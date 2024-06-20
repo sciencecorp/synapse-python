@@ -1,0 +1,15 @@
+[project]
+name = "synapse-ctl"
+version = "0.1.0"
+description = "A command line tool for managing Synapse devices."
+authors = [
+    {name = "Sage Walker", email = "sagew@science.xyz"},
+]
+dependencies = []
+requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
