@@ -1,0 +1,3 @@
+[submodule "synapse-api"]
+	path = synapse-api
+	url = git@github.com:sciencecorp/synapse-api.git

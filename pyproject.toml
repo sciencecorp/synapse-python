@@ -5,7 +5,10 @@ description = "A command line tool for managing Synapse devices."
 authors = [
     {name = "Sage Walker", email = "sagew@science.xyz"},
 ]
-dependencies = []
+dependencies = [
+    "grpcio>=1.64.1",
+    "grpcio-tools>=1.64.1",
+]
 requires-python = ">=3.11"
 readme = "README.md"
 license = {text = "MIT"}
@@ -13,3 +16,5 @@ license = {text = "MIT"}
 [build-system]
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"
+
+[tool.pdm.scripts]

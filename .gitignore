@@ -1,3 +1,6 @@
+# Generated protobuf code
+proto/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
