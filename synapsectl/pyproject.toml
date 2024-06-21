@@ -1,0 +1,18 @@
+[project]
+name = "synapsectl"
+version = "0.1.0"
+description = "Default template for PDM package"
+authors = [
+    {name = "Sage Walker", email = "sagew@science.xyz"},
+]
+dependencies = []
+requires-python = "==3.11.*"
+readme = "README.md"
+license = {text = "MIT"}
+
+[tool.pdm.dev-dependencies]
+dev = [
+]
+
+[tool.pdm]
+distribution = false
