@@ -1,4 +1,5 @@
-from synapse.device import SynapseDevice
+from synapse.device import Device
+from google.protobuf import text_format
 
 def add_commands(subparsers):
   a = subparsers.add_parser('info', help='Get device information')
@@ -18,13 +19,15 @@ def add_commands(subparsers):
   a.set_defaults(func = configure)
 
 def info(args):
-    return SynapseDevice(args.uri).info()
+    info = Device(args.uri).info()
+    print(text_format.MessageToString(info))
+    return True
 
 def start(args):
-    return SynapseDevice(args.uri).start()
+    return Device(args.uri).start()
 
 def stop(args):
-    return SynapseDevice(args.uri).stop()
+    return Device(args.uri).stop()
 
 def configure(args):
-    return SynapseDevice(args.uri).configure()
+    return Device(args.uri).configure()

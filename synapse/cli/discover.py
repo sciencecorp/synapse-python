@@ -27,9 +27,9 @@ def discover(args):
             except socket.timeout:
                 break
             else:
-                command, capability, name = data.decode("ascii").split()
+                command, capability, port, name = data.decode("ascii").split()
                 if command == "ID":
-                    print("{}:{}   {}   {}".format(server[0], server[1], capability, name))
+                    print("{}:{}   {}   {}".format(server[0], port, capability, name))
                     break
                 else:
                     print("Unknown response: {!r}".format(command))
