@@ -1,9 +1,9 @@
 import grpc
 from google.protobuf.empty_pb2 import Empty
 from generated.api.synapse_pb2_grpc import SynapseDeviceStub
-from generated.api.synapse_pb2 import DeviceInfo
+from generated.api.synapse_pb2 import DeviceConfiguration
 
-class SynapseDevice(object):
+class Device(object):
   def __init__(self, uri):
     self.uri = uri
 
@@ -35,4 +35,17 @@ class SynapseDevice(object):
       return None
 
   def configure(self, config):
-    pass
+    try:
+      request = self.rpc.Configure(self._build_config(config))
+      return request
+    except grpc.RpcError as e:
+      print(e.details())
+      return None
+
+  def _build_config(self, config):
+    c = DeviceConfiguration()
+    for node in config.nodes:
+      c.nodes.extend([node.to_proto()])
+    for connection in config.connections:
+      c.connections.extend([connection.to_proto()])
+    return c
