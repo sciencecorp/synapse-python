@@ -4,7 +4,9 @@ Includes `synapsectl` command line utility:
 
     python -m synapse.cli.main --help
 
-First build the protos:
+To build:
 
+    git submodule init
+    git submodule update
     pip install -r requirements.txt
     make

@@ -1,5 +1,5 @@
 from synapse.node import Node
-from generated.api.node_pb2 import NodeOptions, NodeType
+from generated.api.node_pb2 import NodeConfig, NodeType
 from generated.api.nodes.electrical_broadband_pb2 import ElectricalBroadbandConfig
 
 class ElectricalBroadband(Node):
@@ -7,7 +7,7 @@ class ElectricalBroadband(Node):
     self.channel_mask = channel_mask
 
   def to_proto(self):
-    n = NodeOptions()
+    n = NodeConfig()
     n.type = NodeType.kElectricalBroadband
     n.id = self.id
 

@@ -1,5 +1,5 @@
 from synapse.node import Node
-from generated.api.node_pb2 import NodeOptions, NodeType
+from generated.api.node_pb2 import NodeConfig, NodeType
 from generated.api.nodes.stream_out_pb2 import StreamOutConfig
 
 class StreamOut(Node):
@@ -10,7 +10,7 @@ class StreamOut(Node):
     pass
 
   def to_proto(self):
-    n = NodeOptions()
+    n = NodeConfig()
     n.type = NodeType.kStreamOut
     n.id = self.id
 
