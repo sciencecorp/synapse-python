@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package synapse;
+
+message ElectricalStimOptions {
+  uint32 ch_count = 1;
+  repeated uint32 sample_rate = 2;
+  repeated uint32 bit_width = 3;
+  repeated uint32 lsb = 4;
+}
+
+message ElectricalStimConfig {
+  uint32 peripheral_id = 1;
+  repeated bool ch_mask = 2;
+  uint32 sample_rate = 3;
+  uint32 bit_width = 4;
+  uint32 lsb = 5;
+}

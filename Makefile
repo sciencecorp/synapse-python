@@ -1,8 +1,8 @@
 PROJECT_NAME := synapsectl
 PROTOC := protoc
 GRPC_PROTOC := python -m grpc_tools.protoc
-PROTO_DIR := ./src/synapse-api
-PROTO_OUT := ./src/synapsectl/generated
+PROTO_DIR := ./synapse/synapse-api
+PROTO_OUT := ./generated
 PROTOS := $(shell find ${PROTO_DIR} -name '*.proto' | sed 's|${PROTO_DIR}/||')
 
 .PHONY: all

@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package synapse;
+
+message StreamInOptions {
+  uint32 port = 1;
+}
+
+message StreamInConfig {
+  repeated uint32 shape = 1;
+}

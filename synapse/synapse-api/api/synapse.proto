@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package synapse;
+
+import "google/protobuf/empty.proto";
+import "api/node.proto";
+
+enum SynapseStatusCode {
+  kOk = 0;
+  kUndefinedError = 1;
+}
+
+message SynapseStatus {
+  string message = 1;
+  SynapseStatus code = 2;
+  repeated NodeSocket sockets = 3;
+}
+
+message SynapsePeripheral {
+  string name = 1;
+  string vendor = 2;
+  uint32 peripheral_id = 3;
+  NodeOptions options = 4;
+}
+
+message DeviceInfo {
+  string name = 1;
+  uint64 serial = 2;
+  uint32 synapse_version = 3;
+  uint32 firmware_version = 4;
+  repeated SynapsePeripheral peripherals = 5;
+}
+
+message DeviceConfiguration {
+  repeated NodeOptions nodes = 1;
+  repeated NodeConnection connections = 2;
+}
+
+service SynapseDevice {
+  rpc Info(google.protobuf.Empty) returns (DeviceInfo) {}
+  rpc Configure(DeviceConfiguration) returns (SynapseStatus) {}
+  rpc Start(google.protobuf.Empty) returns (SynapseStatus) {}
+  rpc Stop(google.protobuf.Empty) returns (SynapseStatus) {}
+}

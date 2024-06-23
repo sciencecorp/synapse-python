@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package synapse;
+
+message StreamOutOptions {
+  uint32 port = 1;
+}
+
+message StreamOutConfig {
+  repeated bool ch_mask = 1;
+}
+
