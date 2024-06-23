@@ -11,16 +11,28 @@ class SynapseDevice(object):
     self.rpc = SynapseDeviceStub(self.channel)
 
   def start(self):
-    request = self.rpc.Start(Empty())
-    return request
+    try:
+      request = self.rpc.Start(Empty())
+      return request
+    except grpc.RpcError as e:
+      print(e.details())
+      return None
 
   def stop(self):
-    request = self.rpc.Stop(Empty())
-    return request
+    try:
+      request = self.rpc.Stop(Empty())
+      return request
+    except grpc.RpcError as e:
+      print(e.details())
+      return None
 
   def info(self):
-    request = self.rpc.Info(Empty())
-    return request
+    try:
+      request = self.rpc.Info(Empty())
+      return request
+    except grpc.RpcError as e:
+      print(e.details())
+      return None
 
   def configure(self, config):
     pass
