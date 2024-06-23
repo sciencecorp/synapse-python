@@ -43,7 +43,6 @@ class Device(object):
     config.set_device(self)
     try:
       response = self.rpc.Configure(config.to_proto())
-      print(text_format.MessageToString(response))
       if self._handle_status_response(response):
         return True
     except grpc.RpcError as e:
