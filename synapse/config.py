@@ -1,3 +1,6 @@
+from generated.api.synapse_pb2 import DeviceConfiguration
+from generated.api.node_pb2 import NodeConnection
+
 class Config(object):
   nodes = []
   connections = []
@@ -6,7 +9,7 @@ class Config(object):
     pass
 
   def _gen_node_id(self):
-    return len(self.nodes)
+    return len(self.nodes) + 1
 
   def add(self, node):
     node.id = self._gen_node_id()
@@ -20,3 +23,14 @@ class Config(object):
     self.connections.append((from_node.id, to_node.id))
     
     return True
+  
+  def to_proto(self):
+    c = DeviceConfiguration()
+    for node in self.nodes:
+      c.nodes.append(node.to_proto())
+    for connection in self.connections:
+      x = NodeConnection()
+      x.src_node_id = connection[0]
+      x.dst_node_id = connection[1]
+      c.connections.append(x)
+    return c
