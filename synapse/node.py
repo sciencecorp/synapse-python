@@ -1,5 +1,6 @@
 class Node(object):
   id = None
+  device = None
 
   def __init__(self):
     pass
