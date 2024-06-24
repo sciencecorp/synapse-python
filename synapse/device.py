@@ -17,18 +17,20 @@ class Device(object):
     try:
       response = self.rpc.Start(Empty())
       if self._handle_status_response(response):
-        return True
+        return response
     except grpc.RpcError as e:
-      print(e.details())
+      print("Error: ", e.details())
     return False
 
   def stop(self):
     try:
+      print("Stopping device")
       response = self.rpc.Stop(Empty())
+      print(response)
       if self._handle_status_response(response):
-        return True
+        return response
     except grpc.RpcError as e:
-      print(e.details())
+      print("Error: ", e.details())
     return False
 
   def info(self):
@@ -36,7 +38,7 @@ class Device(object):
       response = self.rpc.Info(Empty())
       return response
     except grpc.RpcError as e:
-      print(e.details())
+      print("Error: ", e.details())
       return None
 
   def configure(self, config):
@@ -44,9 +46,9 @@ class Device(object):
     try:
       response = self.rpc.Configure(config.to_proto())
       if self._handle_status_response(response):
-        return True
+        return response
     except grpc.RpcError as e:
-      print(e.details())
+      print("Error: ", e.details())
     return False
   
   def _handle_status_response(self, status):
