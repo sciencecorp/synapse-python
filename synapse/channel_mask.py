@@ -3,5 +3,5 @@ class ChannelMask(object):
         pass
 
     def iter_channels(self):
-        for i in range(0, 511):
+        for i in range(0, 15):
             yield i

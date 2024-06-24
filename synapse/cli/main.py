@@ -28,7 +28,11 @@ def main():
     wifi_config.add_commands(subparsers)
 
     args = parser.parse_args()
-    args.func(args)
+
+    if hasattr(args, "func"):
+        args.func(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
