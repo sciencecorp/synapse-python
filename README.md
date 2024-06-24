@@ -10,3 +10,4 @@ To build:
     git submodule update
     pip install -r requirements.txt
     make
+    python -m build
