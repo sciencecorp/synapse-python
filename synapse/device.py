@@ -1,8 +1,8 @@
 import grpc
 from google.protobuf import text_format
 from google.protobuf.empty_pb2 import Empty
-from generated.api.synapse_pb2 import StatusCode
-from generated.api.synapse_pb2_grpc import SynapseDeviceStub
+from synapse.generated.api.synapse_pb2 import StatusCode
+from synapse.generated.api.synapse_pb2_grpc import SynapseDeviceStub
 
 
 class Device(object):
