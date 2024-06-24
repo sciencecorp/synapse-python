@@ -17,13 +17,15 @@ class StreamOut(Node):
     def read(self):
         if self.device is None:
             return False
-        for socket in self.device.sockets:
-            if socket.node_id == self.id:
-                zmq_socket = zmq.Socket(self.zmq_context, zmq.SUB)
-                zmq_socket.connect(socket.bind)
-                zmq_socket.setsockopt(zmq.SUBSCRIBE, b"")
-                return zmq_socket.recv()
-        return None
+        socket = next((s for s in self.device.sockets if s.node_id == self.id), None)
+        if socket is None:
+            return False
+
+        zmq_socket = zmq.Socket(self.zmq_context, zmq.SUB)
+        zmq_socket.connect(socket.bind)
+        zmq_socket.setsockopt(zmq.SUBSCRIBE, b"")
+        data = zmq_socket.recv()
+        return data
 
     def to_proto(self):
         n = NodeConfig()
