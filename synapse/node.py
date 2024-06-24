@@ -1,9 +1,9 @@
 class Node(object):
-  id = None
-  device = None
+    id = None
+    device = None
 
-  def __init__(self):
-    pass
+    def __init__(self):
+        pass
 
-  def to_proto(self):
-    pass
+    def to_proto(self):
+        pass
