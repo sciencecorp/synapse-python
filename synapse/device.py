@@ -24,9 +24,7 @@ class Device(object):
 
   def stop(self):
     try:
-      print("Stopping device")
       response = self.rpc.Stop(Empty())
-      print(response)
       if self._handle_status_response(response):
         return response
     except grpc.RpcError as e:
