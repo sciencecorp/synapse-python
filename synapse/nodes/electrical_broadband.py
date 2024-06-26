@@ -1,6 +1,6 @@
 from synapse.node import Node
-from synapse.generated.api.node_pb2 import NodeConfig, NodeType
-from synapse.generated.api.nodes.electrical_broadband_pb2 import (
+from synapse.api.api.node_pb2 import NodeConfig, NodeType
+from synapse.api.api.nodes.electrical_broadband_pb2 import (
     ElectricalBroadbandConfig,
 )
 

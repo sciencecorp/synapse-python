@@ -1,8 +1,8 @@
 import zmq
 from synapse import ChannelMask
 from synapse.node import Node
-from synapse.generated.api.node_pb2 import NodeConfig, NodeType
-from synapse.generated.api.nodes.stream_out_pb2 import StreamOutConfig
+from synapse.api.api.node_pb2 import NodeConfig, NodeType
+from synapse.api.api.nodes.stream_out_pb2 import StreamOutConfig
 
 
 class StreamOut(Node):

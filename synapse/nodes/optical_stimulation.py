@@ -1,6 +1,6 @@
 from synapse.node import Node
-from synapse.generated.api.node_pb2 import NodeConfig, NodeType
-from synapse.generated.api.nodes.optical_stim_pb2 import OpticalStimConfig
+from synapse.api.api.node_pb2 import NodeConfig, NodeType
+from synapse.api.api.nodes.optical_stim_pb2 import OpticalStimConfig
 
 
 class OpticalStimulation(Node):

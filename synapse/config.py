@@ -1,5 +1,5 @@
-from synapse.generated.api.synapse_pb2 import DeviceConfiguration
-from synapse.generated.api.node_pb2 import NodeConnection
+from synapse.api.api.synapse_pb2 import DeviceConfiguration
+from synapse.api.api.node_pb2 import NodeConnection
 
 
 class Config(object):
