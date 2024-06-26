@@ -33,9 +33,17 @@ def discover(args):
             except socket.timeout:
                 break
             else:
-                command, capability, port, name = data.decode("ascii").split()
-                if command == "ID":
-                    print("{}:{}   {}   {}".format(server[0], port, capability, name))
+                data = data.decode("ascii").split()
+                if data[0] == "ID":
+                    if len(data) != 5:
+                        print("Invalid ID response from {!r}".format(server))
+                        continue
+                    command, serial, capability, port, name = data
+                    print(
+                        "{}:{}   {}   {} ({})".format(
+                            server[0], port, capability, name, serial
+                        )
+                    )
                     break
                 else:
                     print("Unknown response: {!r}".format(command))
