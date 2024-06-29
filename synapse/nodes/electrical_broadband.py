@@ -6,7 +6,7 @@ from synapse.api.api.nodes.electrical_broadband_pb2 import (
 
 
 class ElectricalBroadband(Node):
-    def __init__(self, channel_mask):
+    def __init__(self, channel_mask=None):
         self.channel_mask = channel_mask
 
     def to_proto(self):
@@ -16,8 +16,8 @@ class ElectricalBroadband(Node):
 
         p = ElectricalBroadbandConfig()
         p.peripheral_id = 0
-        for i in self.channel_mask.iter_channels():
-            p.ch_mask.append(i)
+        # for i in self.channel_mask.iter_channels():
+        #     p.ch_mask.append(i)
         p.bit_width = 10
         p.sample_rate = 20000
         p.gain = 1
