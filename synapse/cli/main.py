@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import argparse
-from synapse.cli import discover, rpc, wifi_config
+from synapse.cli import discover, rpc, wifi_config, streaming
 
 
 def _description():
@@ -26,6 +26,7 @@ def main():
     discover.add_commands(subparsers)
     rpc.add_commands(subparsers)
     wifi_config.add_commands(subparsers)
+    streaming.add_commands(subparsers)
 
     args = parser.parse_args()
 
