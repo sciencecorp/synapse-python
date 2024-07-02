@@ -6,7 +6,7 @@ from synapse.api.api.nodes.stream_out_pb2 import StreamOutConfig
 
 
 class StreamOut(Node):
-    def __init__(self, from_proto:NodeConfig=None, channel_mask=None):
+    def __init__(self, channel_mask=None):
         self.zmq_context = zmq.Context()
         self.zmq_socket = None
 
@@ -16,10 +16,10 @@ class StreamOut(Node):
         else:
             self.channel_mask = channel_mask
 
-    def read(self, num_packets=1):
+    def read(self):
         if self.device is None:
-            print("Device not set")
             return False
+
         socket = next((s for s in self.device.sockets if s.node_id == self.id), None)
         if socket is None:
             return False

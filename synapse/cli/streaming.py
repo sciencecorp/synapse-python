@@ -2,7 +2,7 @@ from synapse.device import Device
 from synapse.config import Config
 from synapse.nodes.electrical_broadband import ElectricalBroadband
 from synapse.nodes.stream_out import StreamOut
-from synapse.generated.api.node_pb2 import NodeType
+from synapse.api.api.node_pb2 import NodeType
 
 def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device StreamOut Node")

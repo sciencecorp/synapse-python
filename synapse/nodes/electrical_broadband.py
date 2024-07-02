@@ -17,6 +17,8 @@ class ElectricalBroadband(Node):
 
         p = ElectricalBroadbandConfig()
         p.peripheral_id = 0
+        for i in self.channel_mask.iter_channels():
+            p.ch_mask.append(i)
         p.bit_width = 10
         p.sample_rate = 20000
         p.gain = 1
