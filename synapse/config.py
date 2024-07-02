@@ -20,10 +20,10 @@ class Config(object):
 
     def add_node(self, node):
         if node.id is not None:
-            return False
+            return None
         node.id = self._gen_node_id()
         self.nodes.append(node)
-        return True
+        return node
 
     def set_device(self, device):
         for node in self.nodes:

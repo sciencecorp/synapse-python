@@ -1,8 +1,9 @@
 import grpc
 from google.protobuf import text_format
 from google.protobuf.empty_pb2 import Empty
-from synapse.api.api.synapse_pb2 import StatusCode
+from synapse.api.api.synapse_pb2 import DeviceInfo, StatusCode
 from synapse.api.api.synapse_pb2_grpc import SynapseDeviceStub
+from synapse.config import Config
 
 
 class Device(object):
@@ -14,7 +15,7 @@ class Device(object):
         self.channel = grpc.insecure_channel(uri)
         self.rpc = SynapseDeviceStub(self.channel)
 
-    def start(self):
+    def start(self) -> bool:
         try:
             response = self.rpc.Start(Empty())
             if self._handle_status_response(response):
@@ -23,7 +24,7 @@ class Device(object):
             print("Error: ", e.details())
         return False
 
-    def stop(self):
+    def stop(self) -> bool:
         try:
             response = self.rpc.Stop(Empty())
             if self._handle_status_response(response):
@@ -32,7 +33,7 @@ class Device(object):
             print("Error: ", e.details())
         return False
 
-    def info(self):
+    def info(self) -> DeviceInfo:
         try:
             response = self.rpc.Info(Empty())
             return response
@@ -40,7 +41,7 @@ class Device(object):
             print("Error: ", e.details())
             return None
 
-    def configure(self, config):
+    def configure(self, config: Config) -> bool:
         config.set_device(self)
         try:
             response = self.rpc.Configure(config.to_proto())
@@ -50,7 +51,7 @@ class Device(object):
             print("Error: ", e.details())
         return False
 
-    def _handle_status_response(self, status):
+    def _handle_status_response(self, status) -> bool:
         if status.code != StatusCode.kOk:
             print("Error %d: %s" % (status.code, status.message))
             return False
