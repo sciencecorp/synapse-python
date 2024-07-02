@@ -8,7 +8,7 @@ from synapse.api.api.nodes.stream_in_pb2 import StreamInConfig
 class StreamIn(Node):
     def __init__(self):
         ctx = zmq.Context.instance()
-        self.socket = zmq.Socket(ctx, zmq.PUB)
+        self.socket = zmq.Socket(ctx, zmq.RADIO)
 
     def write(self, data):
         if self.device is None:

@@ -8,6 +8,7 @@ from synapse.api.api.nodes.stream_out_pb2 import StreamOutConfig
 class StreamOut(Node):
     def __init__(self, from_proto:NodeConfig=None, channel_mask=None):
         self.zmq_context = zmq.Context()
+        self.zmq_socket = None
 
         # if from_proto is not None:
         if channel_mask is None:
@@ -23,13 +24,13 @@ class StreamOut(Node):
         if socket is None:
             return False
 
-        zmq_socket = zmq.Socket(self.zmq_context, zmq.SUB)
-        zmq_socket.connect(socket.bind)
-        zmq_socket.setsockopt(zmq.SUBSCRIBE, b"")
+        if not self.zmq_socket:
+            self.zmq_socket = self.zmq_context.socket(zmq.DISH)
+            self.zmq_socket.rcvtimeo = 1000
+            self.zmq_socket.bind(f"udp://{socket.bind}")
+            self.zmq_socket.join('stream_out')
 
-        data = []
-        for _ in range(num_packets):
-            data.append(zmq_socket.recv())
+        data = self.zmq_socket.recv(copy=False)
         return data
 
     def to_proto(self):

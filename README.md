@@ -8,6 +8,6 @@ To build:
 
     git submodule init
     git submodule update
-    pip install -r requirements.txt
+    make install-dependencies
     make
     python -m build
