@@ -1,6 +1,8 @@
 from synapse.config import Config
 from synapse.device import Device
 from google.protobuf import text_format
+from synapse.nodes.optical_stimulation import OpticalStimulation
+from synapse.nodes.stream_in import StreamIn
 import zmq
 
 from synapse.nodes.electrical_broadband import ElectricalBroadband
@@ -60,29 +62,26 @@ def demo(args):
     if info:
         print(text_format.MessageToString(info))
 
+    device = Device(args.uri)
+
+    print(f"Configuring device for stream out...")
     config = Config()
     node_e_broadband = config.add_node(ElectricalBroadband())
     node_stream_out = config.add_node(StreamOut())
-
     config.connect(node_e_broadband, node_stream_out)
 
-    device = Device(args.uri)
-
-    print(f"Configuring device...")
     ok = device.configure(config)
     if not ok:
-        print("Configuration failed")
+        print("Failed to configure device")
         return
     print(" - device configured")
-
 
     print("Starting...")
     ok = device.start()
     if not ok:
-        print("Start failed")
+        print("Failed to start device")
         return
     print(" - device started")
-
 
     print("Reading...")
     i = 0
@@ -95,4 +94,38 @@ def demo(args):
         value = int.from_bytes(read, byteorder='big')
         print(f" - {value}")
         i += 1
+    print(" - done")
+
+    print("Stopping...")
+    ok = device.stop()
+    if not ok:
+        print("Failed to stop device")
+        return
+    print(" - device stopped")
+    
+    print(f"Configuring device for stream in...")
+    config = Config()
+    node_o_stim = config.add_node(OpticalStimulation())
+    node_stream_in = config.add_node(StreamIn())
+    config.connect(node_stream_in, node_o_stim)
+
+    ok = device.configure(config)
+    if not ok:
+        print("Failed to configure device")
+        return
+    print(" - device configured")
+
+    print("Starting...")
+    ok = device.start()
+    if not ok:
+        print("Start failed")
+        return
+    print(" - device started")
+
+    print("Writing...")
+    i = 0
+    while i < 10:
+        ok = node_stream_in.write(i.to_bytes(4, byteorder='big'))
+        i += 1
+    print(" - done")
 

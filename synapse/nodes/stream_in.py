@@ -7,8 +7,7 @@ from synapse.api.api.nodes.stream_in_pb2 import StreamInConfig
 
 class StreamIn(Node):
     def __init__(self):
-        ctx = zmq.Context.instance()
-        self.socket = zmq.Socket(ctx, zmq.RADIO)
+        self.socket = None
 
     def write(self, data):
         if self.device is None:
@@ -19,9 +18,13 @@ class StreamIn(Node):
         if socket is None:
             return False
 
-        self.socket.connect(socket.bind)
+        if self.socket is None:
+            ctx = zmq.Context.instance()
+            self.socket = zmq.Socket(ctx, zmq.RADIO)
+            self.socket.connect(f"udp://{socket.bind}")
+
         try:
-            self.socket.send_string(data)
+            self.socket.send(data, group="stream_in")
         except zmq.ZMQError as e:
             print(f"Error sending data: {e}")
         return True
