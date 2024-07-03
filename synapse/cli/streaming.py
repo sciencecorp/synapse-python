@@ -11,6 +11,7 @@ def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device's StreamOut Node")
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
+    a.add_argument("-m", "--multicast", type=str, help="Multicast group")
     a.add_argument("-o", "--output", type=str, help="Output file")
     a.set_defaults(func=read)
 
@@ -18,13 +19,17 @@ def add_commands(subparsers):
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
     a.add_argument("-i", "--input", type=str, help="Input file")
+    a.add_argument("-m", "--multicast", type=str, help="Multicast group")
     a.set_defaults(func=write)
 
 
 def read(args):
+    print("Reading from device's StreamOut Node")
+    print(f" - multicast: {args.multicast if args.multicast else '<disabled>'}")
+
     dev = Device(args.uri)
 
-    print("Reading from device...")
+    print("Fetching device info...")
     info = dev.info()
     if info is None:
         print("Couldnt get device info")
@@ -39,7 +44,7 @@ def read(args):
         return
 
     config = Config()
-    stream_out = StreamOut()
+    stream_out = StreamOut(multicast_group=args.multicast)
     ephys = ElectricalBroadband()
 
     config.add_node(stream_out)
@@ -47,7 +52,6 @@ def read(args):
     config.connect(ephys, stream_out)
 
     print("Configuring device...")
- 
     if not dev.configure(config):
         print("Failed to configure device")
         return
@@ -66,8 +70,7 @@ def read(args):
             try:
                 while True:
                     data = stream_out.read()
-                    if data is not None:
-                        print(f"writing: ({len(data)}) {data}")
+                    if data:
                         f.write(data)
             except KeyboardInterrupt:
                 pass
@@ -86,8 +89,10 @@ def read(args):
         return
     print(" - done.")
 
-
 def write(args):
+    print("Writing to device's StreamIn Node")
+    print(f" - multicast: {args.multicast if args.multicast else '<disabled>'}")
+
     if args.input:
         if not os.path.exists(args.input):
             print(f"Input file {args['in']} not found")
@@ -95,7 +100,7 @@ def write(args):
 
     dev = Device(args.uri)
 
-    print("Reading from device...")
+    print("Fetching device info...")
     info = dev.info()
     if info is None:
         print("Couldnt get device info")
@@ -110,7 +115,7 @@ def write(args):
         return
 
     config = Config()
-    stream_in = StreamIn()
+    stream_in = StreamIn(multicast_group=args.multicast)
     optical = OpticalStimulation()
 
     config.add_node(stream_in)
@@ -118,7 +123,6 @@ def write(args):
     config.connect(stream_in, optical)
 
     print("Configuring device...")
- 
     if not dev.configure(config):
         print("Failed to configure device")
         return
