@@ -1,10 +1,11 @@
+from synapse.channel_mask import ChannelMask
 from synapse.node import Node
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.api.nodes.optical_stim_pb2 import OpticalStimConfig
 
 
 class OpticalStimulation(Node):
-    def __init__(self, channel_mask):
+    def __init__(self, channel_mask = ChannelMask()):
         self.channel_mask = channel_mask
 
     def to_proto(self):
