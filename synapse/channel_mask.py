@@ -1,5 +1,7 @@
+CHANNEL_MASK_ALL = "all"
+
 class ChannelMask(object):
-    def __init__(self, mask):
+    def __init__(self, mask = CHANNEL_MASK_ALL):
         pass
 
     def iter_channels(self):
