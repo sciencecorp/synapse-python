@@ -1,20 +1,23 @@
+import os
 from synapse.api.api.node_pb2 import NodeType
 from synapse.device import Device
 from synapse.config import Config
 from synapse.nodes.electrical_broadband import ElectricalBroadband
+from synapse.nodes.optical_stimulation import OpticalStimulation
+from synapse.nodes.stream_in import StreamIn
 from synapse.nodes.stream_out import StreamOut
 
 def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device's StreamOut Node")
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
-    a.add_argument("-o", "--out", type=str, help="Output file")
+    a.add_argument("-o", "--output", type=str, help="Output file")
     a.set_defaults(func=read)
 
     a = subparsers.add_parser("write", help="Write to a device's StreamIn Node")
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
-    a.add_argument("-i", "--in", type=str, help="Input file")
+    a.add_argument("-i", "--input", type=str, help="Input file")
     a.set_defaults(func=write)
 
 
@@ -56,13 +59,15 @@ def read(args):
         return
     print(" - done.")
 
-    print("Streaming data... press Ctrl+C to stop")
-    if args.out:
-        with open(args.out, "wb") as f:
+    src = args.output if args.output else "stdout"
+    print(f"Streaming data out to {src}... press Ctrl+C to stop")
+    if args.output:
+        with open(args.output, "wb") as f:
             try:
                 while True:
                     data = stream_out.read()
                     if data is not None:
+                        print(f"writing: ({len(data)}) {data}")
                         f.write(data)
             except KeyboardInterrupt:
                 pass
@@ -83,4 +88,74 @@ def read(args):
 
 
 def write(args):
-    pass
+    if args.input:
+        if not os.path.exists(args.input):
+            print(f"Input file {args['in']} not found")
+            return
+
+    dev = Device(args.uri)
+
+    print("Reading from device...")
+    info = dev.info()
+    if info is None:
+        print("Couldnt get device info")
+        return
+
+    print(info)
+
+    nodes = info.configuration.nodes
+    out_node = [node for node in nodes if node.id == args.node_id and node.type == NodeType.kStreamIn]
+    if not len(out_node):
+        print(f"Node ID {args.node_id} not found in device's signal chain")
+        return
+
+    config = Config()
+    stream_in = StreamIn()
+    optical = OpticalStimulation()
+
+    config.add_node(stream_in)
+    config.add_node(optical)
+    config.connect(stream_in, optical)
+
+    print("Configuring device...")
+ 
+    if not dev.configure(config):
+        print("Failed to configure device")
+        return
+    print(" - done.")
+
+    print("Starting device...")
+    if not dev.start():
+        print("Failed to start device")
+        return
+    print(" - done.")
+
+    src = args.input if args.input else "stdout"
+    print(f"Streaming data in from {src}... press Ctrl+C to stop")
+    if args.input:
+        with open(args.input, "rb") as f:
+            try:
+                i = 0
+                while True:
+                    f.seek(4 * i)
+                    data = f.read(4)
+                    i += 1
+                    if not data:
+                        break
+                    stream_in.write(data)
+            except KeyboardInterrupt:
+                pass
+    else:
+        try:
+            i = 0
+            while True:
+                data = stream_in.write(i.to_bytes(4, "big"))
+                i += 1
+        except KeyboardInterrupt:
+            pass
+
+    print("Stopping device...")
+    if not dev.stop():
+        print("Failed to stop device")
+        return
+    print(" - done.")
