@@ -40,10 +40,9 @@ class Device(object):
             print("Error: ", e.details())
             return None
 
-    def configure(self, config):
-        config.set_device(self)
+    def configure(self, config_proto):
         try:
-            response = self.rpc.Configure(config.to_proto())
+            response = self.rpc.Configure(config_proto)
             if self._handle_status_response(response):
                 return response
         except grpc.RpcError as e:
