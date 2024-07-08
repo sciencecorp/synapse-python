@@ -19,8 +19,8 @@ class StreamOut(Node):
         if node_socket is None:
             return False
         
-        [addr, p] = node_socket.bind.split(":")
-        port = int(p)
+        addr = self.__multicast_group
+        port = node_socket.bind
 
         if self.__socket is None:
             self.__socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
