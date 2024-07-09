@@ -16,16 +16,18 @@ class StreamIn(Node):
         if self.device is None:
             return False
 
-        socket = next((s for s in self.device.sockets if s.node_id == self.id), None)
+        node_socket = next((s for s in self.device.sockets if s.node_id == self.id), None)
 
-        if socket is None:
+        if node_socket is None:
             return False
 
-        [host, p] = socket.bind.split(":")
-        port = int(p)
+        port = node_socket.bind
+        addr = self._get_addr()
+        if addr is None:
+            return False
 
         try:
-            self.__socket.sendto(data, (host, port))
+            self.__socket.sendto(data, (addr, port))
             # https://stackoverflow.com/questions/21973661/os-x-udp-send-error-55-no-buffer-space-available
             time.sleep(0.00001)
         except Exception as e:
@@ -46,6 +48,15 @@ class StreamIn(Node):
         n.stream_in.CopyFrom(i)
         return n
 
+    def _get_addr(self):
+        if self.device is None:
+            return None
+
+        if self.__multicast_group:
+            return self.__multicast_group
+        
+        return self.device.uri.split(":")[0]
+    
     @staticmethod
     def from_proto(proto):
         if not isinstance(proto, StreamInConfig):
