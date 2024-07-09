@@ -21,11 +21,11 @@ class StreamIn(Node):
         if socket is None:
             return False
 
-        [group, p] = socket.bind.split(":")
+        [host, p] = socket.bind.split(":")
         port = int(p)
 
         try:
-            self.__socket.sendto(data, (group, port))
+            self.__socket.sendto(data, (host, port))
             # https://stackoverflow.com/questions/21973661/os-x-udp-send-error-55-no-buffer-space-available
             time.sleep(0.00001)
         except Exception as e:
