@@ -53,3 +53,10 @@ class StreamOut(Node):
 
         n.stream_out.CopyFrom(o)
         return n
+
+    @staticmethod
+    def from_proto(proto):
+        if not isinstance(proto, StreamOutConfig):
+            raise ValueError("proto is not of type StreamOutConfig")
+
+        return StreamOut(ChannelMask(), proto.multicast_group)

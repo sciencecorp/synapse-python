@@ -37,12 +37,6 @@ def read(args):
 
     print(info)
 
-    nodes = info.configuration.nodes
-    out_node = [node for node in nodes if node.id == args.node_id and node.type == NodeType.kStreamOut]
-    if not len(out_node):
-        print(f"Node ID {args.node_id} not found in device's signal chain")
-        return
-
     config = Config()
     stream_out = StreamOut(multicast_group=args.multicast)
     ephys = ElectricalBroadband()
@@ -79,7 +73,8 @@ def read(args):
             while True:
                 data = stream_out.read()
                 if data is not None:
-                    print(data)
+                    value = int.from_bytes(data, "big")
+                    print(value)
         except KeyboardInterrupt:
             pass
 
@@ -107,12 +102,6 @@ def write(args):
         return
 
     print(info)
-
-    nodes = info.configuration.nodes
-    out_node = [node for node in nodes if node.id == args.node_id and node.type == NodeType.kStreamIn]
-    if not len(out_node):
-        print(f"Node ID {args.node_id} not found in device's signal chain")
-        return
 
     config = Config()
     stream_in = StreamIn(multicast_group=args.multicast)

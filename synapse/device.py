@@ -2,6 +2,7 @@ import grpc
 from google.protobuf.empty_pb2 import Empty
 from synapse.api.api.synapse_pb2 import StatusCode
 from synapse.api.api.synapse_pb2_grpc import SynapseDeviceStub
+from synapse.config import Config
 
 
 class Device(object):
@@ -39,9 +40,13 @@ class Device(object):
             print("Error: ", e.details())
             return None
 
-    def configure(self, config_proto):
+    def configure(self, config: Config):
+        if not isinstance(config, Config):
+            raise ValueError("config must be an instance of Config")
+
+        config.set_device(self)
         try:
-            response = self.rpc.Configure(config_proto)
+            response = self.rpc.Configure(config.to_proto())
             if self._handle_status_response(response):
                 return response
         except grpc.RpcError as e:

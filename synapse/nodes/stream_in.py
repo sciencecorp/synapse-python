@@ -45,3 +45,10 @@ class StreamIn(Node):
 
         n.stream_in.CopyFrom(i)
         return n
+
+    @staticmethod
+    def from_proto(proto):
+        if not isinstance(proto, StreamInConfig):
+            raise ValueError("proto is not of type StreamInConfig")
+
+        return StreamIn(proto.multicast_group)
