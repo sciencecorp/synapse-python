@@ -1,4 +1,5 @@
 from pathlib import Path
+from synapse.config import Config
 from synapse.device import Device
 from synapse.api.api.synapse_pb2 import DeviceConfiguration
 from google.protobuf import text_format
@@ -44,5 +45,7 @@ def configure(args):
     
     with open(args.config_file) as config_json:
         config_proto = Parse(config_json.read(), DeviceConfiguration())
+        print("Configuring device with the following configuration:")
         print(config_proto)
-        return Device(args.uri).configure(config_proto)
+
+        return Device(args.uri).configure(Config.from_proto(config_proto))

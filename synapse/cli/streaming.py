@@ -1,70 +1,154 @@
+import os
+from synapse.api.api.node_pb2 import NodeType
 from synapse.device import Device
 from synapse.config import Config
 from synapse.nodes.electrical_broadband import ElectricalBroadband
+from synapse.nodes.optical_stimulation import OpticalStimulation
+from synapse.nodes.stream_in import StreamIn
 from synapse.nodes.stream_out import StreamOut
-from synapse.generated.api.node_pb2 import NodeType
 
 def add_commands(subparsers):
-    a = subparsers.add_parser("read", help="Read from a device StreamOut Node")
+    a = subparsers.add_parser("read", help="Read from a device's StreamOut Node")
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
+    a.add_argument("-m", "--multicast", type=str, help="Multicast group")
+    a.add_argument("-o", "--output", type=str, help="Output file")
     a.set_defaults(func=read)
 
-    a = subparsers.add_parser("write", help="Write to a device StreamIn Node")
+    a = subparsers.add_parser("write", help="Write to a device's StreamIn Node")
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
+    a.add_argument("-i", "--input", type=str, help="Input file")
+    a.add_argument("-m", "--multicast", type=str, help="Multicast group")
     a.set_defaults(func=write)
 
 
 def read(args):
-
-    config = Config()
-    stream_out = StreamOut()
-    ephys = ElectricalBroadband()
-    config.add_node(stream_out)
-    config.add_node(ephys)
-    config.connect(ephys, stream_out)
+    print("Reading from device's StreamOut Node")
+    print(f" - multicast: {args.multicast if args.multicast else '<disabled>'}")
 
     dev = Device(args.uri)
-    st = dev.configure(config)
-    if not st:
-        print("Failed to configure device")
-        return
 
+    print("Fetching device info...")
     info = dev.info()
     if info is None:
         print("Couldnt get device info")
         return
+
     print(info)
-    nodes = info.configuration.nodes
-    out_node = None
-    for node in nodes:
-        if (node.id == args.node_id):
-            if node.type != NodeType.kStreamOut:
-                print(f"Node ID {args.node_id} is not a StreamOut node")
-                return
-            out_node = node
-            break
 
-    if out_node is None:
-        print(f"Node ID {args.node_id} not found in device's signal chain")
+    config = Config()
+    stream_out = StreamOut(multicast_group=args.multicast)
+    ephys = ElectricalBroadband()
+
+    config.add_node(stream_out)
+    config.add_node(ephys)
+    config.connect(ephys, stream_out)
+
+    print("Configuring device...")
+    if not dev.configure(config):
+        print("Failed to configure device")
         return
+    print(" - done.")
 
-    from io import BytesIO
+    print("Starting device...")
     if not dev.start():
         print("Failed to start device")
         return
-    with open("test.txt", "wb") as f:
-        for i in range(250):
-            data = stream_out.read()
-            # wb = BytesIO(data[0])
-            # for d in data:
+    print(" - done.")
 
-                # print(type(d))
-            f.writelines(data)
+    src = args.output if args.output else "stdout"
+    print(f"Streaming data out to {src}... press Ctrl+C to stop")
+    if args.output:
+        with open(args.output, "wb") as f:
+            try:
+                while True:
+                    data = stream_out.read()
+                    if data:
+                        f.write(data)
+            except KeyboardInterrupt:
+                pass
+    else:
+        try:
+            while True:
+                data = stream_out.read()
+                if data is not None:
+                    value = int.from_bytes(data, "big")
+                    print(value)
+        except KeyboardInterrupt:
+            pass
 
-    print("Stopping device")
-    dev.stop()
+    print("Stopping device...")
+    if not dev.stop():
+        print("Failed to stop device")
+        return
+    print(" - done.")
 
 def write(args):
-    pass
+    print("Writing to device's StreamIn Node")
+    print(f" - multicast: {args.multicast if args.multicast else '<disabled>'}")
+
+    if args.input:
+        if not os.path.exists(args.input):
+            print(f"Input file {args['in']} not found")
+            return
+
+    dev = Device(args.uri)
+
+    print("Fetching device info...")
+    info = dev.info()
+    if info is None:
+        print("Couldnt get device info")
+        return
+
+    print(info)
+
+    config = Config()
+    stream_in = StreamIn(multicast_group=args.multicast)
+    optical = OpticalStimulation()
+
+    config.add_node(stream_in)
+    config.add_node(optical)
+    config.connect(stream_in, optical)
+
+    print("Configuring device...")
+    if not dev.configure(config):
+        print("Failed to configure device")
+        return
+    print(" - done.")
+
+    print("Starting device...")
+    if not dev.start():
+        print("Failed to start device")
+        return
+    print(" - done.")
+
+    src = args.input if args.input else "stdout"
+    print(f"Streaming data in from {src}... press Ctrl+C to stop")
+    if args.input:
+        with open(args.input, "rb") as f:
+            try:
+                i = 0
+                while True:
+                    f.seek(4 * i)
+                    data = f.read(4)
+                    i += 1
+                    if not data:
+                        break
+                    stream_in.write(data)
+            except KeyboardInterrupt:
+                pass
+    else:
+        try:
+            i = 0
+            while True:
+                data = stream_in.write(i.to_bytes(4, "big"))
+                i += 1
+        except KeyboardInterrupt:
+            pass
+
+    print("Stopping device...")
+    if not dev.stop():
+        print("Failed to stop device")
+        return
+    print(" - done.")
