@@ -86,6 +86,7 @@ def read(args):
 
         except KeyboardInterrupt:
             stop.set()
+            thread.join()
             pass
 
 
