@@ -12,19 +12,19 @@ class StreamOut(Node):
         self.__multicast_group = multicast_group  
 
     def read(self):
-        if self.device is None:
-            return False
-
-        node_socket = next((s for s in self.device.sockets if s.node_id == self.id), None)
-        if node_socket is None:
-            return False
-        
-        port = node_socket.bind
-        addr = self._get_addr()
-        if addr is None:
-            return False
-
         if self.__socket is None:
+            if self.device is None:
+                return False
+
+            node_socket = next((s for s in self.device.sockets if s.node_id == self.id), None)
+            if node_socket is None:
+                return False
+            
+            port = node_socket.bind
+            addr = self._get_addr()
+            if addr is None:
+                return False
+
             self.__socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)

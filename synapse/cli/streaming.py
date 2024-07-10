@@ -1,4 +1,6 @@
 import os
+import queue
+import threading
 from synapse.api.api.node_pb2 import NodeType
 from synapse.device import Device
 from synapse.config import Config
@@ -57,17 +59,38 @@ def read(args):
         return
     print(" - done.")
 
+
     src = args.output if args.output else "stdout"
     print(f"Streaming data out to {src}... press Ctrl+C to stop")
     if args.output:
-        with open(args.output, "wb") as f:
-            try:
-                while True:
-                    data = stream_out.read()
-                    if data:
-                        f.write(data)
-            except KeyboardInterrupt:
-                pass
+        stop = threading.Event()
+        q = queue.Queue()
+        def write_to_file():
+            print(f"Writing to file...")
+            with open(args.output, "wb") as f:
+                while not stop.is_set():
+                    data = None
+                    try: 
+                        data = q.get(True, 1)
+                    except:
+                        continue
+
+                    f.write(data)
+                print(f"Done writing to file...")
+
+        try:
+            thread = threading.Thread(target=write_to_file, args=())
+            thread.start()
+            while True:
+                data = stream_out.read()
+                if data:
+                    q.put(data)
+
+        except KeyboardInterrupt:
+            stop.set()
+            pass
+
+
     else:
         try:
             while True:
