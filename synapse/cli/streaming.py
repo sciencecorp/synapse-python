@@ -67,7 +67,7 @@ def read(args):
         q = queue.Queue()
         def write_to_file():
             with open(args.output, "wb") as f:
-                while not stop.is_set():
+                while not stop.is_set() or not q.empty():
                     data = None
                     try: 
                         data = q.get(True, 1)
@@ -85,6 +85,7 @@ def read(args):
                     q.put(data)
 
         except KeyboardInterrupt:
+            print("Stopping read...")
             stop.set()
             thread.join()
             pass
