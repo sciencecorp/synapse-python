@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import argparse
+from importlib import metadata
 from synapse.cli import discover, rpc, wifi_config, streaming
 
 
@@ -16,6 +17,12 @@ def main():
         description=_description(),
         epilog=_epilog(),
         formatter_class=lambda prog: argparse.HelpFormatter(prog, width=124),
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="synapsectl %s" % metadata.version("synapse"),
     )
     parser.add_argument(
         "--uri", metavar="-u", type=str, default=None, help="Device control plane URI"
