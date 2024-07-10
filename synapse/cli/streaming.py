@@ -66,7 +66,6 @@ def read(args):
         stop = threading.Event()
         q = queue.Queue()
         def write_to_file():
-            print(f"Writing to file...")
             with open(args.output, "wb") as f:
                 while not stop.is_set():
                     data = None
@@ -76,7 +75,6 @@ def read(args):
                         continue
 
                     f.write(data)
-                print(f"Done writing to file...")
 
         try:
             thread = threading.Thread(target=write_to_file, args=())
