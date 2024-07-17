@@ -1,3 +1,4 @@
+import time
 import socket
 import struct
 
@@ -22,16 +23,19 @@ def discover(args):
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
 
     try:
+        start_time = time.time()
         print("Announcing...")
         sent = sock.sendto(
             "DISCOVER {}".format(args.auth_code).encode("ascii"),
             (BROADCAST_ADDR, BROADCAST_PORT),
         )
         while True:
+            if time.time() - start_time > 3:
+                break
             try:
                 data, server = sock.recvfrom(1024)
             except socket.timeout:
-                break
+                continue
             else:
                 data = data.decode("ascii").split()
                 if data[0] == "ID":
@@ -44,7 +48,6 @@ def discover(args):
                             server[0], port, capability, name, serial
                         )
                     )
-                    break
                 else:
                     print("Unknown response: {!r}".format(command))
     finally:

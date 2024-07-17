@@ -1,5 +1,7 @@
 import time
 import os
+import queue
+import threading
 from synapse.api.api.node_pb2 import NodeType
 from synapse.device import Device
 from synapse.config import Config
@@ -29,7 +31,6 @@ def read(args):
     print(f" - multicast: {args.multicast if args.multicast else '<disabled>'}")
 
     dev = Device(args.uri)
-
     config = Config()
     stream_out = StreamOut(bind=64401, multicast_group=args.multicast)
     ephys = ElectricalBroadband()
@@ -49,17 +50,14 @@ def read(args):
     if info is None:
         print("Couldnt get device info")
         return
-
     print(info)
 
     nodes = info.configuration.nodes
     out_node = [node for node in nodes if node.id == args.node_id and node.type == NodeType.kStreamOut]
     if not len(out_node):
         print(f"Node ID {args.node_id} not found in device's signal chain")
-        return
-
+    print(" - done.")
     
-
     print("Starting device...")
     if not dev.start():
         print("Failed to start device")
@@ -69,26 +67,46 @@ def read(args):
     src = args.output if args.output else "stdout"
     print(f"Streaming data out to {src}... press Ctrl+C to stop")
     if args.output:
-        with open(args.output, "wb") as f:
-            try:
-                tot_bytes = 0
-                count = 0
-                st = time.time()
-                while True:
-                    data = stream_out.read()
-                    if data:
-                        f.write(data)
-                        tot_bytes += len(data)
-                
-            except KeyboardInterrupt:
-                et = time.time()
-                pass
+        stop = threading.Event()
+        q = queue.Queue()
+        def write_to_file():
+            with open(args.output, "wb") as f:
+                while not stop.is_set() or not q.empty():
+                    data = None
+                    try: 
+                        data = q.get(True, 1)
+                    except:
+                        continue
+
+                    f.write(data)
+
+        try:
+            thread = threading.Thread(target=write_to_file, args=())
+            thread.start()
+            tot_bytes = 0
+            count = 0
+            st = time.time()
+            while True:
+                data = stream_out.read()
+                if data:
+                    q.put(data)
+                    tot_bytes += len(data)
+
+        except KeyboardInterrupt:
+            et = time.time()
+            print("Stopping read...")
+            stop.set()
+            thread.join()
+            pass
+
+
     else:
         try:
             while True:
                 data = stream_out.read()
                 if data is not None:
-                    print(data)
+                    value = int.from_bytes(data, "big")
+                    print(value)
         except KeyboardInterrupt:
             pass
 
@@ -117,12 +135,6 @@ def write(args):
         return
 
     print(info)
-
-    nodes = info.configuration.nodes
-    out_node = [node for node in nodes if node.id == args.node_id and node.type == NodeType.kStreamIn]
-    if not len(out_node):
-        print(f"Node ID {args.node_id} not found in device's signal chain")
-        return
 
     config = Config()
     stream_in = StreamIn(multicast_group=args.multicast)

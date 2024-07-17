@@ -1,31 +1,32 @@
 import socket
 import struct
-from synapse import ChannelMask
+from synapse.channel_mask import ChannelMask
 from synapse.node import Node
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.api.nodes.stream_out_pb2 import StreamOutConfig
 
 class StreamOut(Node):
-    def __init__(self, bind, channel_mask=ChannelMask(), multicast_group=None):
+    def __init__(self, channel_mask=ChannelMask(), multicast_group=None):
         self.__socket = None
-        self.__bind = bind
         self.__channel_mask = channel_mask
         self.__multicast_group = multicast_group  
 
     def read(self):
-        if self.device is None:
-            print("Device not set")
-            return False
-
-        node_socket = next((s for s in self.device.sockets if s.node_id == self.id), None)
-        if node_socket is None:
-            print("Node socket not found")
-            return False
-        
-        addr = self.__multicast_group
-        port = node_socket.bind
-
         if self.__socket is None:
+            if self.device is None:
+                print("Device not set")
+                return False
+
+            node_socket = next((s for s in self.device.sockets if s.node_id == self.id), None)
+            if node_socket is None:
+                print("Node socket not found")
+                return False
+            
+            port = node_socket.bind
+            addr = self._get_addr()
+            if addr is None:
+                return False
+
             self.__socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
@@ -59,3 +60,19 @@ class StreamOut(Node):
 
         n.stream_out.CopyFrom(o)
         return n
+
+    def _get_addr(self):
+        if self.device is None:
+            return None
+
+        if self.__multicast_group:
+            return self.__multicast_group
+        
+        return self.device.uri.split(":")[0]
+
+    @staticmethod
+    def from_proto(proto):
+        if not isinstance(proto, StreamOutConfig):
+            raise ValueError("proto is not of type StreamOutConfig")
+
+        return StreamOut(ChannelMask(), proto.multicast_group)

@@ -23,3 +23,10 @@ class OpticalStimulation(Node):
 
         n.optical_stim.CopyFrom(p)
         return n
+
+    @staticmethod
+    def from_proto(proto):
+        if not isinstance(proto, OpticalStimConfig):
+            raise ValueError("proto is not of type OpticalStimConfig")
+
+        return OpticalStimulation(ChannelMask())
