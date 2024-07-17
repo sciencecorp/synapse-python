@@ -1,5 +1,7 @@
 import socket
 import struct
+import capnp
+import broadband_capnp
 from synapse.channel_mask import ChannelMask
 from synapse.node import Node
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
@@ -39,7 +41,11 @@ class StreamOut(Node):
                 self.__socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
         data, _ = self.__socket.recvfrom(1024)
-        return data
+        bb_packet = broadband_capnp.BroadbandPacket.from_bytes_packed(data)
+        if bb_packet.sequenceNumber != self.__sequence_number:
+            print("Sequence number mismatch: expected %d, got %d" % (self.__sequence_number, bb_packet.sequenceNumber))
+        self.__sequence_number = bb_packet.sequenceNumber
+        return bb_packet.data
 
     def to_proto(self):
         n = NodeConfig()
