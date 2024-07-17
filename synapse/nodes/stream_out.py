@@ -6,17 +6,20 @@ from synapse.api.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.api.nodes.stream_out_pb2 import StreamOutConfig
 
 class StreamOut(Node):
-    def __init__(self, channel_mask=ChannelMask(), multicast_group=None):
+    def __init__(self, bind, channel_mask=ChannelMask(), multicast_group=None):
         self.__socket = None
+        self.__bind = bind
         self.__channel_mask = channel_mask
         self.__multicast_group = multicast_group  
 
     def read(self):
         if self.device is None:
+            print("Device not set")
             return False
 
         node_socket = next((s for s in self.device.sockets if s.node_id == self.id), None)
         if node_socket is None:
+            print("Node socket not found")
             return False
         
         addr = self.__multicast_group
@@ -50,6 +53,9 @@ class StreamOut(Node):
 
         if self.__multicast_group:
             o.multicast_group = self.__multicast_group
+        
+        if self.__bind:
+            o.bind = self.__bind
 
         n.stream_out.CopyFrom(o)
         return n

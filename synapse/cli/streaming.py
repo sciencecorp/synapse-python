@@ -1,3 +1,4 @@
+import time
 import os
 from synapse.api.api.node_pb2 import NodeType
 from synapse.device import Device
@@ -29,6 +30,20 @@ def read(args):
 
     dev = Device(args.uri)
 
+    config = Config()
+    stream_out = StreamOut(bind=64401, multicast_group=args.multicast)
+    ephys = ElectricalBroadband()
+
+    config.add_node(stream_out)
+    config.add_node(ephys)
+    config.connect(ephys, stream_out)
+    config.set_device(dev)
+    print("Configuring device...")
+    if not dev.configure(config.to_proto()):
+        print("Failed to configure device")
+        return
+    print(" - done.")
+
     print("Fetching device info...")
     info = dev.info()
     if info is None:
@@ -43,19 +58,7 @@ def read(args):
         print(f"Node ID {args.node_id} not found in device's signal chain")
         return
 
-    config = Config()
-    stream_out = StreamOut(multicast_group=args.multicast)
-    ephys = ElectricalBroadband()
-
-    config.add_node(stream_out)
-    config.add_node(ephys)
-    config.connect(ephys, stream_out)
-
-    print("Configuring device...")
-    if not dev.configure(config):
-        print("Failed to configure device")
-        return
-    print(" - done.")
+    
 
     print("Starting device...")
     if not dev.start():
@@ -68,11 +71,17 @@ def read(args):
     if args.output:
         with open(args.output, "wb") as f:
             try:
+                tot_bytes = 0
+                count = 0
+                st = time.time()
                 while True:
                     data = stream_out.read()
                     if data:
                         f.write(data)
+                        tot_bytes += len(data)
+                
             except KeyboardInterrupt:
+                et = time.time()
                 pass
     else:
         try:
@@ -83,6 +92,7 @@ def read(args):
         except KeyboardInterrupt:
             pass
 
+    print("Avg Mbps: ", tot_bytes*8 / (et - st) / 1e6)
     print("Stopping device...")
     if not dev.stop():
         print("Failed to stop device")
