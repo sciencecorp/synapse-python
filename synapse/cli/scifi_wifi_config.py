@@ -4,13 +4,13 @@ import getpass
 import serial
 from time import sleep
 
-if os.name == "nt":  # sys.platform == 'win32':
+if os.name == "nt":
     from serial.tools.list_ports_windows import comports
 elif os.name == "posix":
     from serial.tools.list_ports_posix import comports
 
-SYNAPSE_USB_VENDOR_ID = 0x0403
-SYNAPSE_USB_PRODUCT_ID = 0x6015
+SCIFI_USB_VENDOR_ID = 0x0403
+SCIFI_USB_PRODUCT_ID = 0x6015
 
 DEFAULT_HEADSTAGE_USER = "root"
 DEFAULT_HEADSTAGE_PASSWORD = "oelinux123"
@@ -21,40 +21,49 @@ def add_commands(subparsers):
         "list-dev", help="List Synapse devices plugged in via USB"
     )
     a.set_defaults(func=list_devices)
+    a.add_argument("--vendor-id", type=str, default=SCIFI_USB_VENDOR_ID)
+    a.add_argument("--product-id", type=str, default=SCIFI_USB_PRODUCT_ID)
 
     b = subparsers.add_parser(
         "wifi-select",
         help="Configure a USB connected Synapse device to connect to a WiFi network",
     )
+    b.add_argument("device_path", type=str)
     b.add_argument("--ssid", type=str)
     b.add_argument("--headstage-user", type=str, default=DEFAULT_HEADSTAGE_USER)
     b.add_argument("--headstage-password", type=str, default=DEFAULT_HEADSTAGE_PASSWORD)
-    b.add_argument("--headstage-vendor-id", type=str, default=SYNAPSE_USB_VENDOR_ID)
-    b.add_argument("--headstage-product-id", type=str, default=SYNAPSE_USB_PRODUCT_ID)
+    b.add_argument("--vendor-id", type=str, default=SCIFI_USB_VENDOR_ID)
+    b.add_argument("--product-id", type=str, default=SCIFI_USB_PRODUCT_ID)
     b.set_defaults(func=wifi_select)
 
     c = subparsers.add_parser(
         "wifi-config",
         help="Configure a USB connected Synapse device to connect to a WiFi network",
     )
+    b.add_argument("device_path", type=str)
     c.add_argument("--ssid", type=str)
     c.add_argument("--security", type=str)
     c.add_argument("--password", type=str)
     c.add_argument("--headstage-user", type=str, default=DEFAULT_HEADSTAGE_USER)
     c.add_argument("--headstage-password", type=str, default=DEFAULT_HEADSTAGE_PASSWORD)
-    c.add_argument("--headstage-vendor-id", type=str, default=SYNAPSE_USB_VENDOR_ID)
-    c.add_argument("--headstage-product-id", type=str, default=SYNAPSE_USB_PRODUCT_ID)
+    c.add_argument("--vendor-id", type=str, default=SCIFI_USB_VENDOR_ID)
+    c.add_argument("--product-id", type=str, default=SCIFI_USB_PRODUCT_ID)
 
     c.set_defaults(func=wifi_config)
 
 
-def list_devices(args):
+def _list_devices(args):
     iterator = comports(include_links=False)
     ports = [
         port.device
         for port in iterator
-        if port.vid == SYNAPSE_USB_VENDOR_ID and port.pid == SYNAPSE_USB_PRODUCT_ID
+        if port.vid == args.vendor_id and port.pid == args.product_id
     ]
+    return ports
+
+
+def list_devices(args):
+    ports = _list_devices(args)
     if len(ports) == 0:
         print("No Synapse devices found")
     else:
@@ -69,15 +78,9 @@ def wifi_select(args):
     else:
         ssid = args.ssid
 
-    iterator = comports(include_links=False)
-    ports = [
-        port.device
-        for port in iterator
-        if port.vid == args.headstage_vendor_id
-        and port.pid == args.headstage_product_id
-    ]
-    if len(ports) == 0:
-        print("No Synapse devices found")
+    ports = _list_devices(args)
+    if args.device_path not in ports:
+        print("Device %s not found or invalid" % args.device_path)
         return
 
     console = serial.Serial(ports[0], 115200, timeout=1)
@@ -106,6 +109,11 @@ def wifi_select(args):
 
 
 def wifi_config(args):
+    ports = _list_devices(args)
+    if args.device_path not in ports:
+        print("Device %s not found or invalid" % args.device_path)
+        return
+
     if args.ssid is None:
         ssid = input("Network SSID: ")
     else:
@@ -126,7 +134,11 @@ def wifi_config(args):
 
     print("Configuring device to connect to network: %s" % ssid)
 
-    # write [ssid, security_mode, password] to device config
+    console = serial.Serial(ports[0], 115200, timeout=1)
+
+    _program_wpa_supplicant(
+        console, args.headstage_user, args.headstage_password, ssid, password
+    )
 
     return True
 
