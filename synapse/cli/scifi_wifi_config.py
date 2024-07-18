@@ -9,13 +9,6 @@ if os.name == "nt":  # sys.platform == 'win32':
 elif os.name == "posix":
     from serial.tools.list_ports_posix import comports
 
-# import usb.core
-# import usb.backend.libusb1
-
-# backend = usb.backend.libusb1.get_backend(
-#     find_library=lambda x: "/opt/homebrew/lib/libusb-1.0.dylib"
-# )
-
 SYNAPSE_USB_VENDOR_ID = 0x0403
 SYNAPSE_USB_PRODUCT_ID = 0x6015
 
