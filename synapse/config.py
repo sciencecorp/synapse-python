@@ -28,6 +28,9 @@ class Config(object):
                 return False
         return True
 
+    def get_node(self, node_id):
+        return next((node for node in self.nodes if node.id == node_id), None)
+
     def add_node(self, node):
         if node.id is not None:
             return False
@@ -39,11 +42,9 @@ class Config(object):
         for node in self.nodes:
             node.device = device
 
-    def connect(self, from_node, to_node):
-        if from_node.id is None or to_node.id is None:
-            return False
+    def connect(self, from_node_id: int, to_node_id: int):
 
-        self.connections.append((from_node.id, to_node.id))
+        self.connections.append((from_node_id, to_node_id))
         return True
 
     def to_proto(self):

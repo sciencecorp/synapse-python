@@ -2,6 +2,7 @@ import os
 import queue
 import threading
 from synapse.api.api.node_pb2 import NodeType
+from synapse.api.api.synapse_pb2 import DeviceState
 from synapse.device import Device
 from synapse.config import Config
 from synapse.nodes.electrical_broadband import ElectricalBroadband
@@ -38,27 +39,22 @@ def read(args):
         return
 
     print(info)
-
-    config = Config()
-    stream_out = StreamOut(multicast_group=args.multicast)
-    ephys = ElectricalBroadband()
-
-    config.add_node(stream_out)
-    config.add_node(ephys)
-    config.connect(ephys, stream_out)
-
-    print("Configuring device...")
-    if not dev.configure(config):
-        print("Failed to configure device")
+    nodes = info.configuration.nodes
+    out_node = [node for node in nodes if node.id == args.node_id and node.type == NodeType.kStreamOut]
+    if not len(out_node):
+        print(f"Node ID {args.node_id} not found in device's signal chain")
         return
-    print(" - done.")
-
-    print("Starting device...")
-    if not dev.start():
-        print("Failed to start device")
+    
+    if info.status.state != DeviceState.kRunning:
+        print("Device is not started")
         return
-    print(" - done.")
 
+    device = Device(args.uri)
+    config = Config.from_proto(info.configuration)
+    device.configure(config)
+    device.sockets = info.status.sockets
+
+    stream_out = config.get_node(args.node_id)
 
     src = args.output if args.output else "stdout"
     print(f"Streaming data out to {src}... press Ctrl+C to stop")

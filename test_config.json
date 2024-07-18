@@ -1,0 +1,22 @@
+{
+    "nodes": [
+        {
+            "type": "kStreamOut",
+            "id": 1,
+            "stream_out": {
+                "ch_mask": [255],
+                "multicast_group": "224.0.0.246"
+            }
+        },
+        {
+            "type": "kElectricalBroadband",
+            "id": 2
+        }
+    ],
+    "connections" : [
+        {
+            "src_node_id": 2,
+            "dst_node_id": 1
+        }
+    ]
+}

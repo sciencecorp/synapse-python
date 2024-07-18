@@ -67,7 +67,8 @@ class StreamOut(Node):
 
     @staticmethod
     def from_proto(proto):
-        if not isinstance(proto, StreamOutConfig):
+        stream_out_proto = proto.stream_out
+        if not isinstance(stream_out_proto, StreamOutConfig):
             raise ValueError("proto is not of type StreamOutConfig")
 
-        return StreamOut(ChannelMask(), proto.multicast_group)
+        return StreamOut(ChannelMask(), stream_out_proto.multicast_group)

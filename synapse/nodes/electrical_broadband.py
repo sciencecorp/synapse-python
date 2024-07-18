@@ -26,7 +26,8 @@ class ElectricalBroadband(Node):
 
     @staticmethod
     def from_proto(proto):
-        if not isinstance(proto, ElectricalBroadbandConfig):
+        ephys_proto = proto.electrical_broadband
+        if not isinstance(ephys_proto, ElectricalBroadbandConfig):
             raise ValueError("proto is not of type ElectricalBroadbandConfig")
 
         return ElectricalBroadband(ChannelMask())
