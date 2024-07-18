@@ -1,5 +1,6 @@
 import socket
 import time
+from typing import Optional
 from synapse.node import Node
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.api.nodes.stream_in_pb2 import StreamInConfig
@@ -7,6 +8,8 @@ from synapse.api.api.nodes.stream_in_pb2 import StreamInConfig
 MULTICAST_TTL = 3
 
 class StreamIn(Node):
+    type = NodeType.kStreamIn
+
     def __init__(self, multicast_group=None):
         self.__socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.__socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
@@ -34,11 +37,8 @@ class StreamIn(Node):
             print(f"Error sending data: {e}")
         return True
 
-    def to_proto(self):
+    def _to_proto(self):
         n = NodeConfig()
-        n.type = NodeType.kStreamIn
-        n.id = self.id
-
         i = StreamInConfig()
         i.shape.append(2048)
         i.shape.append(1)
@@ -58,7 +58,10 @@ class StreamIn(Node):
         return self.device.uri.split(":")[0]
     
     @staticmethod
-    def from_proto(proto):
+    def _from_proto(proto: Optional[StreamInConfig]):
+        if proto is None:
+            return StreamIn()
+
         if not isinstance(proto, StreamInConfig):
             raise ValueError("proto is not of type StreamInConfig")
 

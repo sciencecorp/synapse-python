@@ -2,18 +2,20 @@ import os
 import queue
 import threading
 from synapse.api.api.node_pb2 import NodeType
-from synapse.api.api.synapse_pb2 import DeviceState
+from synapse.api.api.synapse_pb2 import DeviceConfiguration, DeviceState
 from synapse.device import Device
 from synapse.config import Config
 from synapse.nodes.electrical_broadband import ElectricalBroadband
 from synapse.nodes.optical_stimulation import OpticalStimulation
 from synapse.nodes.stream_in import StreamIn
 from synapse.nodes.stream_out import StreamOut
+from google.protobuf.json_format import Parse, ParseDict
 
 def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device's StreamOut Node")
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
+    a.add_argument("-c", "--config", type=str, help="Config proto (json)")
     a.add_argument("-m", "--multicast", type=str, help="Multicast group")
     a.add_argument("-o", "--output", type=str, help="Output file")
     a.set_defaults(func=read)
@@ -21,10 +23,17 @@ def add_commands(subparsers):
     a = subparsers.add_parser("write", help="Write to a device's StreamIn Node")
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
+    a.add_argument("-c", "--config", type=str, help="Config proto (json)")
     a.add_argument("-i", "--input", type=str, help="Input file")
     a.add_argument("-m", "--multicast", type=str, help="Multicast group")
     a.set_defaults(func=write)
 
+
+def load_proto_json(filepath):
+    print(f"Loading config from {filepath}")
+    with open(filepath, "r") as f:
+        data = f.read()
+        return Parse(data, DeviceConfiguration())
 
 def read(args):
     print("Reading from device's StreamOut Node")
@@ -39,22 +48,34 @@ def read(args):
         return
 
     print(info)
-    nodes = info.configuration.nodes
-    out_node = [node for node in nodes if node.id == args.node_id and node.type == NodeType.kStreamOut]
-    if not len(out_node):
-        print(f"Node ID {args.node_id} not found in device's signal chain")
+
+    if args.config:
+        config = Config.from_proto(load_proto_json(args.config))
+        stream_out = next((n for n in config.nodes if n.type == NodeType.kStreamOut), None)
+        if stream_out is None:
+            print(f"No StreamOut node found in config",)
+            return
+
+    else:
+        config = Config()
+        stream_out = StreamOut(multicast_group=args.multicast)
+        ephys = ElectricalBroadband()
+
+        config.add_node(stream_out)
+        config.add_node(ephys)
+        config.connect(ephys, stream_out)
+
+    print("Configuring device...")
+    if not dev.configure(config):
+        print("Failed to configure device")
         return
+    print(" - done.")
     
-    if info.status.state != DeviceState.kRunning:
-        print("Device is not started")
+    print("Starting device...")
+    if not dev.start():
+        print("Failed to start device")
         return
-
-    device = Device(args.uri)
-    config = Config.from_proto(info.configuration)
-    device.configure(config)
-    device.sockets = info.status.sockets
-
-    stream_out = config.get_node(args.node_id)
+    print(" - done.")
 
     src = args.output if args.output else "stdout"
     print(f"Streaming data out to {src}... press Ctrl+C to stop")
@@ -85,7 +106,6 @@ def read(args):
             stop.set()
             thread.join()
             pass
-
 
     else:
         try:
@@ -122,13 +142,20 @@ def write(args):
 
     print(info)
 
-    config = Config()
-    stream_in = StreamIn(multicast_group=args.multicast)
-    optical = OpticalStimulation()
+    if args.config:
+        config = Config.from_proto(load_proto_json(args.config))
+        stream_in = next((n for n in config.nodes if n.type == NodeType.kStreamIn), None)
+        if stream_in is None:
+            print("No StreamIn node found in config")
+            return
+    else:
+        config = Config()
+        stream_in = StreamIn(multicast_group=args.multicast)
+        optical = OpticalStimulation()
 
-    config.add_node(stream_in)
-    config.add_node(optical)
-    config.connect(stream_in, optical)
+        config.add_node(stream_in)
+        config.add_node(optical)
+        config.connect(stream_in, optical)
 
     print("Configuring device...")
     if not dev.configure(config):

@@ -32,7 +32,7 @@ class Config(object):
         return next((node for node in self.nodes if node.id == node_id), None)
 
     def add_node(self, node):
-        if node.id is not None:
+        if node.id:
             return False
         node.id = self._gen_node_id()
         self.nodes.append(node)
@@ -64,12 +64,19 @@ class Config(object):
 
         for n in proto.nodes:
             if n.type not in list(NODE_TYPE_OBJECT_MAP.keys()):
-                print("Unknown node type: %s" % NodeType.Name(n.type))
                 continue
             node = NODE_TYPE_OBJECT_MAP[n.type].from_proto(n)
-            config.add_node(node)
+
+            if not node.id:
+                config.add_node(node)  
+            else:
+                config.nodes.append(node)
 
         for c in proto.connections:
-            config.connect(c.src_node_id, c.dst_node_id)
+            src = next((n for n in config.nodes if n.id == c.src_node_id), None)
+            dst = next((n for n in config.nodes if n.id == c.dst_node_id), None)
+            if src is None or dst is None:
+                continue
+            config.connect(src.id, dst.id)
 
         return config

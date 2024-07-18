@@ -1,11 +1,14 @@
 import socket
 import struct
+from typing import Optional
 from synapse.channel_mask import ChannelMask
 from synapse.node import Node
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.api.nodes.stream_out_pb2 import StreamOutConfig
 
 class StreamOut(Node):
+    type = NodeType.kStreamOut
+
     def __init__(self, channel_mask=ChannelMask(), multicast_group=None):
         self.__socket = None
         self.__channel_mask = channel_mask
@@ -41,11 +44,8 @@ class StreamOut(Node):
         data, _ = self.__socket.recvfrom(1024)
         return data
 
-    def to_proto(self):
+    def _to_proto(self):
         n = NodeConfig()
-        n.type = NodeType.kStreamOut
-        n.id = self.id
-
         o = StreamOutConfig()
         for i in self.__channel_mask.iter_channels():
             o.ch_mask.append(i)
@@ -66,9 +66,11 @@ class StreamOut(Node):
         return self.device.uri.split(":")[0]
 
     @staticmethod
-    def from_proto(proto):
-        stream_out_proto = proto.stream_out
-        if not isinstance(stream_out_proto, StreamOutConfig):
+    def _from_proto(proto: Optional[StreamOutConfig]):
+        if proto is None:
+            return StreamOut()
+
+        if not isinstance(proto, StreamOutConfig):
             raise ValueError("proto is not of type StreamOutConfig")
 
-        return StreamOut(ChannelMask(), stream_out_proto.multicast_group)
+        return StreamOut(ChannelMask(), proto.multicast_group)

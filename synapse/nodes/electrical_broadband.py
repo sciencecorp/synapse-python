@@ -1,3 +1,4 @@
+from typing import Optional
 from synapse.channel_mask import ChannelMask
 from synapse.node import Node
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
@@ -5,14 +6,13 @@ from synapse.api.api.nodes.electrical_broadband_pb2 import ElectricalBroadbandCo
 
 
 class ElectricalBroadband(Node):
+    type = NodeType.kElectricalBroadband
+
     def __init__(self, channel_mask=ChannelMask()):
         self.channel_mask = channel_mask
 
-    def to_proto(self):
+    def _to_proto(self):
         n = NodeConfig()
-        n.type = NodeType.kElectricalBroadband
-        n.id = self.id
-
         p = ElectricalBroadbandConfig()
         p.peripheral_id = 0
         for i in self.channel_mask.iter_channels():
@@ -25,9 +25,12 @@ class ElectricalBroadband(Node):
         return n
 
     @staticmethod
-    def from_proto(proto):
-        ephys_proto = proto.electrical_broadband
-        if not isinstance(ephys_proto, ElectricalBroadbandConfig):
+
+    def _from_proto(proto: Optional[ElectricalBroadbandConfig]):
+        if not proto:
+            return ElectricalBroadband()
+
+        if not isinstance(proto, ElectricalBroadbandConfig):
             raise ValueError("proto is not of type ElectricalBroadbandConfig")
 
-        return ElectricalBroadband(ChannelMask())
+        return ElectricalBroadband()
