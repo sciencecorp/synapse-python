@@ -8,7 +8,7 @@ authors = [
 dependencies = [
     "grpcio-tools",
     "protoletariat",
-    "serial"
+    "pyserial"
 ]
 readme = "README.md"
 license = {text = "TBD"}

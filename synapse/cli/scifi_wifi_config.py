@@ -40,7 +40,7 @@ def add_commands(subparsers):
         "wifi-config",
         help="Configure a USB connected Synapse device to connect to a WiFi network",
     )
-    b.add_argument("device_path", type=str)
+    c.add_argument("device_path", type=str)
     c.add_argument("--ssid", type=str)
     c.add_argument("--security", type=str)
     c.add_argument("--password", type=str)
@@ -73,15 +73,15 @@ def list_devices(args):
 
 
 def wifi_select(args):
-    if args.ssid is None:
-        ssid = input("Network SSID: ")
-    else:
-        ssid = args.ssid
-
     ports = _list_devices(args)
     if args.device_path not in ports:
         print("Device %s not found or invalid" % args.device_path)
         return
+
+    if args.ssid is None:
+        ssid = input("Network SSID: ")
+    else:
+        ssid = args.ssid
 
     console = serial.Serial(ports[0], 115200, timeout=1)
 
