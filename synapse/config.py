@@ -42,9 +42,10 @@ class Config(object):
         for node in self.nodes:
             node.device = device
 
-    def connect(self, from_node_id: int, to_node_id: int):
-
-        self.connections.append((from_node_id, to_node_id))
+    def connect(self, src, dst):
+        if not src.id or not dst.id:
+            return False
+        self.connections.append((src.id, dst.id))
         return True
 
     def to_proto(self):
