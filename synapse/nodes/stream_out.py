@@ -4,31 +4,38 @@ from typing import Optional
 from synapse.channel_mask import ChannelMask
 from synapse.node import Node
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
+from synapse.api.api.datatype_pb2 import DataType
 from synapse.api.api.nodes.stream_out_pb2 import StreamOutConfig
+
 
 class StreamOut(Node):
     type = NodeType.kStreamOut
 
-    def __init__(self, channel_mask=ChannelMask(), multicast_group=None):
+    def __init__(self, shape, data_type, multicast_group=None):
         self.__socket = None
-        self.__channel_mask = channel_mask
-        self.__multicast_group = multicast_group  
+        self.__shape = shape
+        self.__data_type = data_type
+        self.__multicast_group = multicast_group
 
     def read(self):
         if self.__socket is None:
             if self.device is None:
                 return False
 
-            node_socket = next((s for s in self.device.sockets if s.node_id == self.id), None)
+            node_socket = next(
+                (s for s in self.device.sockets if s.node_id == self.id), None
+            )
             if node_socket is None:
                 return False
-            
+
             port = node_socket.bind
             addr = self._get_addr()
             if addr is None:
                 return False
 
-            self.__socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            self.__socket = socket.socket(
+                socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
+            )
             self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
 
@@ -39,16 +46,17 @@ class StreamOut(Node):
                 mreq = socket.inet_aton(addr) + socket.inet_aton(host)
 
                 mreq = struct.pack("4sL", socket.inet_aton(addr), socket.INADDR_ANY)
-                self.__socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+                self.__socket.setsockopt(
+                    socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq
+                )
 
         data, _ = self.__socket.recvfrom(1024)
         return data
 
     def _to_proto(self):
         n = NodeConfig()
-        o = StreamOutConfig()
-        for i in self.__channel_mask.iter_channels():
-            o.ch_mask.append(i)
+
+        o = StreamOutConfig(shape=self.__shape, data_type=self.__data_type)
 
         if self.__multicast_group:
             o.multicast_group = self.__multicast_group
@@ -62,7 +70,7 @@ class StreamOut(Node):
 
         if self.__multicast_group:
             return self.__multicast_group
-        
+
         return self.device.uri.split(":")[0]
 
     @staticmethod
@@ -73,4 +81,10 @@ class StreamOut(Node):
         if not isinstance(proto, StreamOutConfig):
             raise ValueError("proto is not of type StreamOutConfig")
 
-        return StreamOut(ChannelMask(), proto.multicast_group)
+        if proto.shape is None:
+            raise Exception("shape must not be None and must be iterable")
+
+        if proto.data_type is None:
+            raise Exception("data_type must not be None and must be DataType")
+
+        return StreamOut(proto.shape, proto.data_type, proto.multicast_group)

@@ -12,6 +12,7 @@ NODE_TYPE_OBJECT_MAP = {
     NodeType.kElectricalBroadband: ElectricalBroadband,
 }
 
+
 class Config(object):
     nodes = []
     connections = []
@@ -69,7 +70,7 @@ class Config(object):
             node = NODE_TYPE_OBJECT_MAP[n.type].from_proto(n)
 
             if not node.id:
-                config.add_node(node)  
+                config.add_node(node)
             else:
                 config.nodes.append(node)
 
@@ -78,6 +79,6 @@ class Config(object):
             dst = next((n for n in config.nodes if n.id == c.dst_node_id), None)
             if src is None or dst is None:
                 continue
-            config.connect(src.id, dst.id)
+            config.connect(src, dst)
 
         return config
