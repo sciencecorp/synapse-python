@@ -1,0 +1,11 @@
+{
+  "query_type": "kImpedance",
+  "impedance_query": {
+    "channels": [
+      {
+        "probe_electrode_id": 1,
+        "reference_electrode_id": 2
+      }
+    ]
+  }
+}

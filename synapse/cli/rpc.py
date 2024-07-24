@@ -13,22 +13,23 @@ def add_commands(subparsers):
     a.add_argument("uri", type=str)
     a.set_defaults(func=info)
 
-    a = subparsers.add_parser("query", help="Get device information")
-    a.add_argument("uri", type=str)
-    a.set_defaults(func=query)
+    b = subparsers.add_parser("query", help="Execute a query on the device")
+    b.add_argument("uri", type=str)
+    b.add_argument("query_file", type=str)
+    b.set_defaults(func=query)
 
-    a = subparsers.add_parser("start", help="Start the device")
-    a.add_argument("uri", type=str)
-    a.set_defaults(func=start)
+    c = subparsers.add_parser("start", help="Start the device")
+    c.add_argument("uri", type=str)
+    c.set_defaults(func=start)
 
-    a = subparsers.add_parser("stop", help="Stop the device")
-    a.add_argument("uri", type=str)
-    a.set_defaults(func=stop)
+    d = subparsers.add_parser("stop", help="Stop the device")
+    d.add_argument("uri", type=str)
+    d.set_defaults(func=stop)
 
-    a = subparsers.add_parser("configure", help="Write a configuration to the device")
-    a.add_argument("uri", type=str)
-    a.add_argument("config_file", type=str)
-    a.set_defaults(func=configure)
+    e = subparsers.add_parser("configure", help="Write a configuration to the device")
+    e.add_argument("uri", type=str)
+    e.add_argument("config_file", type=str)
+    e.set_defaults(func=configure)
 
 
 def info(args):
@@ -38,15 +39,18 @@ def info(args):
 
 
 def query(args):
-    req = QueryRequest(
-        query_type=QueryRequest.QueryType.kImpedance,
-        impedance_query=ImpedanceQuery(
-            channels=[Channel(probe_electrode_id=1, reference_electrode_id=2)]
-        ),
-    )
-    info = Device(args.uri).query(req)
-    if info:
-        print(text_format.MessageToString(info))
+    if Path(args.query_file).suffix != ".json":
+        print("Query file must be a JSON file")
+        return False
+
+    with open(args.query_file) as query_json:
+        query_proto = Parse(query_json.read(), QueryRequest())
+        print("Running query:")
+        print(query_proto)
+
+        result = Device(args.uri).query(query_proto)
+        if result:
+            print(text_format.MessageToString(result))
 
 
 def start(args):
