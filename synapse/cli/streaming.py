@@ -2,7 +2,8 @@ import os
 import queue
 import threading
 from synapse.api.api.node_pb2 import NodeType
-from synapse.api.api.synapse_pb2 import DeviceConfiguration, DeviceState
+from synapse.api.api.synapse_pb2 import DeviceConfiguration
+from synapse.api.api.status_pb2 import DeviceState
 from synapse.device import Device
 from synapse.config import Config
 from synapse.nodes.electrical_broadband import ElectricalBroadband
@@ -10,6 +11,7 @@ from synapse.nodes.optical_stimulation import OpticalStimulation
 from synapse.nodes.stream_in import StreamIn
 from synapse.nodes.stream_out import StreamOut
 from google.protobuf.json_format import Parse, ParseDict
+
 
 def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device's StreamOut Node")
@@ -35,6 +37,7 @@ def load_proto_json(filepath):
         data = f.read()
         return Parse(data, DeviceConfiguration())
 
+
 def read(args):
     print("Reading from device's StreamOut Node")
     print(f" - multicast: {args.multicast if args.multicast else '<disabled>'}")
@@ -51,9 +54,13 @@ def read(args):
 
     if args.config:
         config = Config.from_proto(load_proto_json(args.config))
-        stream_out = next((n for n in config.nodes if n.type == NodeType.kStreamOut), None)
+        stream_out = next(
+            (n for n in config.nodes if n.type == NodeType.kStreamOut), None
+        )
         if stream_out is None:
-            print(f"No StreamOut node found in config",)
+            print(
+                f"No StreamOut node found in config",
+            )
             return
 
     else:
@@ -70,7 +77,7 @@ def read(args):
         print("Failed to configure device")
         return
     print(" - done.")
-    
+
     print("Starting device...")
     if not dev.start():
         print("Failed to start device")
@@ -82,11 +89,12 @@ def read(args):
     if args.output:
         stop = threading.Event()
         q = queue.Queue()
+
         def write_to_file():
             with open(args.output, "wb") as f:
                 while not stop.is_set() or not q.empty():
                     data = None
-                    try: 
+                    try:
                         data = q.get(True, 1)
                     except:
                         continue
@@ -123,6 +131,7 @@ def read(args):
         return
     print(" - done.")
 
+
 def write(args):
     print("Writing to device's StreamIn Node")
     print(f" - multicast: {args.multicast if args.multicast else '<disabled>'}")
@@ -144,7 +153,9 @@ def write(args):
 
     if args.config:
         config = Config.from_proto(load_proto_json(args.config))
-        stream_in = next((n for n in config.nodes if n.type == NodeType.kStreamIn), None)
+        stream_in = next(
+            (n for n in config.nodes if n.type == NodeType.kStreamIn), None
+        )
         if stream_in is None:
             print("No StreamIn node found in config")
             return

@@ -1,6 +1,6 @@
 import grpc
 from google.protobuf.empty_pb2 import Empty
-from synapse.api.api.synapse_pb2 import StatusCode
+from synapse.api.api.status_pb2 import StatusCode
 from synapse.api.api.synapse_pb2_grpc import SynapseDeviceStub
 from synapse.config import Config
 
@@ -35,6 +35,14 @@ class Device(object):
     def info(self):
         try:
             response = self.rpc.Info(Empty())
+            return response
+        except grpc.RpcError as e:
+            print("Error: ", e.details())
+            return None
+
+    def query(self, query):
+        try:
+            response = self.rpc.Query(query)
             return response
         except grpc.RpcError as e:
             print("Error: ", e.details())
