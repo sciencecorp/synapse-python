@@ -26,7 +26,7 @@ def add_commands(subparsers):
 
     b = subparsers.add_parser(
         "wifi-select",
-        help="Configure a USB connected Synapse device to connect to a WiFi network",
+        help="Configure a USB connected Synapse device to use a known WiFi network",
     )
     b.add_argument("device_path", type=str)
     b.add_argument("--ssid", type=str)
@@ -38,7 +38,7 @@ def add_commands(subparsers):
 
     c = subparsers.add_parser(
         "wifi-config",
-        help="Configure a USB connected Synapse device to connect to a WiFi network",
+        help="Configure a USB connected Synapse device for a new WiFi network",
     )
     c.add_argument("device_path", type=str)
     c.add_argument("--ssid", type=str)

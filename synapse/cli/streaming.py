@@ -14,7 +14,7 @@ from google.protobuf.json_format import Parse, ParseDict
 
 
 def add_commands(subparsers):
-    a = subparsers.add_parser("read", help="Read from a device's StreamOut Node")
+    a = subparsers.add_parser("read", help="Read from a device's StreamOut node")
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
     a.add_argument("-c", "--config", type=str, help="Config proto (json)")
@@ -22,7 +22,7 @@ def add_commands(subparsers):
     a.add_argument("-o", "--output", type=str, help="Output file")
     a.set_defaults(func=read)
 
-    a = subparsers.add_parser("write", help="Write to a device's StreamIn Node")
+    a = subparsers.add_parser("write", help="Write to a device's StreamIn node")
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
     a.add_argument("-c", "--config", type=str, help="Config proto (json)")
