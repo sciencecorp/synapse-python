@@ -8,13 +8,14 @@ from synapse.api.api.nodes.electrical_broadband_pb2 import ElectricalBroadbandCo
 class ElectricalBroadband(Node):
     type = NodeType.kElectricalBroadband
 
-    def __init__(self, channel_mask=ChannelMask()):
+    def __init__(self, peripheral_id, channel_mask=ChannelMask()):
         self.channel_mask = channel_mask
+        self.peripheral_id = peripheral_id
 
     def _to_proto(self):
         n = NodeConfig()
         p = ElectricalBroadbandConfig()
-        p.peripheral_id = 0
+        p.peripheral_id = self.peripheral_id
         for i in self.channel_mask.iter_channels():
             p.ch_mask.append(i)
         p.bit_width = 10
@@ -33,4 +34,4 @@ class ElectricalBroadband(Node):
         if not isinstance(proto, ElectricalBroadbandConfig):
             raise ValueError("proto is not of type ElectricalBroadbandConfig")
 
-        return ElectricalBroadband()
+        return ElectricalBroadband(proto.peripheral_id, ChannelMask(proto.ch_mask))

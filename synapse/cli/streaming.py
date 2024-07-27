@@ -119,7 +119,7 @@ def read(args):
         try:
             while True:
                 data = stream_out.read()
-                if data is not None:
+                if data:
                     value = int.from_bytes(data, "big")
                     print(value)
         except KeyboardInterrupt:

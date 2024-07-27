@@ -10,10 +10,8 @@ MULTICAST_TTL = 3
 class StreamIn(Node):
     type = NodeType.kStreamIn
 
-    def __init__(self, multicast_group=None):
+    def __init__(self):
         self.__socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        self.__socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
-        self.__multicast_group = multicast_group
 
     def write(self, data):
         if self.device is None:
@@ -24,11 +22,12 @@ class StreamIn(Node):
         if node_socket is None:
             return False
 
-        port = node_socket.bind
+        [_, port] = node_socket.bind.split(":")
         addr = self._get_addr()
         if addr is None:
             return False
-
+        port = int(port)
+        
         try:
             self.__socket.sendto(data, (addr, port))
             # https://stackoverflow.com/questions/21973661/os-x-udp-send-error-55-no-buffer-space-available
@@ -42,8 +41,6 @@ class StreamIn(Node):
         i = StreamInConfig()
         i.shape.append(2048)
         i.shape.append(1)
-        if self.__multicast_group:
-            i.multicast_group = self.__multicast_group
 
         n.stream_in.CopyFrom(i)
         return n
@@ -65,4 +62,4 @@ class StreamIn(Node):
         if not isinstance(proto, StreamInConfig):
             raise ValueError("proto is not of type StreamInConfig")
 
-        return StreamIn(proto.multicast_group)
+        return StreamIn()
