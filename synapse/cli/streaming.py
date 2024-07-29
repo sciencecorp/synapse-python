@@ -1,9 +1,9 @@
 import os
 import queue
 import threading
+from synapse.api.api.datatype_pb2 import DataType
 from synapse.api.api.node_pb2 import NodeType
 from synapse.api.api.synapse_pb2 import DeviceConfiguration
-from synapse.api.api.status_pb2 import DeviceState
 from synapse.device import Device
 from synapse.config import Config
 from synapse.nodes.electrical_broadband import ElectricalBroadband
@@ -65,8 +65,14 @@ def read(args):
 
     else:
         config = Config()
-        stream_out = StreamOut(multicast_group=args.multicast)
-        ephys = ElectricalBroadband()
+        stream_out = StreamOut(
+            data_type=DataType.kBroadband,
+            shape=[4],
+            multicast_group=args.multicast
+        )
+        ephys = ElectricalBroadband(
+            peripheral_id=0
+        )
 
         config.add_node(stream_out)
         config.add_node(ephys)
@@ -161,8 +167,16 @@ def write(args):
             return
     else:
         config = Config()
-        stream_in = StreamIn(multicast_group=args.multicast)
-        optical = OpticalStimulation()
+        stream_in = StreamIn(
+            data_type=DataType.kImage,
+            shape=[1],
+        )
+        optical = OpticalStimulation(
+            peripheral_id=0,
+            bit_width=4,
+            sample_rate=1000,
+            gain=1,
+        )
 
         config.add_node(stream_in)
         config.add_node(optical)

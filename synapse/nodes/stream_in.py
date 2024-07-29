@@ -1,7 +1,8 @@
 import socket
 import time
-from typing import Optional
+from typing import List, Optional
 from synapse.node import Node
+from synapse.api.api.datatype_pb2 import DataType
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.api.nodes.stream_in_pb2 import StreamInConfig
 
@@ -10,7 +11,7 @@ MULTICAST_TTL = 3
 class StreamIn(Node):
     type = NodeType.kStreamIn
 
-    def __init__(self):
+    def __init__(self, data_type: DataType, shape: List[int]):
         self.__socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 
     def write(self, data):
@@ -22,14 +23,18 @@ class StreamIn(Node):
         if node_socket is None:
             return False
 
-        [_, port] = node_socket.bind.split(":")
-        addr = self._get_addr()
-        if addr is None:
+        bind = node_socket.bind.split(":")
+        if len(bind) != 2:
+            return False
+
+        host = bind[0]
+        port = bind[1]
+        if host is None:
             return False
         port = int(port)
         
         try:
-            self.__socket.sendto(data, (addr, port))
+            self.__socket.sendto(data, (host, port))
             # https://stackoverflow.com/questions/21973661/os-x-udp-send-error-55-no-buffer-space-available
             time.sleep(0.00001)
         except Exception as e:
@@ -44,12 +49,6 @@ class StreamIn(Node):
 
         n.stream_in.CopyFrom(i)
         return n
-
-    def _get_addr(self):
-        if self.device is None:
-            return None
-
-        return self.device.uri.split(":")[0]
     
     @staticmethod
     def _from_proto(proto: Optional[StreamInConfig]):

@@ -1,7 +1,6 @@
 import socket
 import struct
-from typing import Optional
-from synapse.channel_mask import ChannelMask
+from typing import List, Optional
 from synapse.node import Node
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.api.datatype_pb2 import DataType
@@ -13,9 +12,9 @@ class StreamOut(Node):
 
     def __init__(self, shape, data_type, multicast_group=None):
         self.__socket = None
-        self.__shape = shape
-        self.__data_type = data_type
-        self.__multicast_group = multicast_group
+        self.__data_type: DataType = data_type
+        self.__shape: List[int] = shape
+        self.__multicast_group: Optional[str] = multicast_group
 
     def read(self):
         if self.__socket is None:
@@ -28,9 +27,16 @@ class StreamOut(Node):
             if node_socket is None:
                 return False
 
-            port = node_socket.bind
-            addr = self._get_addr()
+            bind = node_socket.bind.split(":")
+            if len(bind) != 2:
+                return False
+
+            addr = self.__multicast_group if self.__multicast_group else bind[0]
             if addr is None:
+                return False
+            
+            port = int(bind[1])
+            if not port:
                 return False
 
             self.__socket = socket.socket(
@@ -59,19 +65,12 @@ class StreamOut(Node):
         o = StreamOutConfig(shape=self.__shape, data_type=self.__data_type)
 
         if self.__multicast_group:
+            o.shape.extend(self.__shape)
             o.multicast_group = self.__multicast_group
+            o.use_multicast = self.__multicast_group is not None and len(self.__multicast_group) > 0
 
         n.stream_out.CopyFrom(o)
         return n
-
-    def _get_addr(self):
-        if self.device is None:
-            return None
-
-        if self.__multicast_group:
-            return self.__multicast_group
-
-        return self.device.uri.split(":")[0]
 
     @staticmethod
     def _from_proto(proto: Optional[StreamOutConfig]):
