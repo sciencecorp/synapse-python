@@ -1,4 +1,5 @@
 grpcio-tools
 protoletariat
+pyserial
 pyzmq
 build
