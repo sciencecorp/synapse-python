@@ -49,9 +49,6 @@ class StreamIn(Node):
         if self.device is None:
             return None
 
-        if self.__multicast_group:
-            return self.__multicast_group
-        
         return self.device.uri.split(":")[0]
     
     @staticmethod
