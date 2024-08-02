@@ -1,6 +1,8 @@
 import os
 import queue
 import threading
+import time
+import logging
 from synapse.api.api.datatype_pb2 import DataType
 from synapse.api.api.node_pb2 import NodeType
 from synapse.api.api.synapse_pb2 import DeviceConfiguration
@@ -20,6 +22,7 @@ def add_commands(subparsers):
     a.add_argument("-c", "--config", type=str, help="Config proto (json)")
     a.add_argument("-m", "--multicast", type=str, help="Multicast group")
     a.add_argument("-o", "--output", type=str, help="Output file")
+    a.add_argument("-v", "--verbose", action="store_true", help="Print verbose information about streaming performance")
     a.set_defaults(func=read)
 
     a = subparsers.add_parser("write", help="Write to a device's StreamIn node")
@@ -84,6 +87,15 @@ def read(args):
         return
     print(" - done.")
 
+
+    print("Fetching configured device info...")
+    info = dev.info()
+    if info is None:
+        print("Couldnt get device info")
+        return
+
+    print(info)
+
     print("Starting device...")
     if not dev.start():
         print("Failed to start device")
@@ -110,10 +122,7 @@ def read(args):
         try:
             thread = threading.Thread(target=write_to_file, args=())
             thread.start()
-            while True:
-                data = stream_out.read()
-                if data:
-                    q.put(data)
+            read_worker_(stream_out, q, args.verbose)
 
         except KeyboardInterrupt:
             print("Stopping read...")
@@ -223,3 +232,45 @@ def write(args):
         print("Failed to stop device")
         return
     print(" - done.")
+
+
+def read_worker_(stream_out: StreamOut, q: queue.Queue, verbose: bool): 
+    packet_count = 0
+    avg_bit_rate = 0
+    MBps_sum = 0
+    bytes_recvd = 0
+    start = time.time()
+    seq_num = 0
+    dropped = 0
+
+    start_sec = time.time()
+    while time.time() - start_sec < 10:
+        data = stream_out.read()
+        if data is not None:
+            q.put(data)
+        
+            dur = time.time() - start
+            packet_count += 1
+            MBps = (len(data) / dur) / 1e6
+            MBps_sum += MBps
+            bytes_recvd += len(data)
+            avg_bit_rate = MBps_sum / packet_count
+            if verbose and packet_count % 10000 == 0:
+                logging.info(f"Recieved {packet_count} packets: inst: {MBps} Mbps, avg: {avg_bit_rate} Mbps, dropped: {dropped}, {bytes_recvd*8 / 1e6} Mb recvd")
+            magic = int.from_bytes(data[0:4], "little")
+            if magic != 0xc0ffee00:
+                print(f"Invalid magic: {hex(magic)}")
+
+            recvd_seq_num = int.from_bytes(data[4:8], "little")
+            if recvd_seq_num != seq_num:
+                print(f"Packet out of order: {recvd_seq_num} != {seq_num}")
+                dropped += recvd_seq_num - seq_num
+            seq_num = recvd_seq_num + 1
+
+            start = time.time()
+    end = time.time()
+
+    dur = end - start_sec
+    print(f"Recieved {bytes_recvd*8 / 1e6} Mb in {dur} seconds")
+    
+

@@ -27,10 +27,9 @@ class ElectricalBroadband(Node):
 
     @staticmethod
 
-    def _from_proto(proto: Optional[ElectricalBroadbandConfig]):
+    def _from_proto(proto: ElectricalBroadbandConfig):
         if not proto:
-            return ElectricalBroadband()
-
+            raise ValueError("parameter 'proto' is missing")
         if not isinstance(proto, ElectricalBroadbandConfig):
             raise ValueError("proto is not of type ElectricalBroadbandConfig")
 

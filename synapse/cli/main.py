@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import argparse
+import logging
 from importlib import metadata
 from synapse.cli import discover, rpc, scifi_wifi_config, streaming
 
@@ -13,6 +14,8 @@ def _epilog():
 
 
 def main():
+    logging.basicConfig(level=logging.INFO)
+
     parser = argparse.ArgumentParser(
         description=_description(),
         epilog=_epilog(),

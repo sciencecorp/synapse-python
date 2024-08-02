@@ -1,6 +1,8 @@
 import socket
 import struct
+import logging
 from typing import List, Optional
+from synapse.channel_mask import ChannelMask
 from synapse.node import Node
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.api.datatype_pb2 import DataType
@@ -16,7 +18,7 @@ class StreamOut(Node):
         self.__shape: List[int] = shape
         self.__multicast_group: Optional[str] = multicast_group
 
-    def read(self):
+    def read(self) -> Optional[bytes]:
         if self.__socket is None:
             if self.device is None:
                 return False
@@ -44,6 +46,7 @@ class StreamOut(Node):
             )
             self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            self.__socket.setblocking(1)
 
             self.__socket.bind((addr, port))
 
@@ -56,7 +59,7 @@ class StreamOut(Node):
                     socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq
                 )
 
-        data, _ = self.__socket.recvfrom(1024)
+        data, _ = self.__socket.recvfrom(4096)
         return data
 
     def _to_proto(self):
