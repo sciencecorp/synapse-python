@@ -162,7 +162,7 @@ def _program_wpa_supplicant(console, headstage_user, headstage_pass, ssid, passw
     network_id = _check_if_wpa_network_exists(console, ssid)
 
     if network_id is False:
-        if not _add_wpa_network(console, ssid, password):
+        if not _add_wpa_network(console):
             _logout(console)
             return
 
@@ -191,8 +191,9 @@ def _program_wpa_supplicant(console, headstage_user, headstage_pass, ssid, passw
         _logout(console)
         return
 
-    # check if connected
-    # if connected, return success
+    if not _save_wpa_config(console):
+        _logout(console)
+        return
 
     if not _logout(console):
         print("Failed to logout")
@@ -353,4 +354,19 @@ def _enable_wpa_network(console, network_id):
         return False
 
     print("Enabled network %s" % network_id)
+    return True
+
+
+def _save_wpa_config(console):
+    console.write(b"wpa_cli save_config")
+    sleep(0.1)
+    console.write(b"\r")
+    sleep(0.1)
+    data = console.read(1024)
+    cmp = re.compile(b"\\r\\nOK").search(data)
+    if cmp is None:
+        print("Failed to save network configuration")
+        return False
+
+    print("Saved network configuration")
     return True

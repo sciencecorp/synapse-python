@@ -1,5 +1,6 @@
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
 
+
 class Node(object):
     id: int = None
     type: NodeType = NodeType.kNodeTypeUnknown
@@ -20,7 +21,7 @@ class Node(object):
     @staticmethod
     def _from_proto(_):
         raise NotImplementedError
-    
+
     @classmethod
     def from_proto(cls, proto: NodeConfig):
         config = None
