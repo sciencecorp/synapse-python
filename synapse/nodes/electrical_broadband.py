@@ -9,7 +9,7 @@ class ElectricalBroadband(Node):
     type = NodeType.kElectricalBroadband
 
     def __init__(
-        self, peripheral_id, channels=[], sample_rate=None, gain=None, bit_width=None
+        self, peripheral_id, channels, sample_rate=None, gain=None, bit_width=None
     ):
         self.peripheral_id = peripheral_id
         self.channels = channels
