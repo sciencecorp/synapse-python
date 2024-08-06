@@ -1,21 +1,17 @@
 import socket
 import struct
-import logging
-from typing import List, Optional
-from synapse.channel_mask import ChannelMask
+from typing import Optional
 from synapse.node import Node
 from synapse.api.api.node_pb2 import NodeConfig, NodeType
-from synapse.api.api.datatype_pb2 import DataType
 from synapse.api.api.nodes.stream_out_pb2 import StreamOutConfig
 
 
 class StreamOut(Node):
     type = NodeType.kStreamOut
 
-    def __init__(self, shape, data_type, multicast_group=None):
+    def __init__(self, label=None, multicast_group=None):
         self.__socket = None
-        self.__data_type: DataType = data_type
-        self.__shape: List[int] = shape
+        self.__label = label
         self.__multicast_group: Optional[str] = multicast_group
 
     def read(self) -> Optional[bytes]:
@@ -36,7 +32,7 @@ class StreamOut(Node):
             addr = self.__multicast_group if self.__multicast_group else bind[0]
             if addr is None:
                 return False
-            
+
             port = int(bind[1])
             if not port:
                 return False
@@ -65,12 +61,16 @@ class StreamOut(Node):
     def _to_proto(self):
         n = NodeConfig()
 
-        o = StreamOutConfig(shape=self.__shape, data_type=self.__data_type)
+        o = StreamOutConfig()
+
+        if self.__label:
+            o.label = self.__label
 
         if self.__multicast_group:
-            o.shape.extend(self.__shape)
             o.multicast_group = self.__multicast_group
-            o.use_multicast = self.__multicast_group is not None and len(self.__multicast_group) > 0
+            o.use_multicast = (
+                self.__multicast_group is not None and len(self.__multicast_group) > 0
+            )
 
         n.stream_out.CopyFrom(o)
         return n
@@ -83,10 +83,4 @@ class StreamOut(Node):
         if not isinstance(proto, StreamOutConfig):
             raise ValueError("proto is not of type StreamOutConfig")
 
-        if proto.shape is None:
-            raise Exception("shape must not be None and must be iterable")
-
-        if proto.data_type is None:
-            raise Exception("data_type must not be None and must be DataType")
-
-        return StreamOut(proto.shape, proto.data_type, proto.multicast_group)
+        return StreamOut(proto.label, proto.multicast_group)
