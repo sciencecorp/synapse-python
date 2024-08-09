@@ -12,6 +12,7 @@ from synapse.nodes.electrical_broadband import ElectricalBroadband
 from synapse.nodes.optical_stimulation import OpticalStimulation
 from synapse.nodes.stream_in import StreamIn
 from synapse.nodes.stream_out import StreamOut
+from synapse.channel import Channel
 from google.protobuf.json_format import Parse, ParseDict
 
 
@@ -60,16 +61,23 @@ def read(args):
         stream_out = next(
             (n for n in config.nodes if n.type == NodeType.kStreamOut), None
         )
+
+        ephys = next(
+            (n for n in config.nodes if n.type == NodeType.kElectricalBroadband), None
+        )
         if stream_out is None:
             print(
                 f"No StreamOut node found in config",
             )
             return
+        channels = []
+        for i in range(128):
+            channels.append(Channel(i))
+        ephys.channels = channels 
 
     else:
         config = Config()
         stream_out = StreamOut(
-            shape=[4],
             multicast_group=args.multicast
         )
         ephys = ElectricalBroadband(
@@ -256,6 +264,7 @@ def read_worker_(stream_out: StreamOut, q: queue.Queue, verbose: bool):
             avg_bit_rate = MBps_sum / packet_count
             if verbose and packet_count % 10000 == 0:
                 logging.info(f"Recieved {packet_count} packets: inst: {MBps} Mbps, avg: {avg_bit_rate} Mbps, dropped: {dropped}, {bytes_recvd*8 / 1e6} Mb recvd")
+                print(len(data))
             magic = int.from_bytes(data[0:4], "little")
             if magic != 0xc0ffee00:
                 print(f"Invalid magic: {hex(magic)}")
