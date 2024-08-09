@@ -17,13 +17,13 @@ class StreamOut(Node):
     def read(self) -> Optional[bytes]:
         if self.__socket is None:
             if self.device is None:
-                return False
+                return None
 
             node_socket = next(
                 (s for s in self.device.sockets if s.node_id == self.id), None
             )
             if node_socket is None:
-                return False
+                return None
 
             bind = node_socket.bind.split(":")
             if len(bind) != 2:
@@ -31,11 +31,11 @@ class StreamOut(Node):
 
             addr = self.__multicast_group if self.__multicast_group else bind[0]
             if addr is None:
-                return False
+                return None
 
             port = int(bind[1])
             if not port:
-                return False
+                return None 
 
             self.__socket = socket.socket(
                 socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
