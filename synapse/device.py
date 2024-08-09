@@ -4,14 +4,19 @@ from synapse.api.api.status_pb2 import StatusCode
 from synapse.api.api.synapse_pb2_grpc import SynapseDeviceStub
 from synapse.config import Config
 
+DEFAULT_SYNAPSE_PORT = 647
 
 class Device(object):
     sockets = None
 
     def __init__(self, uri):
-        self.uri = uri
+        if len(uri.split(":")) != 2:
+            self.uri = uri + f":{DEFAULT_SYNAPSE_PORT}"
+        else:
+            self.uri = uri
+        
 
-        self.channel = grpc.insecure_channel(uri)
+        self.channel = grpc.insecure_channel(self.uri)
         self.rpc = SynapseDeviceStub(self.channel)
 
     def start(self):
