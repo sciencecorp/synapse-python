@@ -69,7 +69,6 @@ def read(args):
     else:
         config = Config()
         stream_out = StreamOut(
-            data_type=DataType.kBroadband,
             shape=[4],
             multicast_group=args.multicast
         )
