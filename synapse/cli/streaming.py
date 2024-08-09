@@ -54,7 +54,7 @@ def read(args):
         print("Couldnt get device info")
         return
 
-    print(info)
+    #print(info)
 
     if args.config:
         config = Config.from_proto(load_proto_json(args.config))
@@ -75,25 +75,26 @@ def read(args):
             channels.append(Channel(i))
         ephys.channels = channels 
 
+        print("Configuring device...")
+        if not dev.configure(config):
+            print("Failed to configure device")
+            return
+
+        print(" - done.")
+
     else:
-        config = Config()
-        stream_out = StreamOut(
-            multicast_group=args.multicast
-        )
-        ephys = ElectricalBroadband(
-            peripheral_id=0
-        )
+        config_proto = info.configuration
+        print(config_proto)
+        if config_proto is None:
+            print("Device has no configuration")
+            return
+        config = Config.from_proto(config_proto)
 
-        config.add_node(stream_out)
-        config.add_node(ephys)
-        config.connect(ephys, stream_out)
-
-    print("Configuring device...")
-    if not dev.configure(config):
-        print("Failed to configure device")
-        return
-    print(" - done.")
-
+        stream_out = config.get_node(args.node_id)
+        if stream_out is None:
+            print(f"Node id {args.node_id} not found in device configuration")
+            return
+        
 
     print("Fetching configured device info...")
     info = dev.info()
@@ -132,11 +133,11 @@ def read(args):
             read_worker_(stream_out, q, args.verbose)
 
         except KeyboardInterrupt:
+            pass
+        finally:
             print("Stopping read...")
             stop.set()
             thread.join()
-            pass
-
     else:
         try:
             while True:
