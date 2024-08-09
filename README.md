@@ -11,4 +11,4 @@ To build:
     pip install -r requirements.txt
     make
     python -m build
-    pip install /dist/synapse-0.1.0-py3-none-any.whl 
+    pip install dist/synapse-0.1.0-py3-none-any.whl 
