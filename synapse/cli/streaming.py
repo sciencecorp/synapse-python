@@ -89,6 +89,7 @@ def read(args):
             print("Device has no configuration")
             return
         config = Config.from_proto(config_proto)
+        config.set_device(dev)
 
         stream_out = config.get_node(args.node_id)
         if stream_out is None:
@@ -266,15 +267,6 @@ def read_worker_(stream_out: StreamOut, q: queue.Queue, verbose: bool):
             if verbose and packet_count % 10000 == 0:
                 logging.info(f"Recieved {packet_count} packets: inst: {MBps} Mbps, avg: {avg_bit_rate} Mbps, dropped: {dropped}, {bytes_recvd*8 / 1e6} Mb recvd")
                 print(len(data))
-            magic = int.from_bytes(data[0:4], "little")
-            if magic != 0xc0ffee00:
-                print(f"Invalid magic: {hex(magic)}")
-
-            recvd_seq_num = int.from_bytes(data[4:8], "little")
-            if recvd_seq_num != seq_num:
-                print(f"Packet out of order: {recvd_seq_num} != {seq_num}")
-                dropped += recvd_seq_num - seq_num
-            seq_num = recvd_seq_num + 1
 
             start = time.time()
     end = time.time()
