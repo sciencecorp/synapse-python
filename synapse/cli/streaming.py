@@ -21,6 +21,7 @@ def add_commands(subparsers):
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
     a.add_argument("-c", "--config", type=str, help="Config proto (json)")
+    a.add_argument("-d", "--duration", type=int, help="Duration to read for (s)")
     a.add_argument("-m", "--multicast", type=str, help="Multicast group")
     a.add_argument("-o", "--output", type=str, help="Output file")
     a.add_argument("-v", "--verbose", action="store_true", help="Print verbose information about streaming performance")
@@ -131,7 +132,7 @@ def read(args):
         try:
             thread = threading.Thread(target=write_to_file, args=())
             thread.start()
-            read_worker_(stream_out, q, args.verbose)
+            read_worker_(args.duration, stream_out, q, args.verbose)
 
         except KeyboardInterrupt:
             pass
@@ -243,7 +244,7 @@ def write(args):
     print(" - done.")
 
 
-def read_worker_(stream_out: StreamOut, q: queue.Queue, verbose: bool): 
+def read_worker_(duration, stream_out: StreamOut, q: queue.Queue, verbose: bool): 
     packet_count = 0
     avg_bit_rate = 0
     MBps_sum = 0
@@ -253,7 +254,7 @@ def read_worker_(stream_out: StreamOut, q: queue.Queue, verbose: bool):
     dropped = 0
 
     start_sec = time.time()
-    while time.time() - start_sec < 10:
+    while time.time() - start_sec < duration:
         data = stream_out.read()
         if data is not None:
             q.put(data)
@@ -265,8 +266,7 @@ def read_worker_(stream_out: StreamOut, q: queue.Queue, verbose: bool):
             bytes_recvd += len(data)
             avg_bit_rate = MBps_sum / packet_count
             if verbose and packet_count % 10000 == 0:
-                logging.info(f"Recieved {packet_count} packets: inst: {MBps} Mbps, avg: {avg_bit_rate} Mbps, dropped: {dropped}, {bytes_recvd*8 / 1e6} Mb recvd")
-                print(len(data))
+                logging.info(f"Recieved {packet_count} packets, {bytes_recvd*8 / 1e6} Mb")
 
             start = time.time()
     end = time.time()
