@@ -15,7 +15,7 @@ from synapse.nodes.optical_stimulation import OpticalStimulation
 from synapse.nodes.stream_in import StreamIn
 from synapse.nodes.stream_out import StreamOut
 from synapse.channel import Channel
-from google.protobuf.json_format import Parse, ParseDict
+from google.protobuf.json_format import Parse, ParseDict, MessageToJson
 
 
 def add_commands(subparsers):
@@ -74,9 +74,9 @@ def read(args):
             logging.error("No StreamOut node found in config")
             return
         channels = []
-        for i in range(128, 128 + 64):
-            channels.append(Channel(i, 2*i, 2*i+1))
-        ephys.channels = channels 
+        #for i in range(64, 64 + 64):
+        #    channels.append(Channel(i, 2*i, 2*i+1))
+        #ephys.channels = channels 
 
         print("Configuring device...")
         if not dev.configure(config):
