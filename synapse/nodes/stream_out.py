@@ -20,8 +20,13 @@ class StreamOut(Node):
         if self.__socket is None:
             if self.open_socket() is None:
                 return None
-
-        data, _ = self.__socket.recvfrom(4096)
+        if self.__use_multicast:
+            data, _ = self.__socket.recvfrom(8192)
+        else:
+            
+            data = self.__socket.recv(4096)
+            while (len(data) % 128) != 0:
+                data += self.__socket.recv(4096)
         return data
 
     def open_socket(self):
