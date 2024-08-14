@@ -1,4 +1,5 @@
 import grpc
+import logging
 from google.protobuf.empty_pb2 import Empty
 from synapse.api.api.status_pb2 import StatusCode
 from synapse.api.api.synapse_pb2_grpc import SynapseDeviceStub
@@ -59,12 +60,12 @@ class Device(object):
 
         config.set_device(self)
         try:
-            print(config.to_proto())
+            logging.debug(config.to_proto())
             response = self.rpc.Configure(config.to_proto())
             if self._handle_status_response(response):
                 return response
         except grpc.RpcError as e:
-            print("Error: ", e.details())
+            logging.error("Error: ", e.details())
         return False
 
     def _handle_status_response(self, status):

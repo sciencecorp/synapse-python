@@ -1,8 +1,10 @@
 import os
+import struct
 import queue
 import threading
 import time
 import logging
+import csv
 from synapse.api.api.datatype_pb2 import DataType
 from synapse.api.api.node_pb2 import NodeType
 from synapse.api.api.synapse_pb2 import DeviceConfiguration
@@ -25,6 +27,7 @@ def add_commands(subparsers):
     a.add_argument("-m", "--multicast", type=str, help="Multicast group")
     a.add_argument("-o", "--output", type=str, help="Output file")
     a.add_argument("-v", "--verbose", action="store_true", help="Print verbose information about streaming performance")
+    a.add_argument("-s", "--csv", action="store_true", help="Write data to csv file")
     a.set_defaults(func=read)
 
     a = subparsers.add_parser("write", help="Write to a device's StreamIn node")
@@ -58,6 +61,7 @@ def read(args):
     #print(info)
 
     if args.config:
+        
         config = Config.from_proto(load_proto_json(args.config))
         stream_out = next(
             (n for n in config.nodes if n.type == NodeType.kStreamOut), None
@@ -67,13 +71,11 @@ def read(args):
             (n for n in config.nodes if n.type == NodeType.kElectricalBroadband), None
         )
         if stream_out is None:
-            print(
-                f"No StreamOut node found in config",
-            )
+            logging.error("No StreamOut node found in config")
             return
         channels = []
-        for i in range(128):
-            channels.append(Channel(i))
+        for i in range(128, 128 + 64):
+            channels.append(Channel(i, 2*i, 2*i+1))
         ephys.channels = channels 
 
         print("Configuring device...")
@@ -119,15 +121,30 @@ def read(args):
         q = queue.Queue()
 
         def write_to_file():
-            with open(args.output, "wb") as f:
-                while not stop.is_set() or not q.empty():
-                    data = None
-                    try:
-                        data = q.get(True, 1)
-                    except:
-                        continue
+            if args.csv:
+                
+                with open(args.output, mode='w', newline='') as file:
+                    while not stop.is_set() or not q.empty():
+                        data = None
+                        try:
+                            data = q.get(True, 1)
+                        except:
+                            continue
 
-                    f.write(data)
+                        int_list = parse_bytes_to_16bit_ints(data)
+                        writer = csv.writer(file)
+                        for i in range(0, len(int_list), 64):
+                            writer.writerow(int_list[i:i+64]) 
+            else:
+                with open(args.output, "wb") as f:
+                    while not stop.is_set() or not q.empty():
+                        data = None
+                        try:
+                            data = q.get(True, 1)
+                        except:
+                            continue
+
+                        f.write(data)
 
         try:
             thread = threading.Thread(target=write_to_file, args=())
@@ -151,7 +168,8 @@ def read(args):
             pass
 
     print("Stopping device...")
-    if not dev.stop():
+    stop_resp = dev.stop()
+    if not stop_resp:
         print("Failed to stop device")
         return
     print(" - done.")
@@ -258,7 +276,6 @@ def read_worker_(duration, stream_out: StreamOut, q: queue.Queue, verbose: bool)
         data = stream_out.read()
         if data is not None:
             q.put(data)
-        
             dur = time.time() - start
             packet_count += 1
             MBps = (len(data) / dur) / 1e6
@@ -275,3 +292,8 @@ def read_worker_(duration, stream_out: StreamOut, q: queue.Queue, verbose: bool)
     print(f"Recieved {bytes_recvd*8 / 1e6} Mb in {dur} seconds")
     
 
+def parse_bytes_to_16bit_ints(byte_data):
+    num_of_ints = len(byte_data) // 2
+    format_string = f'<{num_of_ints}H'  # '>' for big-endian, 'H' for 16-bit unsigned int
+    int_list = struct.unpack(format_string, byte_data)
+    return list(int_list)
