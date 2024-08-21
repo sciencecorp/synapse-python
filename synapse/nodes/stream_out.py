@@ -23,10 +23,13 @@ class StreamOut(Node):
         if self.__use_multicast:
             data, _ = self.__socket.recvfrom(8192)
         else:
-            
+            packets_received = 0
             data = self.__socket.recv(4096)
             while (len(data) % 128) != 0:
+                packets_received += 1
                 data += self.__socket.recv(4096)
+                if packets_received > 100:
+                    logging.error(f"Packet size is not a multiple of 128, data: {len(data)}")
         return data
 
     def open_socket(self):

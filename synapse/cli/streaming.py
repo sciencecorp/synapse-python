@@ -74,9 +74,9 @@ def read(args):
             logging.error("No StreamOut node found in config")
             return
         channels = []
-        #for i in range(64, 64 + 64):
-        #    channels.append(Channel(i, 2*i, 2*i+1))
-        #ephys.channels = channels 
+        for i in range(0, 64):
+            channels.append(Channel(i, 2*i, 2*i+1))
+        ephys.channels = channels 
 
         print("Configuring device...")
         if not dev.configure(config):
@@ -282,7 +282,7 @@ def read_worker_(duration, stream_out: StreamOut, q: queue.Queue, verbose: bool)
             MBps_sum += MBps
             bytes_recvd += len(data)
             avg_bit_rate = MBps_sum / packet_count
-            if verbose and packet_count % 10000 == 0:
+            if verbose and packet_count % 100 == 0:
                 logging.info(f"Recieved {packet_count} packets, {bytes_recvd*8 / 1e6} Mb")
 
             start = time.time()
