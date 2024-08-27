@@ -1,0 +1,25 @@
+{
+  "nodes": [
+    {
+      "type": "kStreamIn",
+      "id": 1,
+      "stream_in": {
+        "shape": [2048],
+        "data_type": "kImage"
+      }
+    },
+    {
+      "type": "kOpticalStim",
+      "id": 2,
+      "optical_stim": {
+        "peripheral_id": 1
+      }
+    }
+  ],
+  "connections": [
+    {
+      "src_node_id": 1,
+      "dst_node_id": 2
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+*.csv
 # Generated protobuf code
 synapse/api/
 bin/
