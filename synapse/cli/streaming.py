@@ -58,8 +58,6 @@ def read(args):
         print("Couldnt get device info")
         return
 
-    #print(info)
-
     if args.config:
         
         config = Config.from_proto(load_proto_json(args.config))
@@ -74,7 +72,9 @@ def read(args):
             logging.error("No StreamOut node found in config")
             return
         channels = []
-        for i in range(0, 64):
+        base_channel = 192
+        window = 64
+        for i in range(base_channel, base_channel + window):
             channels.append(Channel(i, 2*i, 2*i+1))
         ephys.channels = channels 
 
@@ -202,22 +202,6 @@ def write(args):
         if stream_in is None:
             print("No StreamIn node found in config")
             return
-    else:
-        config = Config()
-        stream_in = StreamIn(
-            data_type=DataType.kImage,
-            shape=[1],
-        )
-        optical = OpticalStimulation(
-            peripheral_id=0,
-            bit_width=4,
-            sample_rate=1000,
-            gain=1,
-        )
-
-        config.add_node(stream_in)
-        config.add_node(optical)
-        config.connect(stream_in, optical)
 
     print("Configuring device...")
     if not dev.configure(config):
