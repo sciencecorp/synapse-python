@@ -57,7 +57,9 @@ def read(args):
     #print(info)
 
     if args.config:
-        config = Config.from_proto(load_proto_json(args.config))
+        proto = load_proto_json(args.config)
+        print(f"Loading config from proto \"{proto}\"")
+        config = Config.from_proto(proto)
         stream_out = next(
             (n for n in config.nodes if n.type == NodeType.kStreamOut), None
         )
