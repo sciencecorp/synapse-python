@@ -72,11 +72,6 @@ def read(args):
                 f"No StreamOut node found in config",
             )
             return
-        channels = []
-        for i in range(128):
-            channels.append(Channel(i))
-        ephys.channels = channels 
-
         print("Configuring device...")
         if not dev.configure(config):
             print("Failed to configure device")
