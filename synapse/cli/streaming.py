@@ -119,22 +119,23 @@ def _deserialize_ndtp_header(data):
     return data_type, t0, int(seq_num), ch_count
 
 
-def _deserialize_ndtp_broadband(ch_count, data):
+def _deserialize_ndtp_broadband(t0, ch_count, data):
     channel_data = data[NDTP_HEADER_SIZE_BYTES:]
-    return_data = []
+    return_data = [t0]
     for i in range(ch_count):
         channel_id, sample_count = struct.unpack("=ii", channel_data[0:8])
         channel_data = channel_data[8:]
         samples = struct.unpack(f"={sample_count}h", channel_data[: (2 * sample_count)])
-        print(f"Channel {channel_id}, {sample_count}: {samples}")
+        # print(f"Channel {channel_id}, {sample_count}: {samples}")
         channel_data = channel_data[2 * sample_count :]
         return_data.append((channel_id, samples))
     return return_data
 
 
 def _data_writer(stop, q, output_file, verbose):
-    if output_file:
-        fd = open(output_file, "wb")
+    filename = f"output_{time.strftime('%Y%m%d-%H%M%S')}.json"
+    if filename:
+        fd = open(filename, "wb")
 
     last_seq_num = 0
 
@@ -156,7 +157,7 @@ def _data_writer(stop, q, output_file, verbose):
 
                 last_seq_num = seq_num
 
-                unpacked_data = _deserialize_ndtp_broadband(ch_count, data)
+                unpacked_data = _deserialize_ndtp_broadband(t0, ch_count, data)
 
                 if output_file:
                     fd.write(json.dumps(unpacked_data).encode("utf-8"))
@@ -179,7 +180,7 @@ def _read_worker(stream_out: StreamOut, q: queue.Queue, verbose: bool):
     dropped = 0
 
     start_sec = time.time()
-    while time.time() - start_sec < 10:
+    while time.time() - start_sec < 1 * 60:
         data = stream_out.read()
         if data is not None:
             # forward data to async thread for writing to terminal or disk by
