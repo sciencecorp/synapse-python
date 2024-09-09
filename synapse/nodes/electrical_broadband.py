@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 from synapse.node import Node
 from synapse.channel import Channel
 from synapse.api.node_pb2 import NodeConfig, NodeType
@@ -9,7 +9,7 @@ class ElectricalBroadband(Node):
     type = NodeType.kElectricalBroadband
 
     def __init__(
-        self, peripheral_id, channels, sample_rate=None, gain=None, bit_width=None
+        self, peripheral_id: int, channels: List[Channel], sample_rate=None, gain: int = None, bit_width: int = None
     ):
         self.peripheral_id = peripheral_id
         self.channels = channels
