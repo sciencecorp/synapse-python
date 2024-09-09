@@ -14,10 +14,8 @@ from synapse.api.api.synapse_pb2 import DeviceConfiguration
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.synapse_pb2 import DeviceConfiguration
-from synapse.channel import Channel
 from synapse.config import Config
 from synapse.device import Device
-from synapse.nodes.electrical_broadband import ElectricalBroadband
 from synapse.nodes.optical_stimulation import OpticalStimulation
 from synapse.nodes.stream_in import StreamIn
 from synapse.nodes.stream_out import StreamOut
@@ -58,16 +56,9 @@ def load_config_from_file(path):
 
 
 def read(args):
-    print("Reading from device's StreamOut Node")
-    print(f" - multicast: {args.multicast if args.multicast else '<disabled>'}")
-
     device = Device(args.uri)
-
-    print("Fetching device info...")
     info = device.info()
-    if info is None:
-        print("Couldnt get device info")
-        return
+    assert info is not None, "Couldn't get device info"
 
     print("Configuring device...")
     if args.config:
@@ -94,7 +85,7 @@ def read(args):
     if not device.start():
         raise ValueError("Failed to start device")
 
-    print(f"Streaming data... press Ctrl+C to stop")
+    print(f"Streaming data... Ctrl+C to stop")
 
     stop = threading.Event()
     q = queue.Queue()
@@ -116,7 +107,7 @@ def read(args):
     if not device.stop():
         print("Failed to stop device")
         return
-    print(" - done.")
+    print("Stopped")
 
 
 def _deserialize_ndtp_header(data):
@@ -124,7 +115,7 @@ def _deserialize_ndtp_header(data):
         "=Iiqch", data[:NDTP_HEADER_SIZE_BYTES]
     )
     if magic != 0xC0FFEE00:
-        print(f"Invalid magic: {hex(magic)}")
+        print(f"Invalid magic number: {hex(magic)}")
         return None
 
     return data_type, t0, int(seq_num), ch_count
@@ -137,7 +128,6 @@ def _deserialize_ndtp_broadband(t0, ch_count, data):
         channel_id, sample_count = struct.unpack("=ii", channel_data[0:8])
         channel_data = channel_data[8:]
         samples = struct.unpack(f"={sample_count}h", channel_data[: (2 * sample_count)])
-        # print(f"Channel {channel_id}, {sample_count}: {samples}")
         channel_data = channel_data[2 * sample_count :]
         return_data.append((channel_id, samples))
     return return_data
@@ -174,9 +164,8 @@ def _data_writer(stop, q, output_file, verbose):
                     fd.write(json.dumps(unpacked_data).encode("utf-8"))
                 else:
                     print(
-                        f"Data type: {data_type}, seq_num: {seq_num}, ch_count: {ch_count}, sample_count: {sample_count}, t0: {t0}"
+                        f"Data type: {data_type}, seq_num: {seq_num}, ch_count: {ch_count}, t0: {t0}"
                     )
-                    print(unpacked_data)
         except Exception as e:
             print(f"Error processing data: {e}")
             continue
