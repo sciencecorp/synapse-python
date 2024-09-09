@@ -5,9 +5,9 @@ import threading
 import time
 import logging
 import csv
-from synapse.api.api.datatype_pb2 import DataType
-from synapse.api.api.node_pb2 import NodeType
-from synapse.api.api.synapse_pb2 import DeviceConfiguration
+from synapse.api.datatype_pb2 import DataType
+from synapse.api.node_pb2 import NodeType
+from synapse.api.synapse_pb2 import DeviceConfiguration
 from synapse.device import Device
 from synapse.config import Config
 from synapse.nodes.electrical_broadband import ElectricalBroadband
@@ -26,7 +26,12 @@ def add_commands(subparsers):
     a.add_argument("-d", "--duration", type=int, help="Duration to read for (s)")
     a.add_argument("-m", "--multicast", type=str, help="Multicast group")
     a.add_argument("-o", "--output", type=str, help="Output file")
-    a.add_argument("-v", "--verbose", action="store_true", help="Print verbose information about streaming performance")
+    a.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Print verbose information about streaming performance",
+    )
     a.add_argument("-s", "--csv", action="store_true", help="Write data to csv file")
     a.set_defaults(func=read)
 
@@ -58,10 +63,10 @@ def read(args):
         print("Couldnt get device info")
         return
 
-    #print(info)
+    # print(info)
 
     if args.config:
-        
+
         config = Config.from_proto(load_proto_json(args.config))
         stream_out = next(
             (n for n in config.nodes if n.type == NodeType.kStreamOut), None
@@ -74,9 +79,9 @@ def read(args):
             logging.error("No StreamOut node found in config")
             return
         channels = []
-        #for i in range(64, 64 + 64):
+        # for i in range(64, 64 + 64):
         #    channels.append(Channel(i, 2*i, 2*i+1))
-        #ephys.channels = channels 
+        # ephys.channels = channels
 
         print("Configuring device...")
         if not dev.configure(config):
@@ -98,7 +103,6 @@ def read(args):
         if stream_out is None:
             print(f"Node id {args.node_id} not found in device configuration")
             return
-        
 
     print("Fetching configured device info...")
     info = dev.info()
@@ -122,8 +126,8 @@ def read(args):
 
         def write_to_file():
             if args.csv:
-                
-                with open(args.output, mode='w', newline='') as file:
+
+                with open(args.output, mode="w", newline="") as file:
                     while not stop.is_set() or not q.empty():
                         data = None
                         try:
@@ -134,7 +138,7 @@ def read(args):
                         int_list = parse_bytes_to_16bit_ints(data)
                         writer = csv.writer(file)
                         for i in range(0, len(int_list), 64):
-                            writer.writerow(int_list[i:i+64]) 
+                            writer.writerow(int_list[i : i + 64])
             else:
                 with open(args.output, "wb") as f:
                     while not stop.is_set() or not q.empty():
@@ -262,7 +266,7 @@ def write(args):
     print(" - done.")
 
 
-def read_worker_(duration, stream_out: StreamOut, q: queue.Queue, verbose: bool): 
+def read_worker_(duration, stream_out: StreamOut, q: queue.Queue, verbose: bool):
     packet_count = 0
     avg_bit_rate = 0
     MBps_sum = 0
@@ -283,17 +287,21 @@ def read_worker_(duration, stream_out: StreamOut, q: queue.Queue, verbose: bool)
             bytes_recvd += len(data)
             avg_bit_rate = MBps_sum / packet_count
             if verbose and packet_count % 10000 == 0:
-                logging.info(f"Recieved {packet_count} packets, {bytes_recvd*8 / 1e6} Mb")
+                logging.info(
+                    f"Recieved {packet_count} packets, {bytes_recvd*8 / 1e6} Mb"
+                )
 
             start = time.time()
     end = time.time()
 
     dur = end - start_sec
     print(f"Recieved {bytes_recvd*8 / 1e6} Mb in {dur} seconds")
-    
+
 
 def parse_bytes_to_16bit_ints(byte_data):
     num_of_ints = len(byte_data) // 2
-    format_string = f'<{num_of_ints}H'  # '>' for big-endian, 'H' for 16-bit unsigned int
+    format_string = (
+        f"<{num_of_ints}H"  # '>' for big-endian, 'H' for 16-bit unsigned int
+    )
     int_list = struct.unpack(format_string, byte_data)
     return list(int_list)

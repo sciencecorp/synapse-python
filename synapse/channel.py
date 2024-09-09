@@ -1,4 +1,4 @@
-from synapse.api.api.channel_pb2 import Channel as PBChannel
+from synapse.api.channel_pb2 import Channel as PBChannel
 
 
 class Channel(object):
