@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import queue
@@ -18,7 +19,7 @@ from synapse.nodes.optical_stimulation import OpticalStimulation
 from synapse.nodes.stream_in import StreamIn
 from synapse.nodes.stream_out import StreamOut
 
-NDTP_HEADER_SIZE_BYTES = 18
+NDTP_HEADER_SIZE_BYTES = 19
 
 
 def add_commands(subparsers):
@@ -108,17 +109,27 @@ def read(args):
 
 
 def _deserialize_ndtp_header(data):
-    magic, data_type, t0, seq_num, ch_count, sample_count = struct.unpack(
-        "=ciqchh", data[:NDTP_HEADER_SIZE_BYTES]
+    magic, data_type, t0, seq_num, ch_count = struct.unpack(
+        "=Iiqch", data[:NDTP_HEADER_SIZE_BYTES]
     )
-    # if magic != 0xC0FFEE00:
-    #     print(f"Invalid magic: {hex(magic)}")
-    #     return None
-    return data_type, t0, int(seq_num), ch_count, sample_count
+    if magic != 0xC0FFEE00:
+        print(f"Invalid magic: {hex(magic)}")
+        return None
+
+    return data_type, t0, int(seq_num), ch_count
 
 
-def _deserialize_ndtp_broadband(data):
-    return None
+def _deserialize_ndtp_broadband(ch_count, data):
+    channel_data = data[NDTP_HEADER_SIZE_BYTES:]
+    return_data = []
+    for i in range(ch_count):
+        channel_id, sample_count = struct.unpack("=ii", channel_data[0:8])
+        channel_data = channel_data[8:]
+        samples = struct.unpack(f"={sample_count}h", channel_data[: (2 * sample_count)])
+        print(f"Channel {channel_id}, {sample_count}: {samples}")
+        channel_data = channel_data[2 * sample_count :]
+        return_data.append((channel_id, samples))
+    return return_data
 
 
 def _data_writer(stop, q, output_file, verbose):
@@ -132,9 +143,7 @@ def _data_writer(stop, q, output_file, verbose):
         try:
             data = q.get(True, 1)
 
-            data_type, t0, seq_num, ch_count, sample_count = _deserialize_ndtp_header(
-                data
-            )
+            data_type, t0, seq_num, ch_count = _deserialize_ndtp_header(data)
 
             if data_type == DataType.kBroadband:
                 if verbose:
@@ -147,10 +156,10 @@ def _data_writer(stop, q, output_file, verbose):
 
                 last_seq_num = seq_num
 
-                unpacked_data = _deserialize_ndtp_broadband(data)
+                unpacked_data = _deserialize_ndtp_broadband(ch_count, data)
 
                 if output_file:
-                    fd.write(unpacked_data)
+                    fd.write(json.dumps(unpacked_data).encode("utf-8"))
                 else:
                     print(
                         f"Data type: {data_type}, seq_num: {seq_num}, ch_count: {ch_count}, sample_count: {sample_count}, t0: {t0}"

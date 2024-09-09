@@ -13,7 +13,7 @@
       "id": 2,
       "electrical_broadband": {
         "peripheral_id": 1,
-        "sample_rate": 1000,
+        "sample_rate": 30000,
         "bit_width": 16,
         "channels": [
           { "id": 0 },
