@@ -1,19 +1,24 @@
+import logging
 import os
 import queue
+import struct
 import threading
 import time
-import logging
+
+from google.protobuf.json_format import Parse, ParseDict
+
 from synapse.api.api.datatype_pb2 import DataType
 from synapse.api.api.node_pb2 import NodeType
 from synapse.api.api.synapse_pb2 import DeviceConfiguration
-from synapse.device import Device
+from synapse.channel import Channel
 from synapse.config import Config
+from synapse.device import Device
 from synapse.nodes.electrical_broadband import ElectricalBroadband
 from synapse.nodes.optical_stimulation import OpticalStimulation
 from synapse.nodes.stream_in import StreamIn
 from synapse.nodes.stream_out import StreamOut
-from synapse.channel import Channel
-from google.protobuf.json_format import Parse, ParseDict
+
+NDTP_HEADER_SIZE_BYTES = 18
 
 
 def add_commands(subparsers):
@@ -23,7 +28,12 @@ def add_commands(subparsers):
     a.add_argument("-c", "--config", type=str, help="Config proto (json)")
     a.add_argument("-m", "--multicast", type=str, help="Multicast group")
     a.add_argument("-o", "--output", type=str, help="Output file")
-    a.add_argument("-v", "--verbose", action="store_true", help="Print verbose information about streaming performance")
+    a.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Print verbose information about streaming performance",
+    )
     a.set_defaults(func=read)
 
     a = subparsers.add_parser("write", help="Write to a device's StreamIn node")
@@ -35,85 +45,44 @@ def add_commands(subparsers):
     a.set_defaults(func=write)
 
 
-def load_proto_json(filepath):
-    print(f"Loading config from {filepath}")
-    with open(filepath, "r") as f:
+def load_config_from_file(path):
+    with open(path, "r") as f:
         data = f.read()
-        return Parse(data, DeviceConfiguration())
+        proto = Parse(data, DeviceConfiguration())
+        return Config.from_proto(proto)
 
 
 def read(args):
-    print("Reading from device's StreamOut Node")
-    print(f" - multicast: {args.multicast if args.multicast else '<disabled>'}")
+    device = Device(args.uri)
+    info = device.info()
+    assert info is not None, "Couldn't get device info"
 
-    dev = Device(args.uri)
-
-    print("Fetching device info...")
-    info = dev.info()
-    if info is None:
-        print("Couldnt get device info")
-        return
-
-    #print(info)
-
+    print("Configuring device...")
     if args.config:
-        proto = load_proto_json(args.config)
-        print(f"Loading config from proto \"{proto}\"")
-        config = Config.from_proto(proto)
+        config = load_config_from_file(args.config)
         stream_out = next(
             (n for n in config.nodes if n.type == NodeType.kStreamOut), None
         )
+        assert stream_out is not None, "No StreamOut node found in config"
 
-        ephys = next(
-            (n for n in config.nodes if n.type == NodeType.kElectricalBroadband), None
-        )
-        if stream_out is None:
-            print(
-                f"No StreamOut node found in config",
-            )
-            return
-        channels = []
-        for i in range(128):
-            channels.append(Channel(i))
-        ephys.channels = channels 
-
-        print("Configuring device...")
-        if not dev.configure(config):
-            print("Failed to configure device")
-            return
-
-        print(" - done.")
+        if not device.configure(config):
+            raise ValueError("Failed to configure device")
 
     else:
         config_proto = info.configuration
-        print(config_proto)
-        if config_proto is None:
-            print("Device has no configuration")
-            return
+        assert config_proto is not None, "Device has no configuration"
+
         config = Config.from_proto(config_proto)
-
         stream_out = config.get_node(args.node_id)
-        if stream_out is None:
-            print(f"Node id {args.node_id} not found in device configuration")
-            return
-        
-
-    print("Fetching configured device info...")
-    info = dev.info()
-    if info is None:
-        print("Couldnt get device info")
-        return
-
-    print(info)
+        assert (
+            stream_out is not None
+        ), f"Node id {args.node_id} not found in device configuration"
 
     print("Starting device...")
-    if not dev.start():
-        print("Failed to start device")
-        return
-    print(" - done.")
+    if not device.start():
+        raise ValueError("Failed to start device")
 
-    src = args.output if args.output else "stdout"
-    print(f"Streaming data out to {src}... press Ctrl+C to stop")
+    print(f"Streaming data... press Ctrl+C to stop")
     if args.output:
         stop = threading.Event()
         q = queue.Queue()
@@ -151,7 +120,7 @@ def read(args):
             pass
 
     print("Stopping device...")
-    if not dev.stop():
+    if not device.stop():
         print("Failed to stop device")
         return
     print(" - done.")
@@ -177,7 +146,7 @@ def write(args):
     print(info)
 
     if args.config:
-        config = Config.from_proto(load_proto_json(args.config))
+        config = load_config_from_file(args.config)
         stream_in = next(
             (n for n in config.nodes if n.type == NodeType.kStreamIn), None
         )
@@ -244,7 +213,11 @@ def write(args):
     print(" - done.")
 
 
-def read_worker_(stream_out: StreamOut, q: queue.Queue, verbose: bool): 
+def deserialize_header_ndtp(data):
+    return struct.unpack("=ciqchh", data[:NDTP_HEADER_SIZE_BYTES])
+
+
+def read_worker_(stream_out: StreamOut, q: queue.Queue, verbose: bool):
     packet_count = 0
     avg_bit_rate = 0
     MBps_sum = 0
@@ -258,7 +231,7 @@ def read_worker_(stream_out: StreamOut, q: queue.Queue, verbose: bool):
         data = stream_out.read()
         if data is not None:
             q.put(data)
-        
+
             dur = time.time() - start
             packet_count += 1
             MBps = (len(data) / dur) / 1e6
@@ -266,22 +239,30 @@ def read_worker_(stream_out: StreamOut, q: queue.Queue, verbose: bool):
             bytes_recvd += len(data)
             avg_bit_rate = MBps_sum / packet_count
             if verbose and packet_count % 10000 == 0:
-                logging.info(f"Recieved {packet_count} packets: inst: {MBps} Mbps, avg: {avg_bit_rate} Mbps, dropped: {dropped}, {bytes_recvd*8 / 1e6} Mb recvd")
+                logging.info(
+                    f"Recieved {packet_count} packets: inst: {MBps} Mbps, avg: {avg_bit_rate} Mbps, dropped: {dropped}, {bytes_recvd*8 / 1e6} Mb recvd"
+                )
                 print(len(data))
-            magic = int.from_bytes(data[0:4], "little")
-            if magic != 0xc0ffee00:
-                print(f"Invalid magic: {hex(magic)}")
 
-            recvd_seq_num = int.from_bytes(data[4:8], "little")
-            if recvd_seq_num != seq_num:
-                print(f"Packet out of order: {recvd_seq_num} != {seq_num}")
-                dropped += recvd_seq_num - seq_num
-            seq_num = recvd_seq_num + 1
+            magic, data_type, t0, seq_num, ch_count, sample_count = (
+                deserialize_header_ndtp(data)
+            )
+
+            if data_type == DataType.kBroadband:
+                print("Broadband")
+
+            # magic = int.from_bytes(data[0:4], "little")
+            # if magic != 0xC0FFEE00:
+            #     print(f"Invalid magic: {hex(magic)}")
+
+            # recvd_seq_num = int.from_bytes(data[4:8], "little")
+            # if recvd_seq_num != seq_num:
+            #     print(f"Packet out of order: {recvd_seq_num} != {seq_num}")
+            #     dropped += recvd_seq_num - seq_num
+            # seq_num = recvd_seq_num + 1
 
             start = time.time()
     end = time.time()
 
     dur = end - start_sec
     print(f"Recieved {bytes_recvd*8 / 1e6} Mb in {dur} seconds")
-    
-
