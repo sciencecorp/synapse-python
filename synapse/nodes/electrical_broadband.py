@@ -18,13 +18,14 @@ class ElectricalBroadband(Node):
         self.bit_width = bit_width
 
     def _to_proto(self):
+        channels = [c.to_proto() for c in self.channels]
         n = NodeConfig()
         p = ElectricalBroadbandConfig(
             peripheral_id=self.peripheral_id,
             bit_width=self.bit_width,
             sample_rate=self.sample_rate,
             gain=self.gain,
-            channels=[c.to_proto() for c in self.channels],
+            channels=channels,
         )
         n.electrical_broadband.CopyFrom(p)
         return n
