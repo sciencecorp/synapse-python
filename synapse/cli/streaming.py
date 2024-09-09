@@ -70,7 +70,7 @@ def read(args):
 
     else:
         config_proto = info.configuration
-        assert config_proto is not None, "Device has no configuration"
+        assert config_proto is not None, "Device has no configuration and none provided"
 
         config = Config.from_proto(config_proto)
         stream_out = config.get_node(args.node_id)
@@ -83,47 +83,117 @@ def read(args):
         raise ValueError("Failed to start device")
 
     print(f"Streaming data... press Ctrl+C to stop")
-    if args.output:
-        stop = threading.Event()
-        q = queue.Queue()
 
-        def write_to_file():
-            with open(args.output, "wb") as f:
-                while not stop.is_set() or not q.empty():
-                    data = None
-                    try:
-                        data = q.get(True, 1)
-                    except:
-                        continue
+    stop = threading.Event()
+    q = queue.Queue()
+    thread = threading.Thread(
+        target=_data_writer, args=(stop, q, args.output, args.verbose)
+    )
 
-                    f.write(data)
-
-        try:
-            thread = threading.Thread(target=write_to_file, args=())
-            thread.start()
-            read_worker_(stream_out, q, args.verbose)
-
-        except KeyboardInterrupt:
-            pass
-        finally:
-            print("Stopping read...")
-            stop.set()
-            thread.join()
-    else:
-        try:
-            while True:
-                data = stream_out.read()
-                if data:
-                    value = int.from_bytes(data, "big")
-                    print(value)
-        except KeyboardInterrupt:
-            pass
+    try:
+        thread.start()
+        _read_worker(stream_out, q, args.verbose)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        print("Stopping read...")
+        stop.set()
+        thread.join()
 
     print("Stopping device...")
     if not device.stop():
         print("Failed to stop device")
         return
     print(" - done.")
+
+
+def _deserialize_ndtp_header(data):
+    magic, data_type, t0, seq_num, ch_count, sample_count = struct.unpack(
+        "=ciqchh", data[:NDTP_HEADER_SIZE_BYTES]
+    )
+    # if magic != 0xC0FFEE00:
+    #     print(f"Invalid magic: {hex(magic)}")
+    #     return None
+    return data_type, t0, int(seq_num), ch_count, sample_count
+
+
+def _deserialize_ndtp_broadband(data):
+    return None
+
+
+def _data_writer(stop, q, output_file, verbose):
+    if output_file:
+        fd = open(output_file, "wb")
+
+    last_seq_num = 0
+
+    while not stop.is_set() or not q.empty():
+        data = None
+        try:
+            data = q.get(True, 1)
+
+            data_type, t0, seq_num, ch_count, sample_count = _deserialize_ndtp_header(
+                data
+            )
+
+            if data_type == DataType.kBroadband:
+                if verbose:
+                    print("Broadband data...")
+
+                if last_seq_num != 0 and seq_num != last_seq_num + 1:
+                    print(
+                        f"Dropped packets out of order: {seq_num} != {last_seq_num + 1}"
+                    )
+
+                last_seq_num = seq_num
+
+                unpacked_data = _deserialize_ndtp_broadband(data)
+
+                if output_file:
+                    fd.write(unpacked_data)
+                else:
+                    print(
+                        f"Data type: {data_type}, seq_num: {seq_num}, ch_count: {ch_count}, sample_count: {sample_count}, t0: {t0}"
+                    )
+                    print(unpacked_data)
+        except Exception as e:
+            print(f"Error processing data: {e}")
+            continue
+
+
+def _read_worker(stream_out: StreamOut, q: queue.Queue, verbose: bool):
+    packet_count = 0
+    avg_bit_rate = 0
+    MBps_sum = 0
+    bytes_recvd = 0
+    start = time.time()
+    dropped = 0
+
+    start_sec = time.time()
+    while time.time() - start_sec < 10:
+        data = stream_out.read()
+        if data is not None:
+            # forward data to async thread for writing to terminal or disk by
+            # adding it to the queue
+            q.put(data)
+
+            # generate some benchmarking stats
+            dur = time.time() - start
+            packet_count += 1
+            MBps = (len(data) / dur) / 1e6
+            MBps_sum += MBps
+            bytes_recvd += len(data)
+            avg_bit_rate = MBps_sum / packet_count
+            if verbose and packet_count % 10000 == 0:
+                logging.info(
+                    f"Recieved {packet_count} packets: inst: {MBps} Mbps, avg: {avg_bit_rate} Mbps, dropped: {dropped}, {bytes_recvd*8 / 1e6} Mb recvd"
+                )
+                print(len(data))
+            start = time.time()
+    end = time.time()
+
+    dur = end - start_sec
+    print(f"Recieved {bytes_recvd*8 / 1e6} Mb in {dur} seconds")
 
 
 def write(args):
@@ -211,58 +281,3 @@ def write(args):
         print("Failed to stop device")
         return
     print(" - done.")
-
-
-def deserialize_header_ndtp(data):
-    return struct.unpack("=ciqchh", data[:NDTP_HEADER_SIZE_BYTES])
-
-
-def read_worker_(stream_out: StreamOut, q: queue.Queue, verbose: bool):
-    packet_count = 0
-    avg_bit_rate = 0
-    MBps_sum = 0
-    bytes_recvd = 0
-    start = time.time()
-    seq_num = 0
-    dropped = 0
-
-    start_sec = time.time()
-    while time.time() - start_sec < 10:
-        data = stream_out.read()
-        if data is not None:
-            q.put(data)
-
-            dur = time.time() - start
-            packet_count += 1
-            MBps = (len(data) / dur) / 1e6
-            MBps_sum += MBps
-            bytes_recvd += len(data)
-            avg_bit_rate = MBps_sum / packet_count
-            if verbose and packet_count % 10000 == 0:
-                logging.info(
-                    f"Recieved {packet_count} packets: inst: {MBps} Mbps, avg: {avg_bit_rate} Mbps, dropped: {dropped}, {bytes_recvd*8 / 1e6} Mb recvd"
-                )
-                print(len(data))
-
-            magic, data_type, t0, seq_num, ch_count, sample_count = (
-                deserialize_header_ndtp(data)
-            )
-
-            if data_type == DataType.kBroadband:
-                print("Broadband")
-
-            # magic = int.from_bytes(data[0:4], "little")
-            # if magic != 0xC0FFEE00:
-            #     print(f"Invalid magic: {hex(magic)}")
-
-            # recvd_seq_num = int.from_bytes(data[4:8], "little")
-            # if recvd_seq_num != seq_num:
-            #     print(f"Packet out of order: {recvd_seq_num} != {seq_num}")
-            #     dropped += recvd_seq_num - seq_num
-            # seq_num = recvd_seq_num + 1
-
-            start = time.time()
-    end = time.time()
-
-    dur = end - start_sec
-    print(f"Recieved {bytes_recvd*8 / 1e6} Mb in {dur} seconds")
