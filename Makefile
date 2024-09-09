@@ -1,7 +1,7 @@
 PROJECT_NAME := synapsectl
 PROTOC := python -m grpc_tools.protoc
 PROTO_DIR := ./synapse-api
-PROTO_OUT := ./synapse/api
+PROTO_OUT := ./synapse
 PROTOS := $(shell find ${PROTO_DIR} -name '*.proto' | sed 's|${PROTO_DIR}/||')
 
 .PHONY: all
@@ -9,7 +9,7 @@ all: clean generate
 
 .PHONY: clean
 clean:
-	rm -rf bin ${PROTO_OUT}
+	rm -rf bin ${PROTO_OUT}/api*
 
 .PHONY: generate
 generate:

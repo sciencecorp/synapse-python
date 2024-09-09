@@ -1,10 +1,14 @@
+import logging
+
 import grpc
 from google.protobuf.empty_pb2 import Empty
-from synapse.api.api.status_pb2 import StatusCode
-from synapse.api.api.synapse_pb2_grpc import SynapseDeviceStub
+
+from synapse.api.status_pb2 import StatusCode
+from synapse.api.synapse_pb2_grpc import SynapseDeviceStub
 from synapse.config import Config
 
 DEFAULT_SYNAPSE_PORT = 647
+
 
 class Device(object):
     sockets = None
@@ -14,7 +18,6 @@ class Device(object):
             self.uri = uri + f":{DEFAULT_SYNAPSE_PORT}"
         else:
             self.uri = uri
-        
 
         self.channel = grpc.insecure_channel(self.uri)
         self.rpc = SynapseDeviceStub(self.channel)
@@ -54,8 +57,7 @@ class Device(object):
             return None
 
     def configure(self, config: Config):
-        if not isinstance(config, Config):
-            raise ValueError("config must be an instance of Config")
+        assert (isinstance(config, Config), "config must be an instance of Config")
 
         config.set_device(self)
         try:
@@ -64,7 +66,7 @@ class Device(object):
             if self._handle_status_response(response):
                 return response
         except grpc.RpcError as e:
-            print("Error: ", e.details())
+            logging.error("Error: ", e.details())
         return False
 
     def _handle_status_response(self, status):

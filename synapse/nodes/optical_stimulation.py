@@ -1,14 +1,16 @@
 from typing import Optional
 from synapse.channel_mask import ChannelMask
 from synapse.node import Node
-from synapse.api.api.node_pb2 import NodeConfig, NodeType
-from synapse.api.api.nodes.optical_stim_pb2 import OpticalStimConfig
+from synapse.api.node_pb2 import NodeConfig, NodeType
+from synapse.api.nodes.optical_stim_pb2 import OpticalStimConfig
 
 
 class OpticalStimulation(Node):
     type = NodeType.kOpticalStim
 
-    def __init__(self, peripheral_id, bit_width, sample_rate, gain, channel_mask = ChannelMask()):
+    def __init__(
+        self, peripheral_id, bit_width, sample_rate, gain, channel_mask=ChannelMask()
+    ):
         self.channel_mask = channel_mask
         self.peripheral_id = peripheral_id
         self.bit_width = bit_width
@@ -42,5 +44,5 @@ class OpticalStimulation(Node):
             proto.sample_rate,
             proto.gain,
             ChannelMask(proto.pixel_mask),
-        ) 
+        )
         return new_node

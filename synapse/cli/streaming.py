@@ -6,11 +6,14 @@ import struct
 import threading
 import time
 
-from google.protobuf.json_format import Parse, ParseDict
+from google.protobuf.json_format import Parse
 
 from synapse.api.api.datatype_pb2 import DataType
 from synapse.api.api.node_pb2 import NodeType
 from synapse.api.api.synapse_pb2 import DeviceConfiguration
+from synapse.api.datatype_pb2 import DataType
+from synapse.api.node_pb2 import NodeType
+from synapse.api.synapse_pb2 import DeviceConfiguration
 from synapse.channel import Channel
 from synapse.config import Config
 from synapse.device import Device
@@ -27,6 +30,7 @@ def add_commands(subparsers):
     a.add_argument("uri", type=str)
     a.add_argument("node_id", type=int)
     a.add_argument("-c", "--config", type=str, help="Config proto (json)")
+    a.add_argument("-d", "--duration", type=int, help="Duration to read for (s)")
     a.add_argument("-m", "--multicast", type=str, help="Multicast group")
     a.add_argument("-o", "--output", type=str, help="Output file")
     a.add_argument(
@@ -54,9 +58,16 @@ def load_config_from_file(path):
 
 
 def read(args):
+    print("Reading from device's StreamOut Node")
+    print(f" - multicast: {args.multicast if args.multicast else '<disabled>'}")
+
     device = Device(args.uri)
+
+    print("Fetching device info...")
     info = device.info()
-    assert info is not None, "Couldn't get device info"
+    if info is None:
+        print("Couldnt get device info")
+        return
 
     print("Configuring device...")
     if args.config:

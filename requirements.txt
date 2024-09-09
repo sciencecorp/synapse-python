@@ -1,5 +1,7 @@
-grpcio-tools
-protoletariat
+coolname==2.2.0
+grpcio==1.64.1
+grpcio-tools==1.62.2
+protoletariat==3.2.19
 pyserial
 pyzmq
 build

@@ -1,8 +1,8 @@
 from typing import Optional
 from synapse.node import Node
 from synapse.channel import Channel
-from synapse.api.api.node_pb2 import NodeConfig, NodeType
-from synapse.api.api.nodes.electrical_broadband_pb2 import ElectricalBroadbandConfig
+from synapse.api.node_pb2 import NodeConfig, NodeType
+from synapse.api.nodes.electrical_broadband_pb2 import ElectricalBroadbandConfig
 
 
 class ElectricalBroadband(Node):

@@ -1,9 +1,9 @@
 from pathlib import Path
 from synapse.config import Config
 from synapse.device import Device
-from synapse.api.api.synapse_pb2 import DeviceConfiguration
-from synapse.api.api.channel_pb2 import Channel
-from synapse.api.api.query_pb2 import QueryRequest, ImpedanceQuery
+from synapse.api.synapse_pb2 import DeviceConfiguration
+from synapse.api.channel_pb2 import Channel
+from synapse.api.query_pb2 import QueryRequest, ImpedanceQuery
 from google.protobuf import text_format
 from google.protobuf.json_format import Parse
 
