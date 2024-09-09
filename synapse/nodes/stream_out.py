@@ -3,8 +3,8 @@ import struct
 import logging
 from typing import Optional
 from synapse.node import Node
-from synapse.api.api.node_pb2 import NodeConfig, NodeType
-from synapse.api.api.nodes.stream_out_pb2 import StreamOutConfig
+from synapse.api.node_pb2 import NodeConfig, NodeType
+from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
 
 
 class StreamOut(Node):
@@ -23,7 +23,7 @@ class StreamOut(Node):
         if self.__use_multicast:
             data, _ = self.__socket.recvfrom(8192)
         else:
-            
+
             data = self.__socket.recv(4096)
             while (len(data) % 128) != 0:
                 data += self.__socket.recv(4096)
@@ -47,7 +47,11 @@ class StreamOut(Node):
             logging.error("Invalid bind address")
             return None
 
-        addr = self.__multicast_group if self.__multicast_group else self.device.uri.split(":")[0]
+        addr = (
+            self.__multicast_group
+            if self.__multicast_group
+            else self.device.uri.split(":")[0]
+        )
         if addr is None:
             logging.error("Invalid bind address")
             return None
@@ -55,8 +59,8 @@ class StreamOut(Node):
         port = int(bind[1])
         if not port:
             logging.error(f"Invalid bind port. Bind string: {bind}")
-            return None 
-        
+            return None
+
         if self.__use_multicast:
             logging.info(f"Opening UDP multicast socket to {addr}:{port}")
 
@@ -76,11 +80,11 @@ class StreamOut(Node):
                 self.__socket.setsockopt(
                     socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq
                 )
-        else: 
+        else:
             logging.info(f"Opening TCP socket to {addr}:{port}")
             self.__socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.__socket.connect((addr, port))
-        
+
         return self.__socket
 
     def _to_proto(self):
@@ -109,4 +113,3 @@ class StreamOut(Node):
             raise ValueError("proto is not of type StreamOutConfig")
 
         return StreamOut(proto.label, proto.use_multicast, proto.multicast_group)
-

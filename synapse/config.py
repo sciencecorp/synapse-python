@@ -1,5 +1,5 @@
-from synapse.api.api.synapse_pb2 import DeviceConfiguration
-from synapse.api.api.node_pb2 import NodeConnection, NodeType
+from synapse.api.synapse_pb2 import DeviceConfiguration
+from synapse.api.node_pb2 import NodeConnection, NodeType
 from synapse.nodes.electrical_broadband import ElectricalBroadband
 from synapse.nodes.optical_stimulation import OpticalStimulation
 from synapse.nodes.stream_in import StreamIn

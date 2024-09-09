@@ -1,4 +1,3 @@
-
 import time
 
 import cv2
@@ -7,7 +6,7 @@ import numpy as np
 from synapse.device import Device
 from synapse.config import Config
 from synapse.nodes.stream_in import StreamIn
-from synapse.api.api.synapse_pb2 import DeviceConfiguration
+from synapse.api.synapse_pb2 import DeviceConfiguration
 from google.protobuf.json_format import Parse
 
 dev = Device("10.40.61.234:647")

@@ -1,11 +1,12 @@
 import grpc
 import logging
 from google.protobuf.empty_pb2 import Empty
-from synapse.api.api.status_pb2 import StatusCode
-from synapse.api.api.synapse_pb2_grpc import SynapseDeviceStub
+from synapse.api.status_pb2 import StatusCode
+from synapse.api.synapse_pb2_grpc import SynapseDeviceStub
 from synapse.config import Config
 
 DEFAULT_SYNAPSE_PORT = 647
+
 
 class Device(object):
     sockets = None
@@ -15,7 +16,6 @@ class Device(object):
             self.uri = uri + f":{DEFAULT_SYNAPSE_PORT}"
         else:
             self.uri = uri
-        
 
         self.channel = grpc.insecure_channel(self.uri)
         self.rpc = SynapseDeviceStub(self.channel)

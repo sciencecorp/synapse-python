@@ -1,4 +1,4 @@
-from synapse.api.api.node_pb2 import NodeConfig, NodeType
+from synapse.api.node_pb2 import NodeConfig, NodeType
 
 
 class Node(object):
