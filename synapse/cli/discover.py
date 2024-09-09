@@ -1,6 +1,4 @@
-import time
-import socket
-import struct
+from synapse.utils.discover import discover as _discover
 
 BROADCAST_PORT = 6470
 BROADCAST_ADDR = "224.0.0.245"
@@ -17,40 +15,6 @@ def add_commands(subparsers):
 
 
 def discover(args):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(3)
-    ttl = struct.pack("b", 3)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
-
-    devices = []
-
-    try:
-        start_time = time.time()
-
-        sent = sock.sendto(
-            "DISCOVER {}".format(args.auth_code).encode("ascii"),
-            (BROADCAST_ADDR, BROADCAST_PORT),
-        )
-        while True:
-            if time.time() - start_time > 3:
-                break
-            try:
-                data, server = sock.recvfrom(1024)
-            except socket.timeout:
-                continue
-            else:
-                data = data.decode("ascii").split()
-                if data[0] == "ID":
-                    if len(data) != 5:
-                        print("Invalid ID response from {!r}".format(server))
-                        continue
-                    command, serial, capability, port, name = data
-                    print(
-                        "{}:{}   {}   {} ({})".format(
-                            server[0], port, capability, name, serial
-                        )
-                    )
-                else:
-                    print("Unknown response: {!r}".format(command))
-    finally:
-        sock.close()
+    devices = _discover(args.auth_code)
+    for d in devices:
+      print(f"{d.host}:{d.port}   {d.capability}   {d.name} ({d.serial})")
