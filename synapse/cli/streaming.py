@@ -11,10 +11,7 @@ from google.protobuf.json_format import Parse
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.synapse_pb2 import DeviceConfiguration
-from synapse.client import Config, Device
-from synapse.client.nodes.optical_stimulation import OpticalStimulation
-from synapse.client.nodes.stream_in import StreamIn
-from synapse.client.nodes.stream_out import StreamOut
+from synapse.client import Config, Device, OpticalStimulation, StreamIn, StreamOut
 
 NDTP_HEADER_SIZE_BYTES = 19
 
