@@ -10,23 +10,31 @@ logging.basicConfig(level=logging.INFO)
 
 from synapse.server.rpc import serve
 from synapse.server.autodiscovery import MulticastDiscoveryProtocol
+from synapse.server.nodes import SERVER_NODE_OBJECT_MAP
 
 
-RPC_PORT = 647
+ENTRY_DEFAULTS = {
+    "iface_ip": None,
+    "hidden": False,
+    "passphrase": None,
+    "rpc_port": 647,
+    "discovery_port": 6470,
+    "discovery_addr": "224.0.0.245",
+    "server_name": generate_slug(3),
+    "device_serial": "SFI000001",
+}
 
-DISCOVERY_PORT = 6470
-DISCOVERY_ADDR = "224.0.0.245"
 
-SECURITY_MODE = False
-SECURITY_PASSPHRASE = None
-
-SERVER_NAME = generate_slug(3)
-DEVICE_SERIAL = "SFI000001"
-
-
-if __name__ == "__main__":
+def main(
+    node_object_map=SERVER_NODE_OBJECT_MAP, peripherals=[], defaults=ENTRY_DEFAULTS
+):
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument(
+        "--iface-ip",
+        help="IP of the network interface to use for multicast traffic",
+        required=True,
     )
     parser.add_argument(
         "--hidden",
@@ -35,21 +43,26 @@ if __name__ == "__main__":
     )
     parser.add_argument("--passphrase", help="Discovery passphrase")
     parser.add_argument(
-        "--rpc-port", help="Port to listen for RPC requests", type=int, default=RPC_PORT
+        "--rpc-port",
+        help="Port to listen for RPC requests",
+        type=int,
+        default=defaults["rpc_port"],
     )
     parser.add_argument(
         "--discovery-port",
         help="Port to listen for discovery requests",
         type=int,
-        default=6470,
+        default=defaults["discovery_port"],
     )
     parser.add_argument(
         "--discovery-addr",
         help="Multicast address to listen for discovery requests",
-        default=DISCOVERY_ADDR,
+        default=defaults["discovery_addr"],
     )
-    parser.add_argument("--name", help="Device name", default=SERVER_NAME)
-    parser.add_argument("--serial", help="Device serial number", default=DEVICE_SERIAL)
+    parser.add_argument("--name", help="Device name", default=defaults["server_name"])
+    parser.add_argument(
+        "--serial", help="Device serial number", default=defaults["device_serial"]
+    )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose output"
     )
@@ -58,8 +71,18 @@ if __name__ == "__main__":
     if args.hidden and args.passphrase is None:
         parser.error("--hidden requires --passphrase")
 
-    if args.hidden:
-        SECURITY_MODE = True
+    if args.iface_ip is None:
+        parser.error("--iface-ip is required")
+
+    # verify that network interface is real
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        s.bind((args.iface_ip, 8000))
+        logging.info(f"Binding to {s.getsockname()[0]}...")
+    except Exception as e:
+        parser.error("Invalid --iface-ip given, could not bind to interface")
+    finally:
+        s.close()
 
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
@@ -72,19 +95,26 @@ if __name__ == "__main__":
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     sock.bind(("", args.discovery_port))
     group = socket.inet_aton(args.discovery_addr)
-    mreq = struct.pack("4sL", group, socket.INADDR_ANY)
+    mreq = struct.pack("=4sL", group, socket.INADDR_ANY)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
     listen = loop.create_datagram_endpoint(
         lambda: MulticastDiscoveryProtocol(
-            args.name, args.serial, SECURITY_MODE, args.passphrase, args.rpc_port
+            args.name, args.serial, args.hidden, args.passphrase, args.rpc_port
         ),
         sock=sock,
     )
     transport, protocol = loop.run_until_complete(listen)
 
     async def serve_factory():
-        return await serve(args.name, args.serial, args.rpc_port)
+        return await serve(
+            args.name,
+            args.serial,
+            args.rpc_port,
+            args.iface_ip,
+            node_object_map,
+            peripherals,
+        )
 
     main_task = loop.create_task(serve_factory())
     loop.run_until_complete(main_task)

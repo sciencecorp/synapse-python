@@ -1,12 +1,6 @@
 import grpc
 import logging
 
-from synapse.server.nodes import (
-    StreamIn,
-    StreamOut,
-    OpticalStimulation,
-    ElectricalBroadband,
-)
 from synapse.api.node_pb2 import (
     NodeConnection,
 )
@@ -23,22 +17,19 @@ from synapse.api.synapse_pb2_grpc import (
 )
 
 
-async def serve(server_name, device_serial, rpc_port) -> None:
+async def serve(
+    server_name, device_serial, rpc_port, iface_ip, node_object_map, peripherals
+) -> None:
     server = grpc.aio.server()
     add_SynapseDeviceServicer_to_server(
-        SynapseServicer(server_name, device_serial), server
+        SynapseServicer(
+            server_name, device_serial, iface_ip, node_object_map, peripherals
+        ),
+        server,
     )
     server.add_insecure_port("[::]:%d" % rpc_port)
     await server.start()
     await server.wait_for_termination()
-
-
-NODE_TYPE_OBJECT_MAP = {
-    NodeType.kStreamIn: StreamIn,
-    NodeType.kStreamOut: StreamOut,
-    NodeType.kOpticalStim: OpticalStimulation,
-    NodeType.kElectricalBroadband: ElectricalBroadband,
-}
 
 
 class SynapseServicer(SynapseDeviceServicer):
@@ -49,12 +40,16 @@ class SynapseServicer(SynapseDeviceServicer):
     connections = []
     nodes = []
 
-    def __init__(self, name, serial):
+    def __init__(self, name, serial, iface_ip, node_object_map, peripherals):
         self.name = name
         self.serial = serial
+        self.iface_ip = iface_ip
+        self.node_object_map = node_object_map
+        self.peripherals = peripherals
+        self.logger = logging.getLogger("server")
 
     def Info(self, request, context):
-        logging.info("Info()")
+        self.logger.info("Info()")
         connections = [
             NodeConnection(src_node_id=src, dst_node_id=dst)
             for src, dst in self.connections
@@ -70,14 +65,14 @@ class SynapseServicer(SynapseDeviceServicer):
                 sockets=self._sockets_status_info(),
                 state=self.state,
             ),
-            peripherals=[],
+            peripherals=self.peripherals,
             configuration=DeviceConfiguration(
                 nodes=[node.config() for node in self.nodes], connections=connections
             ),
         )
 
     def Configure(self, request, context):
-        logging.info("Configure()")
+        self.logger.info("Configure()")
         if not self._reconfigure(request):
             return Status(
                 message="Failed to configure",
@@ -94,7 +89,7 @@ class SynapseServicer(SynapseDeviceServicer):
         )
 
     def Start(self, request, context):
-        logging.info("Start()")
+        self.logger.info("Start()")
         if not self._start_streaming():
             return Status(
                 message="Failed to start streaming",
@@ -110,7 +105,7 @@ class SynapseServicer(SynapseDeviceServicer):
         )
 
     def Stop(self, request, context):
-        logging.info("Stop()")
+        self.logger.info("Stop()")
         if not self._stop_streaming():
             return Status(
                 message="Failed to stop streaming",
@@ -126,7 +121,7 @@ class SynapseServicer(SynapseDeviceServicer):
         )
 
     def Query(self, request, context):
-        logging.info("Query()")
+        self.logger.info("Query()")
 
         if self.state != DeviceState.kRunning:
             return QueryResponse(
@@ -154,27 +149,39 @@ class SynapseServicer(SynapseDeviceServicer):
     def _reconfigure(self, configuration):
         self.state = DeviceState.kInitializing
 
-        logging.info("Reconfiguring device... with", configuration)
+        self.logger.info("Reconfiguring device...")
+        self.logger.info("Configuration: %s", str(configuration))
+
         for node in self.nodes:
             node.stop()
 
         self.nodes = []
         self.connections = []
 
-        logging.info("Creating nodes...")
+        self.logger.info("Creating nodes...")
         for node in configuration.nodes:
-            if node.type not in list(NODE_TYPE_OBJECT_MAP.keys()):
-                logging.error("Unknown node type: %s" % NodeType.Name(node.type))
-                logging.error("Failed to configure.")
+            if node.type not in list(self.node_object_map.keys()):
+                self.logger.error(
+                    "Unsupported node type: %s" % NodeType.Name(node.type)
+                )
+                self.logger.error("Failed to configure.")
                 return False
 
             config_key = node.WhichOneof("config")
             config = getattr(node, config_key) if config_key else None
 
-            logging.info("Creating %s node(%d)" % (NodeType.Name(node.type), node.id))
-            node = NODE_TYPE_OBJECT_MAP[node.type](node.id)
-            node.configure(config)
-            self.nodes.append(node)
+            self.logger.info(
+                "Creating %s node(%d)" % (NodeType.Name(node.type), node.id)
+            )
+            node = self.node_object_map[node.type](node.id, config)
+            status = node.configure(config, self.iface_ip)
+
+            if not status.ok():
+                self.logger.warning(
+                    f"Failed to configure node {node.id}: {status.message()}"
+                )
+            else:
+                self.nodes.append(node)
 
         for connection in configuration.connections:
             source_node = next(
@@ -184,15 +191,19 @@ class SynapseServicer(SynapseDeviceServicer):
                 (node for node in self.nodes if node.id == connection.dst_node_id), None
             )
             if not source_node or not target_node:
-                logging.error(
-                    "Server: failed to connect nodes %d -> %d"
+                self.logger.error(
+                    "failed to connect nodes %d -> %d"
                     % (connection.src_node_id, connection.dst_node_id)
                 )
                 return False
-            source_node.emit_data = target_node.on_data_received
 
+            self.logger.info(
+                f"Connecting node {source_node.id} to node {target_node.id}"
+            )
+            source_node.emit_data = target_node.on_data_received
             self.connections.append([source_node.id, target_node.id])
-        logging.info(
+
+        self.logger.info(
             "%d nodes received, %d currently loaded"
             % (len(configuration.nodes), len(self.nodes))
         )
@@ -203,21 +214,21 @@ class SynapseServicer(SynapseDeviceServicer):
         return True
 
     def _start_streaming(self):
-        logging.info("Server: starting streaming...")
+        self.logger.info("starting streaming...")
         for node in self.nodes:
             node.start()
         self.state = DeviceState.kRunning
-        logging.info("Server: streaming started.")
+        self.logger.info("streaming started.")
         return True
 
     def _stop_streaming(self):
         if self.state != DeviceState.kRunning:
             return False
-        logging.info("Server: stopping streaming...")
+        self.logger.info("stopping streaming...")
         for node in self.nodes:
             node.stop()
         self.state = DeviceState.kStopped
-        logging.info("Server: streaming stopped.")
+        self.logger.info("streaming stopped.")
         return True
 
     def _sockets_status_info(self):
