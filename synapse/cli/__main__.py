@@ -5,20 +5,11 @@ from importlib import metadata
 from synapse.cli import discover, rpc, scifi_wifi_config, streaming
 
 
-def _description():
-    return "Synapse Device Manager"
-
-
-def _epilog():
-    return "Synapse Device Manager"
-
-
 def main():
     logging.basicConfig(level=logging.INFO)
 
     parser = argparse.ArgumentParser(
-        description=_description(),
-        epilog=_epilog(),
+        description="Synapse Device Manager",
         formatter_class=lambda prog: argparse.HelpFormatter(prog, width=124),
     )
 
