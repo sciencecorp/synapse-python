@@ -55,24 +55,26 @@ As well as a toy device `synapse-server` for local development, or using as the 
 
 This library offers an idiomatic Python interpretation of the Synapse API:
 
-    import synapse.client as syn
+```python
+import synapse.client as syn
 
-    dev = syn.Device("127.0.0.1:647")
+dev = syn.Device("127.0.0.1:647")
 
-    print("Device info: ", dev.info())
+print("Device info: ", dev.info())
 
-    recorder = syn.ElectricalBroadband(2, [syn.Channel(0, 1, 2)])
-    self.out1 = syn.StreamOut()
+recorder = syn.ElectricalBroadband(2, [syn.Channel(0, 1, 2)])
+self.out1 = syn.StreamOut()
 
-    stimulator = syn.OpticalStimulation(syn.ChannelMask(range(0, 1023)))
-    self.stim_in = syn.StreamIn()
+stimulator = syn.OpticalStimulation(syn.ChannelMask(range(0, 1023)))
+self.stim_in = syn.StreamIn()
 
-    config = syn.Config()
-    config.add([recorder, self.out1, stimulator, self.stim_in])
-    config.connect(recorder, self.out1)
-    config.connect(self.stim_in, stimulator)
+config = syn.Config()
+config.add([recorder, self.out1, stimulator, self.stim_in])
+config.connect(recorder, self.out1)
+config.connect(self.stim_in, stimulator)
 
-    dev.start()
+dev.start()
+```
 
 ## Implementing new Synapse devices
 
