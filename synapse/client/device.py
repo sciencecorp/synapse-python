@@ -3,7 +3,7 @@ from google.protobuf.empty_pb2 import Empty
 
 from synapse.api.status_pb2 import StatusCode
 from synapse.api.synapse_pb2_grpc import SynapseDeviceStub
-from synapse.config import Config
+from synapse.client.config import Config
 
 DEFAULT_SYNAPSE_PORT = 647
 

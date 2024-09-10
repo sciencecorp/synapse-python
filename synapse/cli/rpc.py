@@ -1,6 +1,5 @@
 from pathlib import Path
-from synapse.config import Config
-from synapse.device import Device
+from synapse.client import Config, Device
 from synapse.api.synapse_pb2 import DeviceConfiguration
 from synapse.api.channel_pb2 import Channel
 from synapse.api.query_pb2 import QueryRequest, ImpedanceQuery
