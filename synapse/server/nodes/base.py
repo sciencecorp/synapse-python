@@ -15,11 +15,14 @@ class BaseNode(object):
             type=self.type,
         )
 
+    def configure(self, config):
+        raise NotImplementedError
+
     def start(self):
-        pass
+        raise NotImplementedError
 
     def stop(self):
-        pass
+        raise NotImplementedError
 
     def on_data_received(self):
         pass

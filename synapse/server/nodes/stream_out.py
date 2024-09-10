@@ -2,9 +2,7 @@ import logging
 import queue
 import socket
 import threading
-from typing import List
 from synapse.server.nodes import BaseNode
-from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
 
@@ -15,27 +13,17 @@ MULTICAST_TTL = 3
 class StreamOut(BaseNode):
     __n = 0
 
-    def __init__(self, id, config=StreamOutConfig()):
+    def __init__(self, id):
         super().__init__(id, NodeType.kStreamOut)
         self.__i = StreamOut.__n
         StreamOut.__n += 1
         self.__stop_event = threading.Event()
         self.__data_queue = queue.Queue()
 
-        self.data_type: DataType = config.data_type
-        self.multicastGroup: str = (
-            config.multicast_group if config.use_multicast else None
-        )
-        self.shape: List[int] = config.shape
-
-        self.reconfigure(config)
-
     def config(self):
         c = super().config()
 
         o = StreamOutConfig()
-        o.data_type = self.data_type
-        o.shape.extend(self.shape)
 
         if self.multicastGroup:
             o.multicast_group = self.multicastGroup
@@ -43,7 +31,9 @@ class StreamOut(BaseNode):
         c.stream_out.CopyFrom(o)
         return c
 
-    def reconfigure(self, config: StreamOutConfig):
+    def configure(self, config: StreamOutConfig):
+        self.multicastGroup: str = config.multicast_group if config.use_multicast else None
+
         self.__socket = socket.socket(
             socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
         )
@@ -68,6 +58,8 @@ class StreamOut(BaseNode):
             logging.info(
                 f"StreamOut (node {self.id}): created unicast socket on {self.socket}"
             )
+
+        return True
 
     def start(self):
         logging.info("StreamOut (node %d): starting..." % self.id)

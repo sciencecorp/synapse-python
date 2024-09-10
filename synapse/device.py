@@ -1,5 +1,3 @@
-import logging
-
 import grpc
 from google.protobuf.empty_pb2 import Empty
 
@@ -57,16 +55,15 @@ class Device(object):
             return None
 
     def configure(self, config: Config):
-        assert (isinstance(config, Config), "config must be an instance of Config")
+        assert isinstance(config, Config), "config must be an instance of Config"
 
         config.set_device(self)
         try:
-            print(f"Configuring with proto: {config.to_proto()}")
             response = self.rpc.Configure(config.to_proto())
             if self._handle_status_response(response):
                 return response
         except grpc.RpcError as e:
-            logging.error("Error: ", e.details())
+            print("Error: ", e.details())
         return False
 
     def _handle_status_response(self, status):

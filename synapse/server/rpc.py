@@ -172,7 +172,8 @@ class SynapseServicer(SynapseDeviceServicer):
             config = getattr(node, config_key) if config_key else None
 
             logging.info("Creating %s node(%d)" % (NodeType.Name(node.type), node.id))
-            node = NODE_TYPE_OBJECT_MAP[node.type](node.id, config)
+            node = NODE_TYPE_OBJECT_MAP[node.type](node.id)
+            node.configure(config)
             self.nodes.append(node)
 
         for connection in configuration.connections:

@@ -8,14 +8,10 @@ from synapse.server.nodes import BaseNode
 
 
 class StreamIn(BaseNode):
-    def __init__(self, id, config=StreamInConfig()):
+    def __init__(self, id):
         super().__init__(id, NodeType.kStreamIn)
         self.__socket = None
         self.__stop_event = threading.Event()
-        self.data_type = config.data_type
-        self.shape = config.shape
-
-        self.reconfigure(config)
 
     def config(self):
         c = super().config()
@@ -27,7 +23,10 @@ class StreamIn(BaseNode):
         c.stream_in.CopyFrom(i)
         return c
 
-    def reconfigure(self, config: StreamInConfig = StreamInConfig()):
+    def configure(self, config: StreamInConfig = StreamInConfig()):
+        self.data_type = config.data_type
+        self.shape = config.shape
+
         self.__socket = socket.socket(
             socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
         )
