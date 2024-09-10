@@ -1,8 +1,8 @@
 from typing import Optional
-from synapse.channel_mask import ChannelMask
-from synapse.node import Node
 from synapse.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.nodes.optical_stim_pb2 import OpticalStimConfig
+from synapse.client.node import Node
+from synapse.client.channel_mask import ChannelMask
 
 
 class OpticalStimulation(Node):

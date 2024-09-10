@@ -2,7 +2,7 @@ import socket
 import struct
 import logging
 from typing import Optional
-from synapse.node import Node
+from synapse.client.node import Node
 from synapse.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
 

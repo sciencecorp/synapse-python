@@ -29,7 +29,9 @@ def main(
     node_object_map=SERVER_NODE_OBJECT_MAP, peripherals=[], defaults=ENTRY_DEFAULTS
 ):
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="Simple Synapse Device Simulator (Development)",
+        # formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=lambda prog: argparse.HelpFormatter(prog, width=124),
     )
     parser.add_argument(
         "--iface-ip",
@@ -70,9 +72,6 @@ def main(
 
     if args.hidden and args.passphrase is None:
         parser.error("--hidden requires --passphrase")
-
-    if args.iface_ip is None:
-        parser.error("--iface-ip is required")
 
     # verify that network interface is real
     try:

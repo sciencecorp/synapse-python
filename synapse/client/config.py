@@ -1,16 +1,6 @@
 from synapse.api.synapse_pb2 import DeviceConfiguration
-from synapse.api.node_pb2 import NodeConnection, NodeType
-from synapse.nodes.electrical_broadband import ElectricalBroadband
-from synapse.nodes.optical_stimulation import OpticalStimulation
-from synapse.nodes.stream_in import StreamIn
-from synapse.nodes.stream_out import StreamOut
-
-NODE_TYPE_OBJECT_MAP = {
-    NodeType.kStreamIn: StreamIn,
-    NodeType.kStreamOut: StreamOut,
-    NodeType.kOpticalStim: OpticalStimulation,
-    NodeType.kElectricalBroadband: ElectricalBroadband,
-}
+from synapse.api.node_pb2 import NodeConnection
+from synapse.client.nodes import NODE_TYPE_OBJECT_MAP
 
 
 class Config(object):

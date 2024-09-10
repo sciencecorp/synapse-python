@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import queue
-import struct
 import threading
 import time
 
@@ -11,13 +10,8 @@ from google.protobuf.json_format import Parse
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.synapse_pb2 import DeviceConfiguration
-from synapse.config import Config
-from synapse.device import Device
-from synapse.nodes.optical_stimulation import OpticalStimulation
-from synapse.nodes.stream_in import StreamIn
-from synapse.nodes.stream_out import StreamOut
-
-NDTP_HEADER_SIZE_BYTES = 19
+from synapse.client import Config, Device, OpticalStimulation, StreamIn, StreamOut
+from synapse.utils import ndtp
 
 
 def add_commands(subparsers):
@@ -107,29 +101,6 @@ def read(args):
     print("Stopped")
 
 
-def _deserialize_ndtp_header(data):
-    magic, data_type, t0, seq_num, ch_count = struct.unpack(
-        "=Iiqch", data[:NDTP_HEADER_SIZE_BYTES]
-    )
-    if magic != 0xC0FFEE00:
-        print(f"Invalid magic number: {hex(magic)}")
-        return None
-
-    return data_type, t0, int(seq_num), ch_count
-
-
-def _deserialize_ndtp_broadband(t0, ch_count, data):
-    channel_data = data[NDTP_HEADER_SIZE_BYTES:]
-    return_data = [t0]
-    for i in range(ch_count):
-        channel_id, sample_count = struct.unpack("=ii", channel_data[0:8])
-        channel_data = channel_data[8:]
-        samples = struct.unpack(f"={sample_count}h", channel_data[: (2 * sample_count)])
-        channel_data = channel_data[2 * sample_count :]
-        return_data.append((channel_id, samples))
-    return return_data
-
-
 def _data_writer(stop, q, output_file, verbose):
     filename = f"output_{time.strftime('%Y%m%d-%H%M%S')}.json"
     if filename:
@@ -142,7 +113,7 @@ def _data_writer(stop, q, output_file, verbose):
         try:
             data = q.get(True, 1)
 
-            data_type, t0, seq_num, ch_count = _deserialize_ndtp_header(data)
+            data_type, t0, seq_num, ch_count = ndtp.deserialize_header(data)
 
             if data_type == DataType.kBroadband:
                 if verbose:
@@ -155,7 +126,7 @@ def _data_writer(stop, q, output_file, verbose):
 
                 last_seq_num = seq_num
 
-                unpacked_data = _deserialize_ndtp_broadband(t0, ch_count, data)
+                unpacked_data = ndtp.deserialize_broadband(t0, ch_count, data)
 
                 if output_file:
                     fd.write(json.dumps(unpacked_data).encode("utf-8"))
@@ -242,7 +213,6 @@ def write(args):
             sample_rate=1000,
             gain=1,
         )
-
         config.add_node(stream_in)
         config.add_node(optical)
         config.connect(stream_in, optical)

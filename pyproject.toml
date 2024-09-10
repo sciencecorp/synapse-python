@@ -21,4 +21,5 @@ dev = [
 distribution = false
 
 [project.scripts]
-synapsectl = "synapse.cli.main:main"
+synapsectl = "synapse.cli:main"
+synapse-server = "synapse.server:main"

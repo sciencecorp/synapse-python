@@ -1,7 +1,7 @@
 import socket
 import time
 from typing import List, Optional
-from synapse.node import Node
+from synapse.client.node import Node
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.nodes.stream_in_pb2 import StreamInConfig
