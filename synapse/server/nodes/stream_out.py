@@ -4,7 +4,6 @@ import struct
 import threading
 from typing import List, Tuple
 from synapse.server.nodes import BaseNode
-from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
 from synapse.server.status import Status, StatusCode
@@ -63,6 +62,8 @@ class StreamOut(BaseNode):
             f"created multicast socket on {self.socket}, group {self.multicastGroup}"
         )
         return Status()
+
+        return True
 
     def start(self):
         self.logger.info("starting...")

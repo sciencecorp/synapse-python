@@ -173,7 +173,7 @@ class SynapseServicer(SynapseDeviceServicer):
             self.logger.info(
                 "Creating %s node(%d)" % (NodeType.Name(node.type), node.id)
             )
-            node = self.node_object_map[node.type](node.id)
+            node = self.node_object_map[node.type](node.id, config)
             status = node.configure(config, self.iface_ip)
 
             if not status.ok():
