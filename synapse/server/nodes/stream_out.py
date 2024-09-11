@@ -22,6 +22,7 @@ class StreamOut(BaseNode):
         StreamOut.__n += 1
         self.__stop_event = threading.Event()
         self.__data_queue = queue.Queue()
+        self.__sequence_number = 0
 
     def config(self):
         c = super().config()
@@ -121,7 +122,7 @@ class StreamOut(BaseNode):
 
         result = bytearray()
         result.extend(
-            struct.pack("=Iiqch", 0xC0FFEE00, DataType.kBroadband, t0, b"0", len(data))
+            struct.pack("=IiqHh", 0xC0FFEE00, DataType.kBroadband, t0, self.__sequence_number, len(data))
         )
 
         for ch_packet in data:
@@ -131,5 +132,7 @@ class StreamOut(BaseNode):
 
             for value in ch_data:
                 result.extend(struct.pack("h", value))
+
+        self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
 
         return bytes(result)
