@@ -1,10 +1,9 @@
-import logging
 import select
 import socket
 import threading
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_in_pb2 import StreamInConfig
-from synapse.server.nodes import BaseNode
+from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status
 
 
@@ -41,6 +40,9 @@ class StreamIn(BaseNode):
         self.logger.info(f"listening on {self.socket}")
 
         return Status()
+
+    def configure_iface_ip(self, iface_ip):
+        pass
 
     def start(self) -> Status:
         self.logger.info("starting...")

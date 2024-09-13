@@ -3,7 +3,7 @@ import socket
 import struct
 import threading
 from typing import List, Tuple
-from synapse.server.nodes import BaseNode
+from synapse.server.nodes.base import BaseNode
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
@@ -23,21 +23,25 @@ class StreamOut(BaseNode):
         self.__stop_event = threading.Event()
         self.__data_queue = queue.Queue()
         self.__sequence_number = 0
+        self.__iface_ip = None
+        self.__config = None
 
     def config(self):
         c = super().config()
 
-        o = StreamOutConfig()
+        if self.__config:
+            c.stream_out.CopyFrom(self.__config)
 
-        o.multicast_group = self.multicastGroup
-        o.use_multicast = True
-
-        c.stream_out.CopyFrom(o)
         return c
 
-    def configure(self, config: StreamOutConfig, iface_ip) -> Status:
-        if not config.multicast_group:
+    def configure(self, config: StreamOutConfig) -> Status:
+        if not self.__iface_ip:
+            return Status(StatusCode.kUndefinedError, "No interface IP specified")
+
+        if config.use_multicast and not config.multicast_group:
             return Status(StatusCode.kUndefinedError, "No multicast group specified")
+    
+        self.__config = config
 
         self.__socket = socket.socket(
             socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
@@ -47,23 +51,32 @@ class StreamOut(BaseNode):
 
         port = PORT + self.__i
 
-        self.__socket.bind((iface_ip, port))
+        self.__socket.bind((self.__iface_ip, port))
 
-        self.multicastGroup = config.multicast_group
-        mreq = struct.pack(
-            "=4sl", socket.inet_aton(self.multicastGroup), socket.INADDR_ANY
-        )
-        self.__socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-        self.__socket.setsockopt(
-            socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL
-        )
+        if config.use_multicast:
+            mreq = struct.pack(
+                "=4sl", socket.inet_aton(config.multicast_group), socket.INADDR_ANY
+            )
+            self.__socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            self.__socket.setsockopt(
+                socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL
+            )
 
-        self.socket = [self.multicastGroup, port]
+            self.socket = [config.multicast_group, port]
+            self.logger.info(
+                f"created multicast socket on {self.socket}, group {config.multicast_group}"
+            )
+        else:
+            self.socket = [self.__iface_ip, port]
+            self.logger.info(
+                f"created multicast socket on {self.socket}"
+            )
 
-        self.logger.info(
-            f"created multicast socket on {self.socket}, group {self.multicastGroup}"
-        )
+    
         return Status()
+
+    def configure_iface_ip(self, iface_ip):
+        self.__iface_ip = iface_ip
 
     def start(self):
         self.logger.info("starting...")
