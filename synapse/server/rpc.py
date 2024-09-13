@@ -159,10 +159,11 @@ class SynapseServicer(SynapseDeviceServicer):
         self.connections = []
 
         self.logger.info("Creating nodes...")
+        valid_node_types = list(self.node_object_map.keys())
         for node in configuration.nodes:
-            if node.type not in list(self.node_object_map.keys()):
+            if node.type not in valid_node_types:
                 self.logger.error(
-                    "Unsupported node type: %s" % NodeType.Name(node.type)
+                    f"Unsupported node type: {NodeType.Name(node.type)} ({node.type}) (valid nodes: {[NodeType.Name(t) for t in valid_node_types]}) "
                 )
                 self.logger.error("Failed to configure.")
                 return False
@@ -174,7 +175,10 @@ class SynapseServicer(SynapseDeviceServicer):
                 "Creating %s node(%d)" % (NodeType.Name(node.type), node.id)
             )
             node = self.node_object_map[node.type](node.id)
-            status = node.configure(config, self.iface_ip)
+            if node.type in [NodeType.kStreamOut, NodeType.kStreamIn]:
+                node.configure_iface_ip(self.iface_ip)
+
+            status = node.configure(config)
 
             if not status.ok():
                 self.logger.warning(

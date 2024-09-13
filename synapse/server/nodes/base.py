@@ -2,7 +2,7 @@ import logging
 from typing import Tuple
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeConfig, NodeType, NodeSocket
-from synapse.server.status import Status, StatusCode
+from synapse.server.status import Status
 
 
 class BaseNode(object):
@@ -18,10 +18,7 @@ class BaseNode(object):
             type=self.type,
         )
 
-    def configure(self, config, iface_ip) -> Status:
-        raise NotImplementedError
-
-    def configure(self, config):
+    def configure(self, config) -> Status:
         raise NotImplementedError
 
     def start(self):
