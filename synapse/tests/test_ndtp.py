@@ -65,7 +65,7 @@ def test_ndtp_payload_spiketrain():
     assert unpacked == payload
 
 def test_ndtp_header():
-    header = NDTPHeader(MAGIC_HEADER, DataType.kBroadband, 1234567890, 42)
+    header = NDTPHeader(DataType.kBroadband, 1234567890, 42)
     packed = header.pack()
     unpacked = NDTPHeader.unpack(packed)
     assert unpacked == header
@@ -75,7 +75,7 @@ def test_ndtp_header():
         NDTPHeader.unpack(b'\x01\x02\x03\x04' + packed[4:])
 
     # Data too smol
-    with pytest.raises(struct.error):
+    with pytest.raises(ValueError):
         NDTPHeader.unpack(
             struct.pack("<I", MAGIC_HEADER) +
             struct.pack("<I", DataType.kBroadband) +
@@ -83,7 +83,7 @@ def test_ndtp_header():
         )
 
 def test_ndtp_message():
-    header = NDTPHeader(MAGIC_HEADER, DataType.kBroadband, 1234567890, 42)
+    header = NDTPHeader(DataType.kBroadband, 1234567890, 42)
     payload = NDTPPayloadBroadband(1, 3, 16, [1000, 2000, 3000])
     message = NDTPMessage(header, payload, 0xdeadbeef)
     

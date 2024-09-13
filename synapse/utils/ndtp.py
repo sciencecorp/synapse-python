@@ -127,14 +127,13 @@ def deserialize_spiketrain(t0, ch_count, data):
 
 @dataclass
 class NDTPHeader:
-    magic_header: bytes
     data_type: int
     timestamp: int
     seq_number: int
 
     def pack(self):
         return NDTPHeaderStruct.pack(
-            self.magic_header,
+            MAGIC_HEADER,
             self.data_type,
             self.timestamp,
             self.seq_number
@@ -142,12 +141,15 @@ class NDTPHeader:
 
     @staticmethod
     def unpack(data: bytes):
+        if len(data) < NDTPHeaderStruct.size:
+            raise ValueError(f"Invalid header size {len(data)}: expected {NDTPHeaderStruct.size} (got {len(data)})")
+
         magic_header = struct.unpack("<I", data[:4])[0]
         if magic_header != MAGIC_HEADER:
             raise ValueError(f"Invalid magic header {magic_header}: expected {hex(MAGIC_HEADER)}, got {hex(magic_header)}")
 
         _, data_type, timestamp, seq_number = NDTPHeaderStruct.unpack(data)
-        return NDTPHeader(magic_header, data_type, timestamp, seq_number)
+        return NDTPHeader(data_type, timestamp, seq_number)
 
 @dataclass
 class NDTPMessage:

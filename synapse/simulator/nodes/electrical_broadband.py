@@ -1,7 +1,9 @@
+from dataclasses import dataclass
 import math
 import random
 import threading
 import time
+from typing import List
 from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status
 from synapse.api.node_pb2 import NodeType
@@ -10,7 +12,18 @@ from synapse.api.datatype_pb2 import DataType
 
 
 def r_sample(bit_width: int):
-    return random.randint(0, 2 ** bit_width - 1).to_bytes(math.ceil(bit_width / 8), "big")
+    return random.randint(0, 2 ** bit_width - 1)
+
+@dataclass
+class ChannelData:
+    channel_id: int
+    channel_data: List[int]
+
+@dataclass
+class ElectricalBroadbandData:
+    bit_width: int
+    t0: int
+    channel_data: List[ChannelData]
 
 class ElectricalBroadband(BaseNode):
     def __init__(self, id):
@@ -59,18 +72,25 @@ class ElectricalBroadband(BaseNode):
 
         t0 = time.time_ns() // 1000
         while not self.stop_event.is_set():
-
             now = time.time_ns() // 1000
             elapsed =  now -t0
             n_samples = int(sample_rate * elapsed / 1e6)
 
-            data = []
+            data = ElectricalBroadbandData(
+                bit_width=bit_width,
+                t0=t0,
+                channel_data=[]
+            )
             for ch in channels:
                 ch_data = [r_sample(bit_width) for _ in range(n_samples)]
-                print(f" - {ch.id}: {ch_data}")
-                data.append((ch.id, [int.from_bytes(d, "big") for d in ch_data]))
+                data.channel_data.append(
+                    ChannelData(
+                        channel_id=ch.id,
+                        channel_data=ch_data
+                    )
+                )
 
-            self.emit_data((data_type, t0, data))
+            self.emit_data((data_type, data))
 
             t0 = now
 

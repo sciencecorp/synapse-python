@@ -4,6 +4,7 @@ import os
 import queue
 import threading
 import time
+import traceback
 
 from google.protobuf.json_format import Parse
 
@@ -112,6 +113,9 @@ def _data_writer(stop, q, output_file, verbose):
         data = None
         try:
             data = q.get(True, 1)
+            if not data:
+                continue
+
             data_type, t0, seq_num, ch_count = ndtp.deserialize_header(data)
 
             if last_seq_num != 0 and seq_num != last_seq_num + 1:
@@ -130,6 +134,7 @@ def _data_writer(stop, q, output_file, verbose):
 
         except Exception as e:
             print(f"Error processing data: {e}")
+            traceback.print_exc()
             continue
 
 

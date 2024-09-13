@@ -4,14 +4,25 @@
       "type": "kStreamOut",
       "id": 1,
       "stream_out": {
-        "use_multicast": false
+        "use_multicast": true,
+        "multicast_group": "239.0.0.115"
       }
     },
     {
       "type": "kElectricalBroadband",
       "id": 2,
       "electrical_broadband": {
-        "peripheral_id": 3
+        "peripheral_id": 1,
+        "sample_rate": 30000,
+        "bit_width": 12,
+        "gain": 20.0,
+        "channels": [
+          { "id": 0, "electrode_id": 0, "reference_id": 1 },
+          { "id": 1, "electrode_id": 2, "reference_id": 3 },
+          { "id": 2, "electrode_id": 4, "reference_id": 5 },
+          { "id": 3, "electrode_id": 6, "reference_id": 7 },
+          { "id": 4, "electrode_id": 8, "reference_id": 9 }
+        ]
       }
     }
   ],
