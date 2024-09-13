@@ -40,7 +40,7 @@ class StreamOut(BaseNode):
 
         if config.use_multicast and not config.multicast_group:
             return Status(StatusCode.kUndefinedError, "No multicast group specified")
-    
+
         self.__config = config
 
         self.__socket = socket.socket(
@@ -72,7 +72,7 @@ class StreamOut(BaseNode):
                 f"created multicast socket on {self.socket}"
             )
 
-    
+
         return Status()
 
     def configure_iface_ip(self, iface_ip):
@@ -118,34 +118,37 @@ class StreamOut(BaseNode):
             if data[0] == DataType.kBroadband:
                 # detect data type arriving at you (should be packaged in `data` above)
                 # encode it appropriately for NDTP
-                data_type, t0, samples = data
-                encoded_data = self.serialize_broadband_ndtp(t0, samples)
+                data_type, t0, channel_data = data
+
+                for channel in channel_data:
+                    encoded_data = self.serialize_broadband_ndtp(t0, channel)
+                    if len(encoded_data) == 0:
+                        continue
+
+                    try:
+                        self.__socket.sendto(encoded_data, (self.socket[0], self.socket[1]))
+                        self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
+
+                    except Exception as e:
+                        self.logger.error(f"Error sending data: {e}")
             else:
                 self.logger.error(f"Unsupported data type, dropping: {data[0]}")
                 continue
 
-            try:
-                self.__socket.sendto(encoded_data, (self.socket[0], self.socket[1]))
-            except Exception as e:
-                self.logger.error(f"Error sending data: {e}")
-
-    def serialize_broadband_ndtp(self, t0, data: List[Tuple[int, List[int]]]) -> bytes:
+    def serialize_broadband_ndtp(self, t0, data: Tuple[int, List[int]]) -> bytes:
         if len(data) == 0:
             return bytes()
 
         result = bytearray()
         result.extend(
-            struct.pack("=IiqHh", 0xC0FFEE00, DataType.kBroadband, t0, self.__sequence_number, len(data))
+            struct.pack("=IiqHh", 0xC0FFEE00, DataType.kBroadband, t0, self.__sequence_number, 1)
         )
 
-        for ch_packet in data:
-            c = ch_packet[0] - 1
-            ch_data = ch_packet[1]
-            result.extend(struct.pack("ii", c, len(ch_data)))
+        channel_id = data[0] - 1
+        samples = data[1]
+        result.extend(struct.pack("ii", channel_id, len(samples)))
 
-            for value in ch_data:
-                result.extend(struct.pack("h", value))
-
-        self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
+        for sample in samples:
+            result.extend(struct.pack("h", sample))
 
         return bytes(result)
