@@ -19,3 +19,6 @@ generate:
 	${PROTOC} -I=${PROTO_DIR} --python_out=${PROTO_OUT} ${PROTOS}
 	${PROTOC} -I=${PROTO_DIR} --grpc_python_out=${PROTO_OUT} api/synapse.proto
 	protol --create-package --in-place --python-out ${PROTO_OUT} raw bin/descriptors.binpb
+
+test:
+	pytest -v
