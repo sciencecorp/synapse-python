@@ -25,7 +25,7 @@ OUTPUT_PATH = "output.csv"
 DEVICE_URI = "10.40.60.216"
 
 START_CHANNEL = 0
-NUM_CHANNELS = 128
+NUM_CHANNELS = 64
 
 STREAM_DURATION = 10
 
@@ -38,9 +38,8 @@ def load_proto_json(filepath):
 
 dev = Device(DEVICE_URI)
 
-parser = ndtp.Depacketizer() 
-
 data_queue = queue.Queue()
+
 
 def reader(duration, stream_out: StreamOut, stop:threading.Event, verbose: bool): 
     packet_count = 0
@@ -48,8 +47,10 @@ def reader(duration, stream_out: StreamOut, stop:threading.Event, verbose: bool)
     MBps_sum = 0
     bytes_recvd = 0
     start = time.time()
-    seq_num = 0
-    dropped = 0
+
+    tot_time = 0
+    avg_time = 0
+    verbose = True
 
     start_sec = time.time()
     while time.time() - start_sec < duration and not stop.is_set():
@@ -58,19 +59,21 @@ def reader(duration, stream_out: StreamOut, stop:threading.Event, verbose: bool)
             # parser.parse_bytes(data)
             data_queue.put(data)
             dur = time.time() - start
+            tot_time += dur
             packet_count += 1
-            MBps = (len(data) / dur) / 1e6
-            MBps_sum += MBps
+            avg_time = tot_time / packet_count
+            #MBps = (len(data) / dur) / 1e6
+            #MBps_sum += MBps
             bytes_recvd += len(data)
-            avg_bit_rate = (MBps_sum / packet_count) * 8
+            # avg_bit_rate = (MBps_sum / packet_count) * 8
             if verbose and packet_count % 100 == 0:
-                logging.info(f"Recieved {packet_count} packets, {bytes_recvd*8 / 1e6} Mb, {avg_bit_rate} MB/s avg")
+                print(f"Recieved {packet_count} packets, {bytes_recvd*8 / 1e6} Mb, {avg_time * 1000} ms per packet")
 
             start = time.time()
     end = time.time()
 
     dur = end - start_sec
-    print(f"Recieved {bytes_recvd*8 / 1e6} Mb in {dur} seconds. Avg bit rate: {bytes_recvd*8 / dur / 1e6} Mb/s")
+    print(f"Recieved {bytes_recvd*8 / 1e6} Mb in {dur} seconds. Avg bit rate: {bytes_recvd*8 / dur / 1e6} Mb/s. Packets: {packet_count}")
     dev.stop()
     stop.set()
 
@@ -123,6 +126,7 @@ class CSVWriter():
                 
 
 csv_writer = CSVWriter(OUTPUT_PATH)
+parser = ndtp.Depacketizer(input_queue=data_queue, output_queue=queue.Queue()) 
 # bin_writer = BinaryWriter("output.bin", data_queue)
 
 writer = csv_writer
@@ -175,33 +179,32 @@ stop = threading.Event()
 
 read_thread = threading.Thread(target=reader, args=(STREAM_DURATION, stream_out, stop, True))
 write_thread = threading.Thread(target=writer.write_worker, args=(stop,))
+parse_thread = threading.Thread(target=parser.parse_worker, args=(stop,))
 
 read_thread.start()
 write_thread.start()
+parse_thread.start()
 
 try:
     tot_time = 0
     packets = 0
-    while not stop.is_set():
+    avg_time = 0
+    while not stop.is_set() or not parser.packet_queue.empty():
         start = time.time()
-        data = data_queue.get()
-        parser.parse_bytes(data)
 
         new_packet: Optional[ndtp.NBS12Packet] = parser.get_packet()
-        avg_time = 0
-        while new_packet:
-            for channel_id, samples in new_packet.as_sample_data().items():
-                csv_writer.add_samples(channel_id, samples)
-            dur = time.time() - start
-            packets += 1
-            tot_time += dur
-            avg_time = tot_time / packets
+        if new_packet is None:
+            continue
+        sample_data = new_packet.as_sample_data()
+        for channel_id, samples in sample_data.items():
+            csv_writer.add_samples(channel_id, samples)
+        dur = time.time() - start
+        packets += 1
+        tot_time += dur
+        avg_time = tot_time / packets
 
-            new_packet = parser.get_packet()
-
-        dur = time.time() - start 
-        if packets % 100 == 0:
-            print(f"Processed {packets} packet in {dur} seconds, avg: {avg_time}, len {len(data)}")
+        if packets % 100 == 0 and packets > 0:
+            print(f"Processed {packets} packet in {tot_time} seconds, avg: {avg_time *1000} ms")
 
 
 
@@ -210,7 +213,15 @@ except KeyboardInterrupt:
     
 
 
-print(info)
+print(f"Parsed: {parser.packets_parsed}")
+print(f"Min payload: {parser.min_payload}, Max payload: {parser.max_payload}")
+
+print(f"Data queue size: {data_queue.qsize()}")
+
+# print(f"data {data_queue.get()}")
+print(f"Packet queue size: {parser.packet_queue.qsize()}")
+# print(f"Write queue size: ")
+
 print(" - done.")
 
 print("waiting on read thread...")

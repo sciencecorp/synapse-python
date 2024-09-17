@@ -1,6 +1,8 @@
 from enum import Enum
 from queue import Queue
 from typing import Optional 
+import threading
+import time
 from synapse.ndtp import packet
 
 
@@ -14,12 +16,18 @@ class ParseState(Enum):
     CRC = 7
 
 class Depacketizer():
-    def __init__ (self):
+    def __init__ (self, input_queue: Queue, output_queue: Queue):
         self.parse_state = ParseState.VERSION_DTYPE
         self.tmp_packet = None
 
-        self.packet_queue = Queue() 
+        self.packet_queue = output_queue 
+        self.input_queue = input_queue
         self.seq_num = 0
+
+        self.packets_parsed = 0
+
+        self.min_payload = 1000000
+        self.max_payload = 0
 
     def parse_bytes(self, packet_bytes: bytes):
         channels = {}
@@ -86,19 +94,44 @@ class Depacketizer():
                     self.tmp_packet.payload += packet_bytes[i:i+payload_remaining]
                 # print(f"Payload: {self.tmp_packet.payload.hex()}")
                 self.parse_state = ParseState.CRC
-                self.packet_queue.put(self.tmp_packet)
 
                 i += payload_remaining
             elif self.parse_state == ParseState.CRC:
                 self.tmp_packet.crc16 = int.from_bytes(packet_bytes[i:i+2])
-                if not self.tmp_packet.crc_check():
+                if self.tmp_packet.crc_check():
+                    self.packet_queue.put(self.tmp_packet)
+                    self.packets_parsed += 1
+
+                    if len(self.tmp_packet.payload) < self.min_payload:
+                        self.min_payload = len(self.tmp_packet.payload)
+                    if len(self.tmp_packet.payload) > self.max_payload:
+                        self.max_payload = len(self.tmp_packet.payload)
+                else:
                     print(f"CRC check failed: {self.tmp_packet}")
+                
                 i += 2
                 self.parse_state = ParseState.VERSION_DTYPE
 
     def get_packet(self) -> Optional[packet.Packet]:
         try:
-            next_packet = self.packet_queue.get(block=False)
+            next_packet = self.packet_queue.get(timeout=.1)
             return next_packet
         except:
-            return False
+            return None
+    
+    def parse_worker(self, stop: threading.Event):
+        start = time.time()
+        itr = 0
+        tot = 0
+        avg = 0
+        while not stop.is_set() or not self.input_queue.empty():
+            unparsed = self.input_queue.get() 
+            self.parse_bytes(unparsed)
+            dur = time.time() - start
+            itr += 1
+            tot += dur
+            avg = tot / itr
+            if itr % 100 == 0 and itr > 0:
+                print(f"Parsed {self.packets_parsed} chunks in {tot} seconds, avg: {avg*1000} ms per chunk")
+            start = time.time()
+        print("Parser done")

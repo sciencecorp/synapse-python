@@ -1,6 +1,6 @@
 {
   "query_type": "kImpedance",
   "impedance_query": {
-    "electrode_ids": [1] 
+    "electrode_ids": [1, 2] 
   }
 }

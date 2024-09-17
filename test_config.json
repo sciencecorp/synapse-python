@@ -11,7 +11,9 @@
       "type": "kElectricalBroadband",
       "id": 2,
       "electrical_broadband": {
-        "peripheral_id": 3
+        "peripheral_id": 3,
+        "sample_rate": 16000,
+        "bit_width": 12
       }
     }
   ],
