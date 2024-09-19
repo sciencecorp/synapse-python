@@ -75,18 +75,20 @@ class SpikeDetect(BaseNode):
                 self.logger.warning("Received non-broadband data")
                 continue
 
-            spike_times = []
+            spike_counts = []
             for channel in samples:
                 channel_id = channel[0]
-                for i, sample in enumerate(channel[1]):
-                    sample_time = t0 + i / sample_rate
+                spike_count = 0
 
-                    if (
-                        np.abs(sample) > self.threshold_uV
-                        and sample_time - self.last_spike_times[channel_id]
-                        > REFRACTORY_PERIOD_S
-                    ):
-                        spike_times.append((channel_id, sample_time))
+                for i, sample in enumerate(channel[1]):
+                    threshold_crossed = np.abs(sample) > self.threshold_uV
+                    sample_time = t0 + i / sample_rate
+                    since_last_spike = sample_time - self.last_spike_times[channel_id]
+
+                    if threshold_crossed and since_last_spike > REFRACTORY_PERIOD_S:
+                        spike_count += 1
                         self.last_spike_times[channel_id] = sample_time
 
-            self.emit_data((DataType.kSpiketrain, t0, spike_times))
+                spike_counts.append(spike_count)
+
+            self.emit_data((DataType.kSpiketrain, t0, spike_counts))

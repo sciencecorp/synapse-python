@@ -17,7 +17,7 @@ def deserialize_header(data):
     return data_type, t0, int(seq_num), ch_count
 
 
-def deserialize_broadband(t0, ch_count, data):
+def deserialize_broadband(ch_count, data):
     channel_data = data[NDTP_HEADER_SIZE_BYTES:]
     return_data = [t0]
     for i in range(ch_count):
@@ -27,6 +27,10 @@ def deserialize_broadband(t0, ch_count, data):
         channel_data = channel_data[2 * sample_count :]
         return_data.append((channel_id, samples))
     return return_data
+
+
+def deserialize_spiketrain(ch_count, data):
+    return [struct.unpack("B", data[i : i + 1])[0] for i in range(ch_count)]
 
 
 @dataclass
