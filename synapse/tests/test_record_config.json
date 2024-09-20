@@ -1,0 +1,24 @@
+{
+  "nodes": [
+    {
+      "type": "kStreamOut",
+      "id": 1,
+      "stream_out": {
+        "use_multicast": false
+      }
+    },
+    {
+      "type": "kElectricalBroadband",
+      "id": 2,
+      "electrical_broadband": {
+        "peripheral_id": 3
+      }
+    }
+  ],
+  "connections": [
+    {
+      "src_node_id": 2,
+      "dst_node_id": 1
+    }
+  ]
+}

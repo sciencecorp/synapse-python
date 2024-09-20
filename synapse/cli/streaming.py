@@ -72,7 +72,7 @@ def read(args):
             logging.error("No StreamOut node found in config")
             return
         channels = []
-        base_channel = 192
+        base_channel = 0
         window = 64
         for i in range(base_channel, base_channel + window):
             channels.append(Channel(i, 2*i, 2*i+1))
