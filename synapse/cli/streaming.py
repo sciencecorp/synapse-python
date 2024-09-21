@@ -125,7 +125,8 @@ def _data_writer(stop, q, output_file, verbose):
                 unpacked_data = ndtp.deserialize_spiketrain(t0, ch_count, data)
 
             if unpacked_data is not None:
-                fd.write(json.dumps([t0, unpacked_data]).encode("utf-8"))
+                fd.write(json.dumps(unpacked_data).encode("utf-8"))
+                fd.write(b"\n")
 
         except Exception as e:
             print(f"Error processing data: {e}")
