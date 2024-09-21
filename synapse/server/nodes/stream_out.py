@@ -132,7 +132,7 @@ class StreamOut(BaseNode):
         if len(encoded_data) == 0:
             return
         try:
-            self.__socket.sendto(encoded_data, self.socket)
+            self.__socket.sendto(encoded_data, (self.socket[0], self.socket[1]))
             self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
         except Exception as e:
             self.logger.error(f"Error sending data: {e}")
