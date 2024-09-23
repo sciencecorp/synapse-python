@@ -82,15 +82,25 @@ class SpectralFilter(BaseNode):
 
         self.__data_queue.put(data)
 
-    def apply_filter(self, channel_id, samples):
-        if self.channel_states[channel_id] is None:
-            zi = signal.lfilter_zi(self.b, self.a)
-            self.channel_states[channel_id] = zi * samples[0]
+    def apply_filter(self, sample_data):
+        # vectorize sample data so we can apply the filter to all channels at once
+        channel_ids, samples = zip(*sample_data)
+        samples_array = np.array([np.frombuffer(s, dtype=np.int16) for s in samples])
 
-        filtered, self.channel_states[channel_id] = signal.lfilter(
-            self.b, self.a, samples, zi=self.channel_states[channel_id]
-        )
-        return filtered
+        filtered_samples = np.zeros_like(samples_array)
+        for i, channel_id in enumerate(channel_ids):
+            if self.channel_states[channel_id] is None:
+                zi = signal.lfilter_zi(self.b, self.a)
+                self.channel_states[channel_id] = zi * samples_array[i, 0]
+
+            filtered_samples[i], self.channel_states[channel_id] = signal.lfilter(
+                self.b, self.a, samples_array[i], zi=self.channel_states[channel_id]
+            )
+
+        return [
+            [channel_id, filtered_samples[i].tolist()]
+            for i, channel_id in enumerate(channel_ids)
+        ]
 
     def run(self):
         while not self.__stop_event.is_set():
@@ -100,12 +110,6 @@ class SpectralFilter(BaseNode):
                 continue
 
             data_type, t0, sample_data, sample_rate = data
-
-            filtered_sample_data = []
-            for channel_id, samples in sample_data:
-                filtered_samples = self.apply_filter(channel_id, np.array(samples))
-                filtered_sample_data.append(
-                    [channel_id, [int(sample) for sample in filtered_samples]]
-                )
+            filtered_sample_data = self.apply_filter(sample_data)
 
             self.emit_data((DataType.kBroadband, t0, filtered_sample_data, sample_rate))
