@@ -5,6 +5,7 @@ from synapse.client.node import Node
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.nodes.stream_in_pb2 import StreamInConfig
+from synapse.utils.types import SynapseData
 
 MULTICAST_TTL = 3
 
@@ -13,11 +14,12 @@ class StreamIn(Node):
     type = NodeType.kStreamIn
 
     def __init__(self, data_type: DataType, shape: List[int]):
+        self.__sequence_number = 0
         self.__socket = socket.socket(
             socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
         )
 
-    def write(self, data):
+    def write(self, data: SynapseData):
         if self.device is None:
             return False
 
@@ -38,13 +40,35 @@ class StreamIn(Node):
             return False
         port = int(port)
 
-        try:
-            self.__socket.sendto(data, (host, port))
-            # https://stackoverflow.com/questions/21973661/os-x-udp-send-error-55-no-buffer-space-available
-            time.sleep(0.00001)
-        except Exception as e:
-            print(f"Error sending data: {e}")
+        packets = self._pack(data)
+
+        for packet in packets:
+            try:
+                self.__socket.sendto(packet, (host, port))
+                # https://stackoverflow.com/questions/21973661/os-x-udp-send-error-55-no-buffer-space-available
+                time.sleep(0.00001)
+            except Exception as e:
+                print(f"Error sending data: {e}")
         return True
+
+    def _pack(self, data: SynapseData) -> List[bytes]:
+        packets = []
+        if type(data) == ElectricalBroadbandData:
+            packets.append(data.pack(self.__sequence_number))
+            self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
+
+        elif type(data) == SpiketrainData:
+            packets.append(data.pack(self.__sequence_number))
+            self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
+
+        elif type(data) == bytes:
+            packets.append(data)
+            self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
+
+        else:
+            raise ValueError(f"Unknown data type: {type(data)}")
+
+        return packets
 
     def _to_proto(self):
         n = NodeConfig()

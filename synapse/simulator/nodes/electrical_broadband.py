@@ -4,26 +4,17 @@ import random
 import threading
 import time
 from typing import List
-from synapse.server.nodes.base import BaseNode
-from synapse.server.status import Status
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.electrical_broadband_pb2 import ElectricalBroadbandConfig
 from synapse.api.datatype_pb2 import DataType
+from synapse.server.nodes.base import BaseNode
+from synapse.server.status import Status
+from synapse.utils.types import ElectricalBroadbandData
 
 
 def r_sample(bit_width: int):
     return random.randint(0, 2 ** bit_width - 1)
 
-@dataclass
-class ChannelData:
-    channel_id: int
-    channel_data: List[int]
-
-@dataclass
-class ElectricalBroadbandData:
-    bit_width: int
-    t0: int
-    channel_data: List[ChannelData]
 
 class ElectricalBroadband(BaseNode):
     def __init__(self, id):
@@ -67,8 +58,6 @@ class ElectricalBroadband(BaseNode):
         sample_rate = c.sample_rate if c.sample_rate else 16000
         data_type = DataType.kBroadband
 
-        self.logger.info(f" - bit_width: {bit_width} ({math.ceil(bit_width / 8)} bytes, { 2 ** bit_width - 1} max)")
-        self.logger.info(f" - sample_rate: {sample_rate}")
 
         t0 = time.time_ns() // 1000
         while not self.stop_event.is_set():
@@ -79,12 +68,12 @@ class ElectricalBroadband(BaseNode):
             data = ElectricalBroadbandData(
                 bit_width=bit_width,
                 t0=t0,
-                channel_data=[]
+                channels=[]
             )
             for ch in channels:
                 ch_data = [r_sample(bit_width) for _ in range(n_samples)]
-                data.channel_data.append(
-                    ChannelData(
+                data.channels.append(
+                    ElectricalBroadbandData.ChannelData(
                         channel_id=ch.id,
                         channel_data=ch_data
                     )

@@ -1,112 +1,204 @@
-import struct
+import binascii
 from dataclasses import dataclass
-from typing import List
+import struct
+import math
+from typing import List, Tuple
 from synapse.api.datatype_pb2 import DataType
 
 
-NDTPHeaderStruct = struct.Struct("<IIQH")
-NDTP_HEADER_SIZE_BYTES = NDTPHeaderStruct.size
+NDTP_VERSION = 1
 
-MAGIC_HEADER = 0xC0FFEE00
+def convert_to_hex(byte_string):
+    # Convert the input string to bytes if it's not already
+    if isinstance(byte_string, str):
+        byte_string = byte_string.encode('latin-1')
+    
+    # Convert each byte to its two-character hexadecimal representation with '\x' prefix
+    hex_values = ['\\x' + f'{b:02x}' for b in byte_string]
+    
+    # Join the hex values into a single string
+    formatted_hex = ''.join(hex_values)
+    
+    return formatted_hex
 
-def to_bytes(values: List[int], bit_width: int) -> bytes:
+def bytes_to_binary(data: bytes, start_bit: int) -> str:
+    binary_string = ""
+    for byte in data:
+        binary_string += bin(byte)[2:].zfill(8)
+    # add space after every 8 bits
+    binary_string = binary_string[start_bit:]
+    binary_string = ' '.join([binary_string[i:i+8] for i in range(0, len(binary_string), 8)])
+    return binary_string
+
+'''
+Packs a list of integers into a byte array, using the specified bit width for each value.
+
+Can append to an existing byte array, and will correctly handle the case where
+the end of the existing array is not byte aligned (and may contain a partial byte at the end).
+'''
+def to_bytes(values: List[int], bit_width: int, existing: bytearray = None, writing_bit_offset: int = 0) -> Tuple[bytearray, int]:
     if bit_width <= 0:
         raise ValueError("bit width must be > 0")
     
-    result = bytearray()
-    current_byte = 0
-    bits_in_current_byte = 0
+    truncate_bytes = writing_bit_offset // 8
+    writing_bit_offset = writing_bit_offset % 8
+
+    result = existing[truncate_bytes:] if existing is not None else bytearray()
+    continue_last = existing is not None and writing_bit_offset > 0
+    current_byte = result[-1] if result and writing_bit_offset > 0 else 0
+    bits_in_current_byte = writing_bit_offset
 
     for value in values:
         if value < 0 or value >= (1 << bit_width):
-            raise ValueError(f"alue {value} doesn't fit in {bit_width} bits")
+            raise ValueError(f"value {value} doesn't fit in {bit_width} bits")
 
         remaining_bits = bit_width
         while remaining_bits > 0:
+            available_bits = 8 - bits_in_current_byte
+            bits_to_write = min(available_bits, remaining_bits)
+            
+            shift = remaining_bits - bits_to_write
+            bits_to_add = (value >> shift) & ((1 << bits_to_write) - 1)
+            
+            current_byte |= bits_to_add << (available_bits - bits_to_write)
+            
+            remaining_bits -= bits_to_write
+            bits_in_current_byte += bits_to_write
+
             if bits_in_current_byte == 8:
-                result.append(current_byte)
+                if continue_last:
+                    result[-1] = current_byte
+                    continue_last = False
+                else:
+                    result.append(current_byte)
                 current_byte = 0
                 bits_in_current_byte = 0
-
-            bits_to_add = min(8 - bits_in_current_byte, remaining_bits)
-            shift = remaining_bits - bits_to_add
-            mask = ((1 << bits_to_add) - 1) << shift
-            bits = (value & mask) >> shift
-
-            current_byte |= bits << (8 - bits_in_current_byte - bits_to_add)
-            bits_in_current_byte += bits_to_add
-            remaining_bits -= bits_to_add
 
     if bits_in_current_byte > 0:
         result.append(current_byte)
 
-    return bytes(result)
+    return result, bits_in_current_byte
+
 '''
-Pack a list of integers into a byte array, using the specified bit width for each value.
+Parses a list of integers from a byte array, using the specified bit width for each value.
 
 A 'count' parameter can be used if the number of values and their bit widths do not pack neatly into whole bytes.
 '''
-def to_ints(data: bytes, bit_width: int, count: int = 0) -> List[int]:
+def to_ints(data: bytes, bit_width: int, count: int = 0, start_bit: int = 0) -> Tuple[List[int], int]:
     if bit_width <= 0:
         raise ValueError("bit width must be > 0")
 
-    result = []
+    o_start_bit = start_bit
+    o_data = data
+    truncate_bytes = start_bit // 8
+    start_bit = start_bit % 8
+
+    data = data[truncate_bytes:]
+    
+
+    if len(data) < bit_width * count / 8:
+        raise ValueError(f"insufficient data for {count} x {bit_width} bit values (expected {math.ceil(bit_width * count / 8)} bytes, given {len(data)} bytes)")
+
+    values = []
     current_value = 0
     bits_in_current_value = 0
     mask = (1 << bit_width) - 1
+    total_bits_read = 0
 
-    for byte in data:
-        for bit_index in range(7, -1, -1):
+    for byte_index, byte in enumerate(data):
+        start = start_bit if byte_index == 0 else 0
+        for bit_index in range(7 - start, -1, -1):
             bit = (byte >> bit_index) & 1
             current_value = (current_value << 1) | bit
             bits_in_current_value += 1
+            total_bits_read += 1
 
             if bits_in_current_value == bit_width:
-                result.append(current_value & mask)
+                values.append(current_value & mask)
                 current_value = 0
                 bits_in_current_value = 0
 
-    if bits_in_current_value == bit_width:
-        result.append(current_value & mask)
+            if count > 0 and len(values) == count:
+                end_bit = (start_bit + total_bits_read)
+                return values, end_bit, data
 
-    elif bits_in_current_value != 0 and count == 0:
-        raise ValueError(f"{bits_in_current_value} bits left over, not enough to form a complete value of bit width {bit_width}")
-    
+    if bits_in_current_value > 0:
+        if bits_in_current_value == bit_width:
+            values.append(current_value & mask)
+        elif count == 0:
+            raise ValueError(f"{bits_in_current_value} bits left over, not enough to form a complete value of bit width {bit_width}")
+
     if count > 0:
-        result = result[:count]
+        values = values[:count]
     
-    return result
+    end_bit = (start_bit + total_bits_read)
+    return values, end_bit, data
 
 @dataclass
 class NDTPPayloadBroadband:
-    channel_id: int
-    sample_count: int
-    bit_width: int
-    channel_data: List[int]
+    @dataclass
+    class ChannelData:
+        channel_id: int                                                         # 24-bit
+        channel_data: List[int]                                                 # bit_width * num_samples bits
 
-    Header = struct.Struct("<IIB")
-
+    bit_width: int                                                              # 8-bit
+    channels: List[ChannelData]
+    
     def pack(self):
-        payload = bytes()
-        payload += NDTPPayloadBroadband.Header.pack(
-            self.channel_id,
-            self.sample_count,
-            self.bit_width
+        n_channels = len(self.channels)
+
+        payload = bytearray()
+
+        payload += struct.pack("<B", self.bit_width)
+        
+        payload += struct.pack("<BBB", 
+            (n_channels >> 16) & 0xFF,
+            (n_channels >> 8) & 0xFF,
+            n_channels & 0xFF
         )
-        payload += to_bytes(self.channel_data, self.bit_width)
+
+        # packed data is not byte aligned, we do not add padding, so we need to pack the data manually
+        b_offset = 0
+        for c in self.channels:
+            payload, b_offset = to_bytes([c.channel_id], 24, payload, b_offset)
+            payload, b_offset = to_bytes([len(c.channel_data)], 16, payload, b_offset)
+            payload, b_offset = to_bytes(c.channel_data, self.bit_width, payload, b_offset)
+
         return payload
     
     @staticmethod
     def unpack(data: bytes):
-        h_size = NDTPPayloadBroadband.Header.size
-        channel_id, sample_count, bit_width = NDTPPayloadBroadband.Header.unpack(data[:h_size])
-        channel_data = to_ints(data[h_size:], bit_width, sample_count)
-        return NDTPPayloadBroadband(
-            channel_id,
-            sample_count,
-            bit_width,
-            channel_data
-        )
+        if len(data) < 4:
+            raise ValueError(f"Invalid broadband data size {len(data)}: expected at least 4 bytes")
+
+        bit_width = struct.unpack("<B", data[0:1])[0]
+        num_channels = (data[1] << 16) | (data[2] << 8) | data[3]
+
+        payload = data[4:]
+        end_bit = 0
+
+        channels = []
+        for c in range(num_channels):
+            start_bit = end_bit
+            a, end_bit, payload = to_ints(payload, 24, 1, end_bit)
+
+            channel_id = a[0]
+
+            b, end_bit, payload = to_ints(payload, 16, 1, end_bit)
+            num_samples = b[0]
+
+            channel_data, end_bit, payload = to_ints(payload, bit_width, num_samples, end_bit)
+            num_bytes = math.floor(bit_width * num_samples / 8)
+
+            channels.append(
+                NDTPPayloadBroadband.ChannelData(
+                    channel_id=channel_id,
+                    channel_data=channel_data,
+                )
+            )
+
+        return NDTPPayloadBroadband(bit_width, channels)
+
 
 @dataclass
 class NDTPPayloadSpiketrain:
@@ -114,11 +206,16 @@ class NDTPPayloadSpiketrain:
     spike_counts: List[int]
 
     def pack(self):
-        return to_bytes(self.spike_counts, self.BIT_WIDTH)
+        payload = bytearray()
+        payload += struct.pack("<L", len(self.spike_counts))
+        payload, _ = to_bytes(self.spike_counts, self.BIT_WIDTH, payload)
+        return payload
     
     @staticmethod
     def unpack(data: bytes):
-        return NDTPPayloadSpiketrain(to_ints(data, NDTPPayloadSpiketrain.BIT_WIDTH))
+        num_spikes = struct.unpack("<L", data[:4])[0]
+        unpacked, _, ___ = to_ints(data[4:], NDTPPayloadSpiketrain.BIT_WIDTH, num_spikes)
+        return NDTPPayloadSpiketrain(unpacked)
 
 def deserialize_spiketrain(t0, ch_count, data):
     spike_data = data[NDTP_HEADER_SIZE_BYTES:]
@@ -131,9 +228,12 @@ class NDTPHeader:
     timestamp: int
     seq_number: int
 
+    STRUCT = struct.Struct("<BIQH")
+
     def pack(self):
-        return NDTPHeaderStruct.pack(
-            MAGIC_HEADER,
+        version = NDTP_VERSION.to_bytes(1, byteorder='big')
+        return NDTPHeader.STRUCT.pack(
+            NDTP_VERSION,
             self.data_type,
             self.timestamp,
             self.seq_number
@@ -141,35 +241,53 @@ class NDTPHeader:
 
     @staticmethod
     def unpack(data: bytes):
-        if len(data) < NDTPHeaderStruct.size:
-            raise ValueError(f"Invalid header size {len(data)}: expected {NDTPHeaderStruct.size} (got {len(data)})")
+        if len(data) < NDTPHeader.STRUCT.size:
+            raise ValueError(f"Invalid header size {len(data)}: expected {NDTPHeader.STRUCT.size} (got {len(data)})")
 
-        magic_header = struct.unpack("<I", data[:4])[0]
-        if magic_header != MAGIC_HEADER:
-            raise ValueError(f"Invalid magic header {magic_header}: expected {hex(MAGIC_HEADER)}, got {hex(magic_header)}")
+        version = struct.unpack("<B", data[:1])[0]
+        if version != NDTP_VERSION:
+            raise ValueError(f"Incompatible version {version}: expected {hex(NDTP_VERSION)}, got {hex(version)}")
 
-        _, data_type, timestamp, seq_number = NDTPHeaderStruct.unpack(data)
+        _, data_type, timestamp, seq_number = NDTPHeader.STRUCT.unpack(data)
         return NDTPHeader(data_type, timestamp, seq_number)
 
 @dataclass
 class NDTPMessage:
     header: NDTPHeader
     payload: any
-    crc32: int
+
+    @staticmethod
+    def crc16(data: bytes, poly: int = 0x8005, init: int = 0xFFFF) -> int:
+        crc = init
+
+        for byte in data:
+            crc ^= (byte << 8)
+            for _ in range(8):
+                if crc & 0x8000:
+                    crc = (crc << 1) ^ poly
+                else:
+                    crc <<= 1
+
+        return crc & 0xFFFF
+
+    @staticmethod
+    def crc16_verify(data: bytes, crc16: int) -> bool:
+        return NDTPMessage.crc16(data) == crc16
 
     def pack(self):
         header = self.header.pack()
         payload = self.payload.pack() if self.payload else bytes()
-        crc32 = struct.pack("<I", self.crc32)
 
-        return header + payload + crc32
+        crc16 = struct.pack("<H", NDTPMessage.crc16(header + payload))
+
+        return header + payload + crc16
 
     @staticmethod
     def unpack(data: bytes):
-        header = NDTPHeader.unpack(data[:NDTP_HEADER_SIZE_BYTES])
-        crc32 = struct.unpack("<I", data[-4:])[0]
+        header = NDTPHeader.unpack(data[:NDTPHeader.STRUCT.size])
+        crc16 = struct.unpack("<H", data[-2:])[0]
 
-        pbytes = data[NDTP_HEADER_SIZE_BYTES:-4]
+        pbytes = data[NDTPHeader.STRUCT.size:-2]
         pdtype = header.data_type
 
         if pdtype == DataType.kBroadband:
@@ -178,6 +296,9 @@ class NDTPMessage:
             payload = NDTPPayloadSpiketrain.unpack(pbytes)
         else:
             raise ValueError(f"unknown data type {pdtype}")
-        
-        return NDTPMessage(header, payload, crc32)
+
+        if not NDTPMessage.crc16_verify(data[:-2], crc16):
+            raise ValueError(f"CRC16 verification failed (expected {crc16}, got {crc16_expected})")
+
+        return NDTPMessage(header, payload)
 

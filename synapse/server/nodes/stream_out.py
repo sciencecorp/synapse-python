@@ -8,7 +8,8 @@ from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
 from synapse.server.status import Status, StatusCode
-from synapse.utils.ndtp import NDTPHeader, NDTPMessage, NDTPPayloadBroadband
+from synapse.utils.ndtp import NDTPHeader, NDTPMessage, NDTPPayloadBroadband, NDTPPayloadSpiketrain
+from synapse.utils.types import SynapseData
 
 PORT = 6480
 MULTICAST_TTL = 3
@@ -95,7 +96,7 @@ class StreamOut(BaseNode):
         self.logger.info("stopped")
         return Status()
 
-    def on_data_received(self, data):
+    def on_data_received(self, data: SynapseData):
         self.__data_queue.put(data)
 
     def run(self):
@@ -113,29 +114,8 @@ class StreamOut(BaseNode):
             if data is None or len(data) < 1:
                 continue
 
-            packets = []
-
-            dtype = data[0]
-            if dtype == DataType.kBroadband:
-                _, bdata = data
-
-                for c in bdata.channel_data:
-                    p = self.serialize_broadband_ndtp(bdata.t0, c.channel_id, c.channel_data)
-                    if p is None:
-                        self.logger.error("Failed to serialize broadband data for channel {channel}")
-                        continue
-                    packets.append(p)
-
-
-            elif dtype == DataType.kSpiketrain:
-                data_type, t0, spike_counts = data
-                encoded_data = self.serialize_spiketrain_ndtp(t0, spike_counts)
-                packets.append(encoded_data)
-
-            else:
-                self.logger.error(f"Unsupported data type, dropping: {dtype}")
-                continue
-
+            dtype, data = data
+            packets = self._pack(dtype, data)
 
             for packet in packets:
                 try:
@@ -143,25 +123,21 @@ class StreamOut(BaseNode):
                 except Exception as e:
                     self.logger.error(f"Error sending data: {e}")
 
-    def serialize_broadband_ndtp(self, t0, channel_id, channel_data=[], bit_width=16) -> Optional[bytes]:
-        if len(channel_data) == 0:
-            return None
+    def _pack(self, dtype, data: SynapseData) -> List[bytes]:
+        packets = []
+        if dtype == DataType.kBroadband:
+            packets.append(data.pack(self.__sequence_number))
+            self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
 
-        self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
+        elif dtype == DataType.kSpiketrain:
+            packets.append(data.pack(self.__sequence_number))
+            self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
 
-        message = NDTPMessage(
-            header=NDTPHeader(
-                data_type=DataType.kBroadband,
-                timestamp=t0,
-                seq_number=self.__sequence_number
-            ),
-            payload=NDTPPayloadBroadband(
-                channel_id=channel_id,
-                sample_count=len(channel_data),
-                bit_width=bit_width,
-                channel_data=channel_data
-            ),
-            crc32=0x000000
-        )
+        elif dtype == DataType.kUnknown:
+            packets.append(data)
+            self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
 
-        return message.pack()
+        else:
+            self.logger.error(f"Unsupported data type, dropping: {dtype}")
+
+        return packets
