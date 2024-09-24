@@ -1,9 +1,11 @@
+import dataclasses
 import json
 import logging
 import os
 import queue
 import threading
 import time
+import traceback
 
 from google.protobuf.json_format import Parse
 
@@ -12,7 +14,14 @@ from synapse.api.node_pb2 import NodeType
 from synapse.api.synapse_pb2 import DeviceConfiguration
 from synapse.client import Config, Device, OpticalStimulation, StreamIn, StreamOut
 from synapse.utils import ndtp
+from synapse.utils.types import ElectricalBroadbandData
 
+
+class DataclassJSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if dataclasses.is_dataclass(o):
+            return dataclasses.asdict(o)
+        return super().default(o)
 
 def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device's StreamOut node")
@@ -21,7 +30,7 @@ def add_commands(subparsers):
     a.add_argument("-c", "--config", type=str, help="Config proto (json)")
     a.add_argument("-d", "--duration", type=int, help="Duration to read for (s)")
     a.add_argument("-m", "--multicast", type=str, help="Multicast group")
-    a.add_argument("-o", "--output", type=str, help="Output file")
+    a.add_argument("-o", "--output", type=str, help="Output filename (json)")
     a.add_argument(
         "-v",
         "--verbose",
@@ -44,7 +53,6 @@ def load_config_from_file(path):
         data = f.read()
         proto = Parse(data, DeviceConfiguration())
         return Config.from_proto(proto)
-
 
 def read(args):
     device = Device(args.uri)
@@ -80,12 +88,13 @@ def read(args):
 
     stop = threading.Event()
     q = queue.Queue()
-    thread = threading.Thread(
-        target=_data_writer, args=(stop, q, args.output, args.verbose)
-    )
 
     try:
-        thread.start()
+        if args.output:
+            thread = threading.Thread(
+                target=_data_writer, args=(stop, q, args.output, args.verbose)
+            )
+            thread.start()
         _read_worker(stream_out, q, args.verbose)
     except KeyboardInterrupt:
         pass
@@ -101,8 +110,8 @@ def read(args):
     print("Stopped")
 
 
-def _data_writer(stop, q, output_file, verbose):
-    filename = f"output_{time.strftime('%Y%m%d-%H%M%S')}.json"
+def _data_writer(stop, q, filename="output", verbose=False):
+    filename = f"{filename}_{time.strftime('%Y%m%d-%H%M%S')}.json"
     if filename:
         fd = open(filename, "wb")
 
@@ -112,24 +121,15 @@ def _data_writer(stop, q, output_file, verbose):
         data = None
         try:
             data = q.get(True, 1)
-            data_type, t0, seq_num, ch_count = ndtp.deserialize_header(data)
+            if not data:
+                continue
 
-            if last_seq_num != 0 and seq_num != last_seq_num + 1:
-                print(f"Dropped packets out of order: {seq_num} != {last_seq_num + 1}")
-            last_seq_num = seq_num
-
-            unpacked_data = None
-            if data_type == DataType.kBroadband:
-                unpacked_data = ndtp.deserialize_broadband(t0, ch_count, data)
-            elif data_type == DataType.kSpiketrain:
-                unpacked_data = ndtp.deserialize_spiketrain(t0, ch_count, data)
-
-            if unpacked_data is not None:
-                fd.write(json.dumps(unpacked_data).encode("utf-8"))
-                fd.write(b"\n")
+            fd.write(json.dumps(data, cls=DataclassJSONEncoder).encode("utf-8"))
+            fd.write(b"\n")
 
         except Exception as e:
             print(f"Error processing data: {e}")
+            traceback.print_exc()
             continue
 
 
@@ -144,24 +144,26 @@ def _read_worker(stream_out: StreamOut, q: queue.Queue, verbose: bool):
     start_sec = time.time()
     while time.time() - start_sec < 1 * 60:
         data = stream_out.read()
-        if data is not None:
-            # forward data to async thread for writing to terminal or disk by
-            # adding it to the queue
-            q.put(data)
 
-            # generate some benchmarking stats
-            dur = time.time() - start
-            packet_count += 1
-            MBps = (len(data) / dur) / 1e6
-            MBps_sum += MBps
-            bytes_recvd += len(data)
-            avg_bit_rate = MBps_sum / packet_count
-            if verbose and packet_count % 10000 == 0:
-                logging.info(
-                    f"Recieved {packet_count} packets: inst: {MBps} Mbps, avg: {avg_bit_rate} Mbps, dropped: {dropped}, {bytes_recvd*8 / 1e6} Mb recvd"
-                )
-                print(len(data))
-            start = time.time()
+        if not data:
+            continue;
+        # forward data to async thread for writing to terminal or disk by
+        # adding it to the queue
+        q.put(data)
+
+        # generate some benchmarking stats
+        dur = time.time() - start
+        packet_count += 1
+        # MBps = (len(data) / dur) / 1e6
+        # MBps_sum += MBps
+        # bytes_recvd += len(data)
+        # avg_bit_rate = MBps_sum / packet_count
+        # if verbose and packet_count % 10000 == 0:
+        #     logging.info(
+        #         f"Recieved {packet_count} packets: inst: {MBps} Mbps, avg: {avg_bit_rate} Mbps, dropped: {dropped}, {bytes_recvd*8 / 1e6} Mb recvd"
+        #     )
+        #     print(len(data))
+        start = time.time()
     end = time.time()
 
     dur = end - start_sec

@@ -2,12 +2,14 @@ import queue
 import socket
 import struct
 import threading
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 from synapse.server.nodes.base import BaseNode
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
 from synapse.server.status import Status, StatusCode
+from synapse.utils.ndtp import NDTPHeader, NDTPMessage, NDTPPayloadBroadband, NDTPPayloadSpiketrain
+from synapse.utils.types import SynapseData
 
 PORT = 6480
 MULTICAST_TTL = 3
@@ -94,7 +96,7 @@ class StreamOut(BaseNode):
         self.logger.info("stopped")
         return Status()
 
-    def on_data_received(self, data):
+    def on_data_received(self, data: SynapseData):
         self.__data_queue.put(data)
 
     def run(self):
@@ -112,64 +114,26 @@ class StreamOut(BaseNode):
             if data is None or len(data) < 1:
                 continue
 
-            if data[0] == DataType.kBroadband:
-                data_type, t0, channel_data, sample_rate = data
+            _, data = data
+            packets = self._pack(data)
 
-                for channel in channel_data:
-                    encoded_data = self.serialize_broadband_ndtp(t0, channel)
-                    self.send_data(encoded_data)
+            for packet in packets:
+                try:
+                    self.__socket.sendto(packet, (self.socket[0], self.socket[1]))
+                except Exception as e:
+                    self.logger.error(f"Error sending data: {e}")
 
-            elif data[0] == DataType.kSpiketrain:
-                data_type, t0, spike_counts = data
-                encoded_data = self.serialize_spiketrain_ndtp(t0, spike_counts)
-                self.send_data(encoded_data)
+    def _pack(self, data: SynapseData) -> List[bytes]:
+        packets = []
 
-            else:
-                self.logger.error(f"Unsupported data type, dropping: {data[0]}")
-                continue
+        if hasattr(data, 'pack'):
+            try:
+                packets.append(data.pack(self.__sequence_number))
+            except Exception as e:
+                raise ValueError(f"Error packing data: {e}")
+        elif type(data) is bytes:
+            packets.append(data)
+        else:
+            raise ValueError(f"Invalid payload: {type(data)}, {data}")
 
-    def send_data(self, encoded_data):
-        if len(encoded_data) == 0:
-            return
-        try:
-            self.__socket.sendto(encoded_data, (self.socket[0], self.socket[1]))
-            self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
-        except Exception as e:
-            self.logger.error(f"Error sending data: {e}")
-
-    def serialize_header(self, t0, data_type, seq_num, ch_count):
-        return struct.pack(
-            "=IiqHh",
-            0xC0FFEE00,
-            data_type,
-            t0,
-            seq_num,
-            ch_count,
-        )
-
-    def serialize_broadband_ndtp(self, t0, data: Tuple[int, List[int]]) -> bytes:
-        result = bytearray(
-            self.serialize_header(t0, DataType.kBroadband, self.__sequence_number, 1)
-        )
-
-        channel_id = data[0] - 1
-        samples = data[1]
-        result.extend(struct.pack("ii", channel_id, len(samples)))
-
-        for sample in samples:
-            result.extend(struct.pack("h", sample))
-
-        return bytes(result)
-
-    def serialize_spiketrain_ndtp(self, t0, spike_counts: List[int]) -> bytes:
-        result = bytearray(
-            self.serialize_header(
-                t0, DataType.kSpiketrain, self.__sequence_number, len(spike_counts)
-            )
-        )
-
-        for count in spike_counts:
-            # using a full byte for now, for readability, but we could use a lot fewer
-            result.extend(struct.pack("B", min(count, 255)))
-
-        return bytes(result)
+        return packets

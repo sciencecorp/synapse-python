@@ -5,6 +5,7 @@ from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_in_pb2 import StreamInConfig
 from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status
+from synapse.utils.types import SynapseData
 
 
 class StreamIn(BaseNode):
@@ -69,8 +70,26 @@ class StreamIn(BaseNode):
                 ready = select.select([self.__socket], [], [], 1)
                 if ready[0]:
                     data, _ = self.__socket.recvfrom(1024)
-                    self.emit_data(data)
+                    unpacked = self._unpack(data)
+                    self.emit_data(unpacked)
             except Exception as e:
                 self.logger.error(f"Error receiving data: {e}")
 
         self.logger.info("exited thread")
+
+    def _unpack(self, data: bytes) -> SynapseData:
+        u = None
+        try:
+            u = NDTPMessage.unpack(data)
+        except Exception as e:
+            self.logger.error(f"Failed to unpack NDTPMessage: {e}")
+            return data
+
+        h = u.header
+        if h.data_type == DataType.kBroadband:
+            return ElectricalBroadbandData.from_ndtp_message(u)
+        elif h.data_type == DataType.kSpiketrain:
+            return SpiketrainData.from_ndtp_message(u)
+        else:
+            self.logger.error(f"Unknown data type: {h.data_type}")
+            return data

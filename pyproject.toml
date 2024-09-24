@@ -15,6 +15,7 @@ license = {text = "TBD"}
 
 [tool.pdm.dev-dependencies]
 dev = [
+    "pytest"
 ]
 
 [tool.pdm]

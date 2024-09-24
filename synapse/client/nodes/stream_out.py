@@ -1,11 +1,14 @@
 import socket
 import struct
 import logging
+import traceback
 from typing import Optional
 from synapse.client.node import Node
+from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
-
+from synapse.utils.ndtp import NDTPMessage
+from synapse.utils.types import ElectricalBroadbandData, SpiketrainData, SynapseData
 
 class StreamOut(Node):
     type = NodeType.kStreamOut
@@ -16,7 +19,7 @@ class StreamOut(Node):
         self.__multicast_group: Optional[str] = multicast_group
         self.__use_multicast = use_multicast
 
-    def read(self) -> Optional[bytes]:
+    def read(self) -> Optional[SynapseData]:
         if self.__socket is None:
             if self.open_socket() is None:
                 return None
@@ -27,7 +30,8 @@ class StreamOut(Node):
             data = self.__socket.recv(4096)
             while (len(data) % 128) != 0:
                 data += self.__socket.recv(4096)
-        return data
+                
+        return self._unpack(data)
 
     def open_socket(self):
         print("Opening socket")
@@ -103,6 +107,25 @@ class StreamOut(Node):
 
         n.stream_out.CopyFrom(o)
         return n
+
+    def _unpack(self, data: bytes) -> SynapseData:
+        u = None
+        try:
+            u = NDTPMessage.unpack(data)
+
+        except Exception as e:
+            logging.error(f"Failed to unpack NDTPMessage: {e}")
+            traceback.print_exc()
+            return data
+
+        h = u.header
+        if h.data_type == DataType.kBroadband:
+            return ElectricalBroadbandData.from_ndtp_message(u)
+        elif h.data_type == DataType.kSpiketrain:
+            return SpiketrainData.from_ndtp_message(u)
+        else:
+            logging.error(f"Unknown data type: {h.data_type}")
+            return data
 
     @staticmethod
     def _from_proto(proto: Optional[StreamOutConfig]):
