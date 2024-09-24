@@ -114,8 +114,8 @@ class StreamOut(BaseNode):
             if data is None or len(data) < 1:
                 continue
 
-            dtype, data = data
-            packets = self._pack(dtype, data)
+            _, data = data
+            packets = self._pack(data)
 
             for packet in packets:
                 try:
@@ -123,21 +123,17 @@ class StreamOut(BaseNode):
                 except Exception as e:
                     self.logger.error(f"Error sending data: {e}")
 
-    def _pack(self, dtype, data: SynapseData) -> List[bytes]:
+    def _pack(self, data: SynapseData) -> List[bytes]:
         packets = []
-        if dtype == DataType.kBroadband:
-            packets.append(data.pack(self.__sequence_number))
-            self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
 
-        elif dtype == DataType.kSpiketrain:
-            packets.append(data.pack(self.__sequence_number))
-            self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
-
-        elif dtype == DataType.kUnknown:
+        if hasattr(data, 'pack'):
+            try:
+                packets.append(data.pack(self.__sequence_number))
+            except Exception as e:
+                raise ValueError(f"Error packing data: {e}")
+        elif type(data) is bytes:
             packets.append(data)
-            self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
-
         else:
-            self.logger.error(f"Unsupported data type, dropping: {dtype}")
+            raise ValueError(f"Invalid payload: {type(data)}, {data}")
 
         return packets
