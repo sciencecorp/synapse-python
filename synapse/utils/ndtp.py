@@ -40,13 +40,12 @@ Packs a list of integers into a byte array, using the specified bit width for ea
 Can append to an existing byte array, and will correctly handle the case where
 the end of the existing array is not byte aligned (and may contain a partial byte at the end).
 """
-
-
 def to_bytes(
     values: List[int],
     bit_width: int,
     existing: bytearray = None,
     writing_bit_offset: int = 0,
+    signed: bool = False,
 ) -> Tuple[bytearray, int]:
     if bit_width <= 0:
         raise ValueError("bit width must be > 0")
@@ -60,8 +59,20 @@ def to_bytes(
     bits_in_current_byte = writing_bit_offset
 
     for value in values:
-        if value < 0 or value >= (1 << bit_width):
-            raise ValueError(f"value {value} doesn't fit in {bit_width} bits")
+        if signed:
+            min_value = -(1 << (bit_width - 1))
+            max_value = (1 << (bit_width - 1)) - 1
+            if value < min_value or value > max_value:
+                raise ValueError(f"signed value {value} doesn't fit in {bit_width} bits")
+            # Convert to two's complement representation
+            if value < 0:
+                value = (1 << bit_width) + value
+        else:
+            if value < 0:
+                raise ValueError("unsigned packing specified, but value is negative")
+
+            if value >= (1 << bit_width):
+                raise ValueError(f"unsigned value {value} doesn't fit in {bit_width} bits")
 
         remaining_bits = bit_width
         while remaining_bits > 0:
@@ -94,13 +105,16 @@ def to_bytes(
 """
 Parses a list of integers from a byte array, using the specified bit width for each value.
 
-A 'count' parameter can be used if the number of values and their bit widths do not pack neatly into whole bytes.
+A 'count' parameter can be used if the expected number of values does not pack neatly into whole byte, with their given bit_width.
 """
 
 
+import math
+
 def to_ints(
-    data: bytes, bit_width: int, count: int = 0, start_bit: int = 0
-) -> Tuple[List[int], int]:
+    data: bytes, bit_width: int, count: int = 0, start_bit: int = 0,
+    signed: bool = False
+) -> Tuple[List[int], int, bytes]:
     if bit_width <= 0:
         raise ValueError("bit width must be > 0")
 
@@ -109,7 +123,7 @@ def to_ints(
 
     data = data[truncate_bytes:]
 
-    if len(data) < bit_width * count / 8:
+    if count > 0 and len(data) < math.ceil(bit_width * count / 8):
         raise ValueError(
             f"insufficient data for {count} x {bit_width} bit values (expected {math.ceil(bit_width * count / 8)} bytes, given {len(data)} bytes)"
         )
@@ -129,7 +143,11 @@ def to_ints(
             total_bits_read += 1
 
             if bits_in_current_value == bit_width:
-                values.append(current_value & mask)
+                if signed and (current_value & (1 << (bit_width - 1))):
+                    current_value = current_value - (1 << bit_width)
+                else:
+                    current_value = current_value & mask
+                values.append(current_value)
                 current_value = 0
                 bits_in_current_value = 0
 
@@ -139,7 +157,11 @@ def to_ints(
 
     if bits_in_current_value > 0:
         if bits_in_current_value == bit_width:
-            values.append(current_value & mask)
+            if signed and (current_value & (1 << (bit_width - 1))):
+                current_value = current_value - (1 << bit_width)
+            else:
+                current_value = current_value & mask
+            values.append(current_value)
         elif count == 0:
             raise ValueError(
                 f"{bits_in_current_value} bits left over, not enough to form a complete value of bit width {bit_width}"
@@ -159,6 +181,7 @@ class NDTPPayloadBroadband:
         channel_id: int  # 24-bit
         channel_data: List[int]  # bit_width * num_samples bits
 
+    signed: bool
     bit_width: int
     sample_rate: int
     channels: List[ChannelData]
@@ -179,7 +202,7 @@ class NDTPPayloadBroadband:
             n_channels & 0xFF,
         )
 
-        payload += struct.pack("<H", self.sample_rate & 0xFFFF)
+        payload += struct.pack("<H", self.sample_rate)
 
         # packed data is not byte aligned, we do not add padding, so we need to pack the data manually
         b_offset = 0
@@ -204,8 +227,9 @@ class NDTPPayloadBroadband:
         bit_width = struct.unpack("<B", data[0:1])[0] >> 1
         signed = (struct.unpack("<B", data[0:1])[0] & 1) == 1
         num_channels = (data[1] << 16) | (data[2] << 8) | data[3]
+        sample_rate = struct.unpack("<H", data[4:6])
 
-        payload = data[4:]
+        payload = data[6:]
         end_bit = 0
 
         channels = []
@@ -225,10 +249,11 @@ class NDTPPayloadBroadband:
                 NDTPPayloadBroadband.ChannelData(
                     channel_id=channel_id,
                     channel_data=channel_data,
+                    sample_rate=sample_rate
                 )
             )
 
-        return NDTPPayloadBroadband(bit_width, channels)
+        return NDTPPayloadBroadband(signed, bit_width, sample_rate, channels)
 
 
 @dataclass

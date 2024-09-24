@@ -11,6 +11,7 @@ def test_packing_broadband_data():
     bdata = ElectricalBroadbandData(
       bit_width = 12,
       t0 = 1234567890,
+      sample_rate=3,
       channels = [
           ElectricalBroadbandData.ChannelData(
               channel_id=0,

@@ -19,6 +19,8 @@ def test_to_bytes():
     assert to_bytes([1, 2, 3, 2, 1], bit_width=2) == (bytearray(b'\x6E\x40'), 2)
 
     assert to_bytes([7, 5, 3, 1], bit_width=12) == (bytearray(b'\x00\x70\x05\x00\x30\x01'), 0)
+
+    assert to_bytes([-7, -5, -3, -1], bit_width=12, signed=True) == (bytearray(b'\xFF\x9F\xFB\xFF\xDF\xFF'), 0)
     
     assert to_bytes(
         [7, 5, 3],
@@ -26,6 +28,14 @@ def test_to_bytes():
         existing=bytearray(b'\x01\x00'),
         writing_bit_offset=4
     ) == (bytearray(b'\x01\x00\x07\x00\x50\x03'), 0)
+    
+    assert to_bytes(
+        [-7, -5, -3],
+        bit_width=12,
+        existing=bytearray(b'\x01\x00'),
+        writing_bit_offset=4,
+        signed=True
+    ) == (bytearray(b'\x01\x0F\xF9\xFF\xBF\xFD'), 0)
 
     assert to_bytes([7, 5, 3], bit_width=12) == (bytearray(b'\x00p\x05\x000'), 4)
 
@@ -70,6 +80,10 @@ def test_to_ints():
     assert res == [7, 5, 3]
     assert offset == 36 + 4
 
+    res, offset, _ = to_ints(b'\xFF\xF9\xFF\xBF\xFD', 12, 3, 4, signed=True)
+    assert res == [-7, -5, -3]
+    assert offset == 36 + 4
+
     arry = bytearray(b'\x6E\x40')
     res, offset, arry = to_ints(arry, 2, 1)
     assert res == [1]
@@ -102,6 +116,8 @@ def test_to_ints():
 
 def test_ndtp_payload_broadband():
     bit_width = 12
+    sample_rate = 3,
+    signed = False,
     channels = [
         NDTPPayloadBroadband.ChannelData(
             channel_id=0,
@@ -117,7 +133,7 @@ def test_ndtp_payload_broadband():
         )
     ]
 
-    payload = NDTPPayloadBroadband(bit_width, channels)
+    payload = NDTPPayloadBroadband(signed, bit_width, sample_rate, channels)
     p = payload.pack()
 
     u = NDTPPayloadBroadband.unpack(p)
@@ -212,6 +228,8 @@ def test_ndtp_message():
     header = NDTPHeader(DataType.kBroadband, timestamp=1234567890, seq_number=42)
     payload = NDTPPayloadBroadband(
         bit_width=12,
+        sample_rate=100,
+        signed=False,
         channels=[
             NDTPPayloadBroadband.ChannelData(
                 channel_id=c,
