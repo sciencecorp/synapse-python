@@ -1,14 +1,11 @@
 import queue
 import socket
 import struct
-import threading
-from typing import List, Optional, Tuple
+from typing import List
 from synapse.server.nodes.base import BaseNode
-from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
 from synapse.server.status import Status, StatusCode
-from synapse.utils.ndtp import NDTPHeader, NDTPMessage, NDTPPayloadBroadband, NDTPPayloadSpiketrain
 from synapse.utils.types import SynapseData
 
 PORT = 6480
@@ -22,8 +19,6 @@ class StreamOut(BaseNode):
         super().__init__(id, NodeType.kStreamOut)
         self.__i = StreamOut.__n
         StreamOut.__n += 1
-        self.__stop_event = threading.Event()
-        self.__data_queue = queue.Queue()
         self.__sequence_number = 0
         self.__iface_ip = None
         self.__config = None
@@ -77,44 +72,21 @@ class StreamOut(BaseNode):
     def configure_iface_ip(self, iface_ip):
         self.__iface_ip = iface_ip
 
-    def start(self):
-        self.logger.info("starting...")
-        self.thread = threading.Thread(target=self.run, args=())
-        self.thread.start()
-        self.logger.info("started")
-        return Status()
-
     def stop(self):
-        self.logger.info("stopping...")
-        if not hasattr(self, "thread") or not self.thread.is_alive():
-            return
-
-        self.__stop_event.set()
-        self.thread.join()
         self.__socket.close()
         self.__socket = None
-        self.logger.info("stopped")
-        return Status()
-
-    def on_data_received(self, data: SynapseData):
-        self.__data_queue.put(data)
+        return super().stop()
 
     def run(self):
-        self.logger.info("starting to send data...")
-        while not self.__stop_event.is_set():
+        while not self.stop_event.is_set():
             if not self.socket:
                 self.logger.error("socket not configured")
                 return
             try:
-                data = self.__data_queue.get(True, 1)
+                data = self.data_queue.get(True, 1)
             except queue.Empty:
-                self.logger.warning("queue is empty")
                 continue
 
-            if data is None or len(data) < 1:
-                continue
-
-            _, data = data
             packets = self._pack(data)
 
             for packet in packets:
@@ -126,13 +98,12 @@ class StreamOut(BaseNode):
     def _pack(self, data: SynapseData) -> List[bytes]:
         packets = []
 
-        if hasattr(data, 'pack'):
+        if hasattr(data, "pack"):
             try:
                 packets.append(data.pack(self.__sequence_number))
+                self.__sequence_number += 1
             except Exception as e:
                 raise ValueError(f"Error packing data: {e}")
-        elif type(data) is bytes:
-            packets.append(data)
         else:
             raise ValueError(f"Invalid payload: {type(data)}, {data}")
 
