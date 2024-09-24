@@ -29,6 +29,11 @@ def deserialize_broadband(t0, ch_count, data):
     return return_data
 
 
+def deserialize_spiketrain(t0, ch_count, data):
+    spike_data = data[NDTP_HEADER_SIZE_BYTES:]
+    return [t0, [struct.unpack("B", spike_data[i : i + 1])[0] for i in range(ch_count)]]
+
+
 @dataclass
 class NDTPHeader:
     version: int

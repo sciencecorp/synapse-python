@@ -68,10 +68,7 @@ class StreamOut(BaseNode):
             )
         else:
             self.socket = [self.__iface_ip, port]
-            self.logger.info(
-                f"created multicast socket on {self.socket}"
-            )
-
+            self.logger.info(f"created multicast socket on {self.socket}")
 
         return Status()
 
@@ -116,32 +113,43 @@ class StreamOut(BaseNode):
                 continue
 
             if data[0] == DataType.kBroadband:
-                # detect data type arriving at you (should be packaged in `data` above)
-                # encode it appropriately for NDTP
-                data_type, t0, channel_data = data
+                data_type, t0, channel_data, sample_rate = data
 
                 for channel in channel_data:
                     encoded_data = self.serialize_broadband_ndtp(t0, channel)
-                    if len(encoded_data) == 0:
-                        continue
+                    self.send_data(encoded_data)
 
-                    try:
-                        self.__socket.sendto(encoded_data, (self.socket[0], self.socket[1]))
-                        self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
+            elif data[0] == DataType.kSpiketrain:
+                data_type, t0, spike_counts = data
+                encoded_data = self.serialize_spiketrain_ndtp(t0, spike_counts)
+                self.send_data(encoded_data)
 
-                    except Exception as e:
-                        self.logger.error(f"Error sending data: {e}")
             else:
                 self.logger.error(f"Unsupported data type, dropping: {data[0]}")
                 continue
 
-    def serialize_broadband_ndtp(self, t0, data: Tuple[int, List[int]]) -> bytes:
-        if len(data) == 0:
-            return bytes()
+    def send_data(self, encoded_data):
+        if len(encoded_data) == 0:
+            return
+        try:
+            self.__socket.sendto(encoded_data, (self.socket[0], self.socket[1]))
+            self.__sequence_number = (self.__sequence_number + 1) & 0xFFFF
+        except Exception as e:
+            self.logger.error(f"Error sending data: {e}")
 
-        result = bytearray()
-        result.extend(
-            struct.pack("=IiqHh", 0xC0FFEE00, DataType.kBroadband, t0, self.__sequence_number, 1)
+    def serialize_header(self, t0, data_type, seq_num, ch_count):
+        return struct.pack(
+            "=IiqHh",
+            0xC0FFEE00,
+            data_type,
+            t0,
+            seq_num,
+            ch_count,
+        )
+
+    def serialize_broadband_ndtp(self, t0, data: Tuple[int, List[int]]) -> bytes:
+        result = bytearray(
+            self.serialize_header(t0, DataType.kBroadband, self.__sequence_number, 1)
         )
 
         channel_id = data[0] - 1
@@ -150,5 +158,18 @@ class StreamOut(BaseNode):
 
         for sample in samples:
             result.extend(struct.pack("h", sample))
+
+        return bytes(result)
+
+    def serialize_spiketrain_ndtp(self, t0, spike_counts: List[int]) -> bytes:
+        result = bytearray(
+            self.serialize_header(
+                t0, DataType.kSpiketrain, self.__sequence_number, len(spike_counts)
+            )
+        )
+
+        for count in spike_counts:
+            # using a full byte for now, for readability, but we could use a lot fewer
+            result.extend(struct.pack("B", min(count, 255)))
 
         return bytes(result)

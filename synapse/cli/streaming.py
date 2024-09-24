@@ -112,28 +112,22 @@ def _data_writer(stop, q, output_file, verbose):
         data = None
         try:
             data = q.get(True, 1)
-
             data_type, t0, seq_num, ch_count = ndtp.deserialize_header(data)
 
+            if last_seq_num != 0 and seq_num != last_seq_num + 1:
+                print(f"Dropped packets out of order: {seq_num} != {last_seq_num + 1}")
+            last_seq_num = seq_num
+
+            unpacked_data = None
             if data_type == DataType.kBroadband:
-                if verbose:
-                    print("Broadband data...")
-
-                if last_seq_num != 0 and seq_num != last_seq_num + 1:
-                    print(
-                        f"Dropped packets out of order: {seq_num} != {last_seq_num + 1}"
-                    )
-
-                last_seq_num = seq_num
-
                 unpacked_data = ndtp.deserialize_broadband(t0, ch_count, data)
+            elif data_type == DataType.kSpiketrain:
+                unpacked_data = ndtp.deserialize_spiketrain(t0, ch_count, data)
 
-                if output_file:
-                    fd.write(json.dumps(unpacked_data).encode("utf-8"))
-                else:
-                    print(
-                        f"Data type: {data_type}, seq_num: {seq_num}, ch_count: {ch_count}, t0: {t0}"
-                    )
+            if unpacked_data is not None:
+                fd.write(json.dumps(unpacked_data).encode("utf-8"))
+                fd.write(b"\n")
+
         except Exception as e:
             print(f"Error processing data: {e}")
             continue
