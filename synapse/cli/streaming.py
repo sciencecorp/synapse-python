@@ -30,7 +30,7 @@ def add_commands(subparsers):
     a.add_argument("-c", "--config", type=str, help="Config proto (json)")
     a.add_argument("-d", "--duration", type=int, help="Duration to read for (s)")
     a.add_argument("-m", "--multicast", type=str, help="Multicast group")
-    a.add_argument("-o", "--output", type=str, help="Output file")
+    a.add_argument("-o", "--output", type=str, help="Output filename (json)")
     a.add_argument(
         "-v",
         "--verbose",
@@ -88,12 +88,13 @@ def read(args):
 
     stop = threading.Event()
     q = queue.Queue()
-    thread = threading.Thread(
-        target=_data_writer, args=(stop, q, args.output, args.verbose)
-    )
 
     try:
-        thread.start()
+        if args.output:
+            thread = threading.Thread(
+                target=_data_writer, args=(stop, q, args.output, args.verbose)
+            )
+            thread.start()
         _read_worker(stream_out, q, args.verbose)
     except KeyboardInterrupt:
         pass
@@ -109,8 +110,8 @@ def read(args):
     print("Stopped")
 
 
-def _data_writer(stop, q, output_file, verbose):
-    filename = f"output_{time.strftime('%Y%m%d-%H%M%S')}.json"
+def _data_writer(stop, q, filename="output", verbose=False):
+    filename = f"{filename}_{time.strftime('%Y%m%d-%H%M%S')}.json"
     if filename:
         fd = open(filename, "wb")
 
@@ -123,14 +124,8 @@ def _data_writer(stop, q, output_file, verbose):
             if not data:
                 continue
 
-            if type(data) == ElectricalBroadbandData:
-                if verbose and last_seq_num != 0 and h.seq_number != last_seq_num + 1:
-                    print(
-                        f"Dropped packets out of order: {h.seq_number} != {last_seq_num + 1}"
-                    )
-
-                if output_file:
-                    fd.write(json.dumps(data, cls=DataclassJSONEncoder).encode("utf-8"))
+            fd.write(json.dumps(data, cls=DataclassJSONEncoder).encode("utf-8"))
+            fd.write(b"\n")
 
         except Exception as e:
             print(f"Error processing data: {e}")
