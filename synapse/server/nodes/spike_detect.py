@@ -7,7 +7,7 @@ from synapse.server.nodes import BaseNode
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.spike_detect_pb2 import SpikeDetectConfig, SpikeDetectOptions
-from synapse.server.status import Status
+from synapse.server.status import Status, StatusCode
 
 REFRACTORY_PERIOD_S = 0.001
 
@@ -31,11 +31,18 @@ class SpikeDetect(BaseNode):
             if self.threshold_uV == 0:
                 self.logger.warning("Threshold mode selected but threshold_uV is 0")
         elif self.mode == SpikeDetectOptions.SpikeDetectMode.kTemplate:
-            raise NotImplementedError("Template mode is not yet implemented")
+            return Status(
+                StatusCode.kUnimplemented, "Template mode is not yet implemented"
+            )
         elif self.mode == SpikeDetectConfig.SpikeDetectOptions.SpikeDetectMode.kWavelet:
-            raise NotImplementedError("Wavelet mode is not yet implemented")
+            return Status(
+                StatusCode.kUnimplemented, "Wavelet mode is not yet implemented"
+            )
         else:
-            raise ValueError(f"Unknown spike detection mode: {self.mode}")
+            return Status(
+                StatusCode.kInvalidConfiguration,
+                f"Unknown spike detection mode: {self.mode}",
+            )
         return Status()
 
     def start(self):
