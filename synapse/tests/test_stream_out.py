@@ -29,17 +29,18 @@ def test_packing_broadband_data():
         ],
     )
 
-    packed = node._pack(bdata)[0]
-    unpacked = NDTPMessage.unpack(packed)
+    packed = node._pack(bdata)
 
-    assert unpacked.header.timestamp == bdata.t0
-    assert unpacked.payload.bit_width == bdata.bit_width
-    assert len(unpacked.payload.channels) == len(bdata.channels)
+    for i, p in enumerate(packed):
+        unpacked = NDTPMessage.unpack(p)
 
-    for i in range(len(bdata.channels)):
-        assert unpacked.payload.channels[i].channel_id == bdata.channels[i].channel_id
+        assert unpacked.header.timestamp == bdata.t0
+        assert unpacked.header.seq_number == i
+        assert unpacked.payload.bit_width == bdata.bit_width
+
+        assert unpacked.payload.channels[0].channel_id == bdata.channels[i].channel_id
         assert (
-            unpacked.payload.channels[i].channel_data == bdata.channels[i].channel_data
+            unpacked.payload.channels[0].channel_data == bdata.channels[i].channel_data
         )
 
 

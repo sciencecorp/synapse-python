@@ -73,9 +73,11 @@ class StreamOut(BaseNode):
         self.__iface_ip = iface_ip
 
     def stop(self):
-        self.__socket.close()
-        self.__socket = None
-        return super().stop()
+        status = super().stop()
+        if self.__socket:
+            self.__socket.close()
+            self.__socket = None
+        return status
 
     def run(self):
         while not self.stop_event.is_set():
@@ -100,8 +102,9 @@ class StreamOut(BaseNode):
 
         if hasattr(data, "pack"):
             try:
-                packets.append(data.pack(self.__sequence_number))
-                self.__sequence_number += 1
+                packets = data.pack(self.__sequence_number)
+                self.__sequence_number += len(packets)
+
             except Exception as e:
                 raise ValueError(f"Error packing data: {e}")
         else:

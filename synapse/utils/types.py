@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Union
+from typing import ClassVar, List, Union
 from synapse.api.datatype_pb2 import DataType
 from synapse.utils.ndtp import (
     NDTPHeader,
@@ -15,6 +15,8 @@ class ElectricalBroadbandData:
     ElectricalBroadbandData is a timestamped list of channels, each with a list of samples of a given bit width.
     """
 
+    data_type: ClassVar[DataType] = DataType.kBroadband
+
     @dataclass
     class ChannelData:
         channel_id: int
@@ -26,32 +28,38 @@ class ElectricalBroadbandData:
     t0: int
     channels: List[ChannelData]
 
-    def data_type(self):
-        return DataType.kBroadband
-
-    def pack(self, seq_number: int) -> bytes:
+    def pack(self, seq_number: int) -> List[bytes]:
         """
         Pack the data into an NDTPMessage that can be sent via the StreamOut node.
         """
-        message = NDTPMessage(
-            header=NDTPHeader(
-                data_type=DataType.kBroadband, timestamp=self.t0, seq_number=seq_number
-            ),
-            payload=NDTPPayloadBroadband(
-                bit_width=self.bit_width,
-                signed=self.signed,
-                sample_rate=self.sample_rate,
-                channels=[
-                    NDTPPayloadBroadband.ChannelData(
-                        channel_id=c.channel_id,
-                        channel_data=c.channel_data,
-                    )
-                    for c in self.channels
-                ],
-            ),
-        )
 
-        return message.pack()
+        packets = []
+        seq_number_offset = 0
+
+        for c in self.channels:
+            packets.append(
+                NDTPMessage(
+                    header=NDTPHeader(
+                        data_type=DataType.kBroadband,
+                        timestamp=self.t0,
+                        seq_number=seq_number + seq_number_offset,
+                    ),
+                    payload=NDTPPayloadBroadband(
+                        bit_width=self.bit_width,
+                        signed=self.signed,
+                        sample_rate=self.sample_rate,
+                        channels=[
+                            NDTPPayloadBroadband.ChannelData(
+                                channel_id=c.channel_id,
+                                channel_data=c.channel_data,
+                            )
+                        ],
+                    ),
+                ).pack()
+            )
+            seq_number_offset += 1
+
+        return packets
 
     @staticmethod
     def from_ndtp_message(msg: NDTPMessage) -> "ElectricalBroadbandData":
@@ -85,13 +93,11 @@ class SpiketrainData:
     Spiketrain data is a timestamped list of spike counts for each channel.
     """
 
+    data_type: ClassVar[DataType] = DataType.kSpiketrain
     t0: int
     spike_counts: List[int]
 
-    def data_type(self):
-        return DataType.kSpiketrain
-
-    def pack(self, seq_number: int) -> bytes:
+    def pack(self, seq_number: int) -> List[bytes]:
         """
         Pack the data into an NDTPMessage that can be sent via the StreamOut node.
         """
@@ -104,7 +110,7 @@ class SpiketrainData:
             ),
         )
 
-        return message.pack()
+        return [message.pack()]
 
     @staticmethod
     def from_ndtp_message(msg: NDTPMessage) -> "SpiketrainData":

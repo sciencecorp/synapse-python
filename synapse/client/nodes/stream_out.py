@@ -10,6 +10,7 @@ from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
 from synapse.utils.ndtp import NDTPMessage
 from synapse.utils.types import ElectricalBroadbandData, SpiketrainData, SynapseData
 
+
 class StreamOut(Node):
     type = NodeType.kStreamOut
 
@@ -30,7 +31,7 @@ class StreamOut(Node):
             data = self.__socket.recv(4096)
             while (len(data) % 128) != 0:
                 data += self.__socket.recv(4096)
-                
+
         return self._unpack(data)
 
     def open_socket(self):
