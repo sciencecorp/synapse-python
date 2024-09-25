@@ -153,8 +153,9 @@ def to_ints(
             total_bits_read += 1
 
             if bits_in_current_value == bit_width:
-                if signed and (current_value & (1 << (bit_width - 1))):
-                    current_value = current_value - (1 << bit_width)
+                if signed:
+                    if current_value & (1 << (bit_width - 1)):
+                        current_value = current_value - (1 << bit_width)
                 else:
                     current_value = current_value & mask
                 values.append(current_value)
@@ -254,7 +255,7 @@ class NDTPPayloadBroadband:
             num_samples = b[0]
 
             channel_data, end_bit, payload = to_ints(
-                payload, bit_width, num_samples, end_bit
+                payload, bit_width, num_samples, end_bit, signed
             )
 
             channels.append(

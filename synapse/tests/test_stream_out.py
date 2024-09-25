@@ -9,22 +9,22 @@ def test_packing_broadband_data():
     node = StreamOut(id=1)
 
     bdata = ElectricalBroadbandData(
-        bit_width=12,
+        bit_width=16,
         signed=True,
         t0=1234567890,
         sample_rate=3,
         channels=[
             ElectricalBroadbandData.ChannelData(
                 channel_id=0,
-                channel_data=[1000, 2000, 3000],
+                channel_data=[-1000, 2000, 3000],
             ),
             ElectricalBroadbandData.ChannelData(
                 channel_id=1,
-                channel_data=[1234, 1234, 1234, 1234],
+                channel_data=[1234, -1234, 1234, 1234],
             ),
             ElectricalBroadbandData.ChannelData(
                 channel_id=2,
-                channel_data=[3000, 2000, 1000, 2000, 3000],
+                channel_data=[3000, -2000, 1000, 2000, 3000],
             ),
         ],
     )
