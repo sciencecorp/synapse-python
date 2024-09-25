@@ -117,16 +117,15 @@ class StreamOut(Node):
         except Exception as e:
             logging.error(f"Failed to unpack NDTPMessage: {e}")
             traceback.print_exc()
-            return data
 
         h = u.header
         if h.data_type == DataType.kBroadband:
-            return ElectricalBroadbandData.from_ndtp_message(u)
+            return h, ElectricalBroadbandData.from_ndtp_message(u)
         elif h.data_type == DataType.kSpiketrain:
-            return SpiketrainData.from_ndtp_message(u)
+            return h, SpiketrainData.from_ndtp_message(u)
         else:
             logging.error(f"Unknown data type: {h.data_type}")
-            return data
+            return h, data
 
     @staticmethod
     def _from_proto(proto: Optional[StreamOutConfig]):

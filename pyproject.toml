@@ -24,3 +24,6 @@ distribution = false
 [project.scripts]
 synapsectl = "synapse.cli:main"
 synapse-sim = "synapse.simulator:main"
+
+[tool.setuptools]
+packages = { find = { exclude = ["config", "data"] } }
