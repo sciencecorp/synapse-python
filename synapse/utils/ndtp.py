@@ -40,6 +40,8 @@ Packs a list of integers into a byte array, using the specified bit width for ea
 Can append to an existing byte array, and will correctly handle the case where
 the end of the existing array is not byte aligned (and may contain a partial byte at the end).
 """
+
+
 def to_bytes(
     values: List[int],
     bit_width: int,
@@ -63,7 +65,9 @@ def to_bytes(
             min_value = -(1 << (bit_width - 1))
             max_value = (1 << (bit_width - 1)) - 1
             if value < min_value or value > max_value:
-                raise ValueError(f"signed value {value} doesn't fit in {bit_width} bits")
+                raise ValueError(
+                    f"signed value {value} doesn't fit in {bit_width} bits"
+                )
             # Convert to two's complement representation
             if value < 0:
                 value = (1 << bit_width) + value
@@ -72,7 +76,9 @@ def to_bytes(
                 raise ValueError("unsigned packing specified, but value is negative")
 
             if value >= (1 << bit_width):
-                raise ValueError(f"unsigned value {value} doesn't fit in {bit_width} bits")
+                raise ValueError(
+                    f"unsigned value {value} doesn't fit in {bit_width} bits"
+                )
 
         remaining_bits = bit_width
         while remaining_bits > 0:
@@ -111,9 +117,13 @@ A 'count' parameter can be used if the expected number of values does not pack n
 
 import math
 
+
 def to_ints(
-    data: bytes, bit_width: int, count: int = 0, start_bit: int = 0,
-    signed: bool = False
+    data: bytes,
+    bit_width: int,
+    count: int = 0,
+    start_bit: int = 0,
+    signed: bool = False,
 ) -> Tuple[List[int], int, bytes]:
     if bit_width <= 0:
         raise ValueError("bit width must be > 0")
@@ -193,7 +203,9 @@ class NDTPPayloadBroadband:
 
         # first bit of the payload is the signed bool
         # remaining 7 bits are the bit width
-        payload += struct.pack("<B", (self.bit_width << 1) | (1 if self.signed else 0))
+        payload += struct.pack(
+            "<B", ((self.bit_width & 0x7F) << 1) | (1 if self.signed else 0)
+        )
 
         payload += struct.pack(
             "<BBB",
@@ -227,7 +239,7 @@ class NDTPPayloadBroadband:
         bit_width = struct.unpack("<B", data[0:1])[0] >> 1
         signed = (struct.unpack("<B", data[0:1])[0] & 1) == 1
         num_channels = (data[1] << 16) | (data[2] << 8) | data[3]
-        sample_rate = struct.unpack("<H", data[4:6])
+        sample_rate = struct.unpack("<H", data[4:6])[0]
 
         payload = data[6:]
         end_bit = 0
@@ -249,7 +261,6 @@ class NDTPPayloadBroadband:
                 NDTPPayloadBroadband.ChannelData(
                     channel_id=channel_id,
                     channel_data=channel_data,
-                    sample_rate=sample_rate
                 )
             )
 
@@ -285,9 +296,8 @@ class NDTPHeader:
     STRUCT = struct.Struct("<BIQH")
 
     def pack(self):
-        version = NDTP_VERSION.to_bytes(1, byteorder="big")
         return NDTPHeader.STRUCT.pack(
-            version, self.data_type, self.timestamp, self.seq_number
+            NDTP_VERSION, self.data_type, self.timestamp, self.seq_number
         )
 
     @staticmethod

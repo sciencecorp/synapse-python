@@ -21,6 +21,7 @@ class ElectricalBroadbandData:
         channel_data: List[int]
 
     bit_width: int
+    signed: bool
     sample_rate: int
     t0: int
     channels: List[ChannelData]
@@ -38,6 +39,7 @@ class ElectricalBroadbandData:
             ),
             payload=NDTPPayloadBroadband(
                 bit_width=self.bit_width,
+                signed=self.signed,
                 sample_rate=self.sample_rate,
                 channels=[
                     NDTPPayloadBroadband.ChannelData(
@@ -56,6 +58,7 @@ class ElectricalBroadbandData:
         return ElectricalBroadbandData(
             t0=msg.header.timestamp,
             bit_width=msg.payload.bit_width,
+            signed=msg.payload.signed,
             sample_rate=msg.payload.sample_rate,
             channels=[
                 ElectricalBroadbandData.ChannelData(

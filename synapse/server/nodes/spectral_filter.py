@@ -90,6 +90,7 @@ class SpectralFilter(BaseNode):
 
             filtered_data = ElectricalBroadbandData(
                 bit_width=data.bit_width,
+                signed=data.signed,
                 sample_rate=data.sample_rate,
                 t0=data.t0,
                 channels=self.apply_filter(data.channels),
