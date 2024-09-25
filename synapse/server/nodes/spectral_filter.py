@@ -1,8 +1,8 @@
 from collections import defaultdict
+from typing import List
 import numpy as np
 import queue
 from scipy import signal
-import threading
 
 from synapse.server.nodes import BaseNode
 from synapse.api.datatype_pb2 import DataType
@@ -12,6 +12,7 @@ from synapse.api.nodes.spectral_filter_pb2 import (
     SpectralFilterMethod,
 )
 from synapse.server.status import Status
+from synapse.utils.types import ElectricalBroadbandData, SynapseData
 
 
 def get_filter_coefficients(method, low_cutoff_hz, high_cutoff_hz, sample_rate):
@@ -35,8 +36,6 @@ def get_filter_coefficients(method, low_cutoff_hz, high_cutoff_hz, sample_rate):
 class SpectralFilter(BaseNode):
     def __init__(self, id):
         super().__init__(id, NodeType.kSpectralFilter)
-        self.__stop_event = threading.Event()
-        self.__data_queue = queue.Queue()
         self.sample_rate = None
         self.channel_states = defaultdict(lambda: None)
 
@@ -46,46 +45,24 @@ class SpectralFilter(BaseNode):
         self.high_cutoff_hz = config.high_cutoff_hz
         return Status()
 
-    def start(self):
-        self.logger.info("starting...")
-        self.thread = threading.Thread(target=self.run)
-        self.thread.start()
-        self.logger.info("started")
-        return Status()
-
-    def stop(self):
-        self.logger.info("stopping...")
-        if not hasattr(self, "thread") or not self.thread.is_alive():
-            return
-        self.__stop_event.set()
-        self.thread.join()
-        self.logger.info("stopped")
-        return Status()
-
-    def on_data_received(self, data):
-        if data is None or len(data) < 4:
-            self.logger.warning("Received invalid data")
-            return
-
-        data_type, t0, sample_data, sample_rate = data
-
-        if data_type != DataType.kBroadband:
+    def on_data_received(self, data: SynapseData):
+        if data.data_type != DataType.kBroadband:
             self.logger.warning("Received non-broadband data")
             return
 
-        if sample_rate != self.sample_rate:
+        if data.sample_rate != self.sample_rate:
             self.b, self.a = get_filter_coefficients(
-                self.method, self.low_cutoff_hz, self.high_cutoff_hz, sample_rate
+                self.method, self.low_cutoff_hz, self.high_cutoff_hz, data.sample_rate
             )
-            self.sample_rate = sample_rate
+            self.sample_rate = data.sample_rate
             self.channel_states.clear()
 
-        self.__data_queue.put(data)
+        self.data_queue.put(data)
 
-    def apply_filter(self, sample_data):
-        # vectorize sample data so we can apply the filter to all channels at once
-        channel_ids, samples = zip(*sample_data)
-        samples_array = np.array([np.frombuffer(s, dtype=np.int16) for s in samples])
+    def apply_filter(self, channels: List[ElectricalBroadbandData.ChannelData]):
+        # vectorize channel data so we can apply the filter to all channels at once
+        channel_ids = [ch.channel_id for ch in channels]
+        samples_array = np.array([ch.channel_data for ch in channels], dtype=np.int16)
 
         filtered_samples = np.zeros_like(samples_array)
         for i, channel_id in enumerate(channel_ids):
@@ -98,18 +75,25 @@ class SpectralFilter(BaseNode):
             )
 
         return [
-            [channel_id, filtered_samples[i].tolist()]
+            ElectricalBroadbandData.ChannelData(
+                channel_id=channel_id, channel_data=filtered_samples[i].tolist()
+            )
             for i, channel_id in enumerate(channel_ids)
         ]
 
     def run(self):
-        while not self.__stop_event.is_set():
+        while not self.stop_event.is_set():
             try:
-                data = self.__data_queue.get(timeout=1)
+                data = self.data_queue.get(timeout=1)
             except queue.Empty:
                 continue
 
-            data_type, t0, sample_data, sample_rate = data
-            filtered_sample_data = self.apply_filter(sample_data)
+            filtered_data = ElectricalBroadbandData(
+                bit_width=data.bit_width,
+                signed=data.signed,
+                sample_rate=data.sample_rate,
+                t0=data.t0,
+                channels=self.apply_filter(data.channels),
+            )
 
-            self.emit_data((DataType.kBroadband, t0, filtered_sample_data, sample_rate))
+            self.emit_data(filtered_data)

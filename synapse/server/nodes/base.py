@@ -1,8 +1,11 @@
 import logging
+import queue
+import threading
 from typing import Tuple
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeConfig, NodeType, NodeSocket
 from synapse.server.status import Status
+from synapse.utils.types import SynapseData
 
 
 class BaseNode(object):
@@ -11,6 +14,7 @@ class BaseNode(object):
         self.type: NodeType = type
         self.socket: Tuple[str, int] = None
         self.logger = logging.getLogger(f"[{self.__class__.__name__} id: {self.id}]")
+        self.data_queue = queue.Queue()
 
     def config(self) -> NodeConfig:
         return NodeConfig(
@@ -22,13 +26,25 @@ class BaseNode(object):
         raise NotImplementedError
 
     def start(self):
-        raise NotImplementedError
+        self.logger.info("starting...")
+        self.stop_event = threading.Event()
+        self.thread = threading.Thread(target=self.run, args=())
+        self.thread.start()
+        self.logger.info("started")
+        return Status()
 
     def stop(self):
-        raise NotImplementedError
+        self.logger.info("stopping...")
+        if not hasattr(self, "thread") or not self.thread.is_alive():
+            return
 
-    def on_data_received(self):
-        pass
+        self.stop_event.set()
+        self.thread.join()
+        self.logger.info("stopped")
+        return Status()
+
+    def on_data_received(self, data: SynapseData):
+        self.data_queue.put(data)
 
     def emit_data(self, data):
         pass
