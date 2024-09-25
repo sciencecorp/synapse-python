@@ -222,7 +222,7 @@ class NDTPPayloadBroadband:
             payload, b_offset = to_bytes([c.channel_id], 24, payload, b_offset)
             payload, b_offset = to_bytes([len(c.channel_data)], 16, payload, b_offset)
             payload, b_offset = to_bytes(
-                c.channel_data, self.bit_width, payload, b_offset
+                c.channel_data, self.bit_width, payload, b_offset, self.signed
             )
 
         return payload
