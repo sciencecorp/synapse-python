@@ -25,5 +25,9 @@ distribution = false
 synapsectl = "synapse.cli:main"
 synapse-sim = "synapse.simulator:main"
 
+[build-system]
+requires = ["setuptools>=42", "wheel", "pybind11>=2.6.0", "cmake>=3.14"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools]
 packages = { find = { exclude = ["config", "data"] } }

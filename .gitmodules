@@ -1,3 +1,6 @@
 [submodule "synapse-api"]
 	path = synapse-api
 	url = git@github.com:sciencecorp/synapse-api.git
+[submodule "libndtp"]
+	path = libndtp
+	url = git@github.com:sciencecorp/libndtp.git
