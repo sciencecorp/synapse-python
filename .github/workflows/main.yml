@@ -34,20 +34,11 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      - name: Debug information
-        run: |
-          cmake --version
-          protoc --version
-          ls -R libndtp
-          echo "Protobuf libraries:"
-          find /usr/lib -name "libprotobuf*"
-          echo "Protobuf include directory:"
-          find /usr/include -name "google"
-
       - name: Build project
         run: |
           export Protobuf_INCLUDE_DIR=/usr/include
           export Protobuf_LIBRARIES=/usr/lib/x86_64-linux-gnu/libprotobuf.so
+          make
           python -m build -v
         env:
           DISTUTILS_DEBUG: 1
