@@ -47,6 +47,8 @@ class SpikeDetect(BaseNode):
                 StatusCode.kInvalidConfiguration,
                 f"Unknown spike detection mode: {self.mode}",
             )
+
+        self.__config = config
         return Status()
 
     def run(self):
