@@ -23,14 +23,39 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libprotobuf-dev protobuf-compiler
+
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest
-          make
-          python -m build
-          pip install dist/synapse-*.whl
+
+      - name: Debug information
+        run: |
+          cmake --version
+          protoc --version
+          ls -R libndtp
+          echo "Protobuf libraries:"
+          find /usr/lib -name "libprotobuf*"
+          echo "Protobuf include directory:"
+          find /usr/include -name "google"
+
+      - name: Build project
+        run: |
+          export Protobuf_INCLUDE_DIR=/usr/include
+          export Protobuf_LIBRARIES=/usr/lib/x86_64-linux-gnu/libprotobuf.so
+          python -m build -v
+        env:
+          DISTUTILS_DEBUG: 1
+          CMAKE_PREFIX_PATH: /usr
+
+      - name: Install wheel
+        run: |
+          pip install dist/*.whl
 
       - name: Run tests with pytest
         run: |
