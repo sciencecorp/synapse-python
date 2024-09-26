@@ -38,11 +38,19 @@ class SpectralFilter(BaseNode):
         super().__init__(id, NodeType.kSpectralFilter)
         self.sample_rate = None
         self.channel_states = defaultdict(lambda: None)
+        self.__config = None
+
+    def config(self):
+        c = super().config()
+        if self.__config:
+            c.spectral_filter.CopyFrom(self.__config)
+        return c
 
     def configure(self, config=SpectralFilterConfig()):
         self.method = config.method
         self.low_cutoff_hz = config.low_cutoff_hz
         self.high_cutoff_hz = config.high_cutoff_hz
+        self.__config = config
         return Status()
 
     def on_data_received(self, data: SynapseData):

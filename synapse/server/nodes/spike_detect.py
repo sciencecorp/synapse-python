@@ -16,6 +16,13 @@ class SpikeDetect(BaseNode):
         super().__init__(id, NodeType.kSpikeDetect)
         self.samples_since_last_spike = defaultdict(lambda: 0)
         self.channel_buffers = defaultdict(list)
+        self.__config = None
+
+    def config(self):
+        c = super().config()
+        if self.__config:
+            c.spike_detect.CopyFrom(self.__config)
+        return c
 
     def configure(self, config=SpikeDetectConfig()):
         self.mode = config.mode
