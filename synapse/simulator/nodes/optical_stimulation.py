@@ -13,7 +13,7 @@ class OpticalStimulation(BaseNode):
     def config(self):
         c = super().config()
         if self.__config:
-            c.opticalStim.CopyFrom(self.__config)
+            c.optical_stim.CopyFrom(self.__config)
         return c
 
     def configure(self, config=OpticalStimConfig()) -> Status:
