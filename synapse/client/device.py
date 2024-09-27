@@ -41,6 +41,7 @@ class Device(object):
     def info(self):
         try:
             response = self.rpc.Info(Empty())
+            self._handle_status_response(response.status)
             return response
         except grpc.RpcError as e:
             print("Error: ", e.details())

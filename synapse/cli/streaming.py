@@ -4,10 +4,12 @@ import queue
 import threading
 import time
 import traceback
+from typing import Optional
 
 from google.protobuf.json_format import Parse
 
 from synapse.api.node_pb2 import NodeType
+from synapse.api.status_pb2 import DeviceState
 from synapse.api.synapse_pb2 import DeviceConfiguration
 from synapse.client import Config, Device, StreamOut
 
@@ -22,8 +24,9 @@ class DataclassJSONEncoder(json.JSONEncoder):
 def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device's StreamOut node")
     a.add_argument("uri", type=str, help="IP address of Synapse device")
-    a.add_argument("config", type=str, help="Configuration file")
-    a.add_argument("duration", type=int, help="Duration to read for in seconds")
+    a.add_argument("--config", type=str, help="Configuration file",)
+    a.add_argument("--duration", type=int, help="Duration to read for in seconds")
+    a.add_argument("--node_id", type=int, help="ID of the StreamOut node to read from")
     a.set_defaults(func=read)
 
 
@@ -35,21 +38,42 @@ def load_config_from_file(path):
 
 
 def read(args):
+    print(f"Reading from {args.uri}...")
+
+    if not args.config and not args.node_id:
+        print("Either `--config` or `--node_id` must be specified.")
+        return
+
     device = Device(args.uri)
     info = device.info()
     assert info is not None, "Couldn't get device info"
+    print(info)
 
-    print("Configuring device...")
-    config = load_config_from_file(args.config)
-    stream_out = next((n for n in config.nodes if n.type == NodeType.kStreamOut), None)
-    assert stream_out is not None, "No StreamOut node found in config"
+    print(f"\n")
 
-    if not device.configure(config):
-        raise ValueError("Failed to configure device")
+    if args.config:
+        print("Configuring device...")
+        config = load_config_from_file(args.config)
+        stream_out = next((n for n in config.nodes if n.type == NodeType.kStreamOut), None)
+        assert stream_out is not None, "No StreamOut node found in config"
 
-    print("Starting device...")
-    if not device.start():
-        raise ValueError("Failed to start device")
+        if not device.configure(config):
+            raise ValueError("Failed to configure device")
+
+        if info.status.state != DeviceState.kRunning:
+            print("Starting device...")
+            if not device.start():
+                raise ValueError("Failed to start device")
+
+    else:
+        node = next((n for n in info.configuration.nodes if n.type == NodeType.kStreamOut and n.id == args.node_id), None)
+        if node is None:
+            print("No StreamOut node found in device configuration; please configure the device with a StreamOut node.")
+            return
+        
+        stream_out = StreamOut._from_proto(node.stream_out)
+        stream_out.id = args.node_id
+        stream_out.device = device
 
     print(f"Streaming data... Ctrl+C to stop")
     q = queue.Queue()
@@ -66,19 +90,20 @@ def read(args):
         stop.set()
         thread.join()
 
-    print("Stopping device...")
-    if not device.stop():
-        print("Failed to stop device")
-        return
-    print("Stopped")
+    if args.config:
+        print("Stopping device...")
+        if not device.stop():
+            print("Failed to stop device")
+            return
+        print("Stopped")
 
 
-def read_packets(node: StreamOut, q: queue.Queue, duration: int):
+def read_packets(node: StreamOut, q: queue.Queue, duration: Optional[int] = None):
     packet_count = 0
     seq_number = None
     start = time.time()
 
-    while time.time() - start < duration:
+    while True:
         header, data = node.read()
         if not data:
             continue
@@ -89,6 +114,9 @@ def read_packets(node: StreamOut, q: queue.Queue, duration: int):
         seq_number = header.seq_number
 
         q.put(data)
+
+        if duration and time.time() - start > duration:
+            break
 
     print(f"Recieved {packet_count} packets in {time.time() - start} seconds")
 
