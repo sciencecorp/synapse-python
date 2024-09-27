@@ -47,7 +47,7 @@ class ElectricalBroadband(BaseNode):
 
             data = ElectricalBroadbandData(
                 bit_width=bit_width,
-                signed=True,
+                signed=False,
                 sample_rate=sample_rate,
                 t0=t0,
                 channels=[

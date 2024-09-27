@@ -178,3 +178,4 @@ data/
 config/
 
 output_*.json
+*.jsonl
