@@ -13,7 +13,11 @@ from synapse.api.nodes.spectral_filter_pb2 import (
 )
 from synapse.server.nodes import BaseNode
 from synapse.server.status import Status
-from synapse.utils.datatypes import ElectricalBroadbandData, SynapseData
+from synapse.utils.ndtp import (
+    ElectricalBroadbandData,
+    ElectricalBroadbandDataChannelData,
+)
+from synapse.utils.ndtp_types import SynapseData
 
 
 def get_filter_coefficients(method, low_cutoff_hz, high_cutoff_hz, sample_rate):
@@ -68,7 +72,7 @@ class SpectralFilter(BaseNode):
 
         self.data_queue.put(data)
 
-    def apply_filter(self, channels: List[ElectricalBroadbandData.ChannelData]):
+    def apply_filter(self, channels: List[ElectricalBroadbandDataChannelData]):
         # vectorize channel data so we can apply the filter to all channels at once
         channel_ids = [ch.channel_id for ch in channels]
         samples_array = np.array([ch.channel_data for ch in channels], dtype=np.int16)
@@ -84,7 +88,7 @@ class SpectralFilter(BaseNode):
             )
 
         return [
-            ElectricalBroadbandData.ChannelData(
+            ElectricalBroadbandDataChannelData(
                 channel_id=channel_id, channel_data=filtered_samples[i].tolist()
             )
             for i, channel_id in enumerate(channel_ids)

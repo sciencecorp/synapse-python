@@ -6,7 +6,7 @@ from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_in_pb2 import StreamInConfig
 from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status
-from synapse.utils.datatypes import SynapseData
+from synapse.utils.ndtp_types import SynapseData
 
 
 class StreamIn(BaseNode):

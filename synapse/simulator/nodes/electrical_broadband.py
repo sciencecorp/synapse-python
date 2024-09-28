@@ -5,7 +5,10 @@ from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.electrical_broadband_pb2 import ElectricalBroadbandConfig
 from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status
-from synapse.utils.datatypes import ElectricalBroadbandData
+from synapse.utils.ndtp import (
+    ElectricalBroadbandData,
+    ElectricalBroadbandDataChannelData,
+)
 
 
 def r_sample(bit_width: int):
@@ -52,7 +55,7 @@ class ElectricalBroadband(BaseNode):
                 sample_rate=sample_rate,
                 t0=t0,
                 channels=[
-                    ElectricalBroadbandData.ChannelData(
+                    ElectricalBroadbandDataChannelData(
                         channel_id=ch.id,
                         channel_data=[r_sample(bit_width) for _ in range(n_samples)],
                     )

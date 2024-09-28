@@ -8,8 +8,8 @@ from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
 from synapse.client.node import Node
-from synapse.utils.datatypes import ElectricalBroadbandData, SpiketrainData, SynapseData
-from synapse.utils.ndtp import NDTPMessage
+from synapse.utils.ndtp import ElectricalBroadbandData, NDTPMessage, SpiketrainData
+from synapse.utils.ndtp_types import SynapseData
 
 
 class StreamOut(Node):

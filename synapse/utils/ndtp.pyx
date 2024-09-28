@@ -1,4 +1,3 @@
-# ndtp.pyx
 import cython
 import struct
 from typing import List, Tuple
@@ -25,10 +24,10 @@ cdef int NDTPPayloadSpiketrain_BIT_WIDTH = 2
 @wraparound(False)
 def to_bytes(
     values,
-    bint is_signed,
     int bit_width,
     existing: bytearray = None,
     int writing_bit_offset = 0,
+    bint is_signed = False,
     byteorder: str = 'big'
 ) -> Tuple[bytearray, int]:
     cdef int num_values = len(values)
@@ -124,10 +123,10 @@ def to_bytes(
 @wraparound(False)
 def to_ints(
     data,
-    bint is_signed,
     int bit_width,
     int count = 0,
     int start_bit = 0,
+    bint is_signed = False,
     byteorder: str = 'big'
 ) -> Tuple[List[int], int, object]:
     if bit_width <= 0:
@@ -239,7 +238,7 @@ def to_ints(
     return [values_array[i] for i in range(value_index)], end_bit, data
 
 
-cdef class ChannelData:
+cdef class NDTPPayloadBroadbandChannelData:
     cdef public int channel_id 
     cdef public int[::1] channel_data 
 
@@ -260,7 +259,7 @@ cdef class ChannelData:
             self.channel_data = channel_data
 
     def __eq__(self, other):
-        if not isinstance(other, ChannelData):
+        if not isinstance(other, NDTPPayloadBroadbandChannelData):
             return False
         return (
             self.channel_id == other.channel_id and
@@ -275,7 +274,7 @@ cdef class NDTPPayloadBroadband:
     cdef public bint is_signed
     cdef public int bit_width
     cdef public int sample_rate
-    cdef public list channels  # List of ChannelData objects
+    cdef public list channels  # List of NDTPPayloadBroadbandChannelData objects
 
     def __init__(self, bint is_signed, int bit_width, int sample_rate, channels):
         self.is_signed = is_signed
@@ -298,7 +297,7 @@ cdef class NDTPPayloadBroadband:
         # Next two bytes: sample rate (16-bit integer)
         payload += struct.pack(">H", self.sample_rate)
 
-        cdef ChannelData c
+        cdef NDTPPayloadBroadbandChannelData c
         for c in self.channels:
             # Pack channel_id (3 bytes, 24 bits)
             payload += c.channel_id.to_bytes(3, byteorder='big', signed=False)
@@ -308,7 +307,7 @@ cdef class NDTPPayloadBroadband:
 
             # Pack channel_data
             channel_data_bytes, _ = to_bytes(
-                c.channel_data, self.is_signed, self.bit_width
+                c.channel_data, self.bit_width, is_signed=self.is_signed
             )
             payload += channel_data_bytes
 
@@ -335,7 +334,7 @@ cdef class NDTPPayloadBroadband:
         cdef list channels = []
         cdef int channel_id, num_samples
         cdef list channel_data
-        cdef ChannelData channel
+        cdef NDTPPayloadBroadbandChannelData channel
 
         for _ in range(num_channels):
             # Unpack channel_id (3 bytes, big-endian)
@@ -362,10 +361,10 @@ cdef class NDTPPayloadBroadband:
 
             # Unpack channel_data
             channel_data, _, _ = to_ints(
-                channel_data_bytes, is_signed, bit_width, num_samples
+                channel_data_bytes, bit_width, num_samples, is_signed=is_signed
             )
 
-            channel = ChannelData(channel_id, channel_data)
+            channel = NDTPPayloadBroadbandChannelData(channel_id, channel_data)
             channels.append(channel)
 
         return NDTPPayloadBroadband(is_signed, bit_width, sample_rate, channels)
@@ -413,7 +412,7 @@ cdef class NDTPPayloadSpiketrain:
 
         # Pack spike counts
         spike_counts_bytes, _ = to_bytes(
-            self.spike_counts, False, NDTPPayloadSpiketrain_BIT_WIDTH
+            self.spike_counts, NDTPPayloadSpiketrain_BIT_WIDTH, is_signed=False
         )
         payload += spike_counts_bytes
         return payload
@@ -439,7 +438,7 @@ cdef class NDTPPayloadSpiketrain:
 
         # Unpack spike_counts
         spike_counts, _, _ = to_ints(
-            payload[:bytes_needed], False, NDTPPayloadSpiketrain_BIT_WIDTH, num_spikes
+            payload[:bytes_needed], NDTPPayloadSpiketrain_BIT_WIDTH, num_spikes, is_signed=False
         )
 
         return NDTPPayloadSpiketrain(spike_counts)
@@ -579,3 +578,186 @@ cdef class NDTPMessage:
             raise ValueError(f"CRC16 verification failed (expected {crc16_value})")
 
         return NDTPMessage(header, payload)
+
+
+cdef class ElectricalBroadbandDataChannelData:
+    cdef public int channel_id
+    cdef public int[::1] channel_data  # Memoryview of integers
+
+    def __init__(self, int channel_id, channel_data):
+        cdef int size, i
+        self.channel_id = channel_id
+        if isinstance(channel_data, list):
+            size = len(channel_data)
+            self.channel_data = cython.view.array(
+                shape=(size,), itemsize=cython.sizeof(cython.int), format="i"
+            )
+            for i in range(size):
+                self.channel_data[i] = channel_data[i]
+        else:
+            self.channel_data = channel_data  # Assume it's already a memoryview
+
+    def __eq__(self, other):
+        if not isinstance(other, ElectricalBroadbandDataChannelData):
+            return False
+        return (
+            self.channel_id == other.channel_id and
+            list(self.channel_data) == list(other.channel_data)
+        )
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+
+cdef class ElectricalBroadbandData:
+    """
+    ElectricalBroadbandData is a timestamped list of channels, each with a list of samples of a given bit width.
+    """
+
+    cdef public int data_type
+    cdef public bint is_signed
+    cdef public int bit_width
+    cdef public int sample_rate
+    cdef public long long t0
+    cdef public list channels  # List[ElectricalBroadbandDataChannelData]
+
+    def __init__(self, bint is_signed, int bit_width, int sample_rate, long long t0, channels):
+        self.data_type = DataType.kBroadband
+        self.is_signed = is_signed
+        self.bit_width = bit_width
+        self.sample_rate = sample_rate
+        self.t0 = t0
+        self.channels = channels
+
+    cpdef list pack(self, int seq_number):
+        """
+        Pack the data into NDTPMessages that can be sent via the StreamOut node.
+        """
+        cdef list packets = []
+        cdef int seq_number_offset = 0
+        cdef ElectricalBroadbandDataChannelData c
+        for c in self.channels:
+            packets.append(
+                NDTPMessage(
+                    header=NDTPHeader(
+                        data_type=self.data_type,
+                        timestamp=self.t0,
+                        seq_number=seq_number + seq_number_offset,
+                    ),
+                    payload=NDTPPayloadBroadband(
+                        self.is_signed,
+                        self.bit_width,
+                        self.sample_rate,
+                        [
+                            NDTPPayloadBroadbandChannelData(
+                                channel_id=c.channel_id,
+                                channel_data=c.channel_data,
+                            )
+                        ],
+                    ),
+                ).pack()
+            )
+            seq_number_offset += 1
+
+        return packets
+
+    @staticmethod
+    def unpack(data):
+        """
+        Unpack the data from an NDTPMessage that was received via the StreamIn node.
+        """
+        cdef NDTPMessage u = NDTPMessage.unpack(data)
+        cdef list channels = []
+        cdef NDTPPayloadBroadbandChannelData c
+        cdef ElectricalBroadbandDataChannelData ebc
+        for c in u.payload.channels:
+            ebc = ElectricalBroadbandDataChannelData(
+                channel_id=c.channel_id,
+                channel_data=c.channel_data
+            )
+            channels.append(ebc)
+        return ElectricalBroadbandData(
+            bit_width=u.payload.bit_width,
+            is_signed=u.payload.is_signed,
+            sample_rate=u.payload.sample_rate,
+            t0=u.header.timestamp,
+            channels=channels
+        )
+
+    def __eq__(self, other):
+        if not isinstance(other, ElectricalBroadbandData):
+            return False
+        return (
+            self.is_signed == other.is_signed and
+            self.bit_width == other.bit_width and
+            self.sample_rate == other.sample_rate and
+            self.t0 == other.t0 and
+            self.channels == other.channels
+        )
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+
+cdef class SpiketrainData:
+    """
+    Spiketrain data is a timestamped list of spike counts for each channel.
+    """
+
+    cdef public int data_type
+    cdef public long long t0
+    cdef public int[::1] spike_counts  # Memoryview of integers
+
+    def __init__(self, long long t0, spike_counts):
+        self.data_type = DataType.kSpiketrain
+        self.t0 = t0
+        cdef int size, i
+        if isinstance(spike_counts, list):
+            size = len(spike_counts)
+            self.spike_counts = cython.view.array(
+                shape=(size,),
+                itemsize=cython.sizeof(cython.int),
+                format="i",
+            )
+            for i in range(size):
+                self.spike_counts[i] = spike_counts[i]
+        else:
+            self.spike_counts = spike_counts
+
+    cpdef list pack(self, int seq_number):
+        """
+        Pack the data into an NDTPMessage that can be sent via the StreamOut node.
+        """
+        cdef NDTPMessage message = NDTPMessage(
+            header=NDTPHeader(
+                data_type=self.data_type,
+                timestamp=self.t0,
+                seq_number=seq_number
+            ),
+            payload=NDTPPayloadSpiketrain(
+                spike_counts=self.spike_counts,
+            ),
+        )
+        return [message.pack()]
+
+    @staticmethod
+    def unpack(data):
+        """
+        Unpack the data from an NDTPMessage that was received via the StreamIn node.
+        """
+        cdef NDTPMessage u = NDTPMessage.unpack(data)
+        return SpiketrainData(
+            t0=u.header.timestamp,
+            spike_counts=u.payload.spike_counts
+        )
+
+    def __eq__(self, other):
+        if not isinstance(other, SpiketrainData):
+            return False
+        return (
+            self.t0 == other.t0 and
+            list(self.spike_counts) == list(other.spike_counts)
+        )
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
