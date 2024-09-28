@@ -1,8 +1,9 @@
 import pytest
+
 from synapse.api.datatype_pb2 import DataType
 from synapse.server.nodes.stream_out import StreamOut
+from synapse.utils.datatypes import ElectricalBroadbandData, SpiketrainData
 from synapse.utils.ndtp import NDTPMessage
-from synapse.utils.types import ElectricalBroadbandData, SpiketrainData
 
 
 def test_packing_broadband_data():
@@ -40,7 +41,8 @@ def test_packing_broadband_data():
 
         assert unpacked.payload.channels[0].channel_id == bdata.channels[i].channel_id
         assert (
-            unpacked.payload.channels[0].channel_data == bdata.channels[i].channel_data
+            list(unpacked.payload.channels[0].channel_data)
+            == bdata.channels[i].channel_data
         )
 
 
@@ -58,4 +60,4 @@ def test_packing_spiketrain_data():
     assert unpacked.header.timestamp == sdata.t0
     assert len(unpacked.payload.spike_counts) == len(sdata.spike_counts)
 
-    assert unpacked.payload.spike_counts == sdata.spike_counts
+    assert list(unpacked.payload.spike_counts) == sdata.spike_counts

@@ -6,3 +6,4 @@ pyserial
 pyzmq
 build
 scipy
+cython

@@ -1,10 +1,11 @@
 import random
 import time
+
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.electrical_broadband_pb2 import ElectricalBroadbandConfig
 from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status
-from synapse.utils.types import ElectricalBroadbandData
+from synapse.utils.datatypes import ElectricalBroadbandData
 
 
 def r_sample(bit_width: int):

@@ -1,12 +1,12 @@
 import queue
 from collections import defaultdict
 
-from synapse.server.nodes import BaseNode
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.spike_detect_pb2 import SpikeDetectConfig, SpikeDetectOptions
+from synapse.server.nodes import BaseNode
 from synapse.server.status import Status, StatusCode
-from synapse.utils.types import SpiketrainData
+from synapse.utils.datatypes import SpiketrainData
 
 REFRACTORY_PERIOD_S = 0.001
 

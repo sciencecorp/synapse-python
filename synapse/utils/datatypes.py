@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from typing import ClassVar, List, Union
+
 from synapse.api.datatype_pb2 import DataType
 from synapse.utils.ndtp import (
+    ChannelData,
     NDTPHeader,
     NDTPMessage,
     NDTPPayloadBroadband,
@@ -28,7 +30,7 @@ class ElectricalBroadbandData:
     t0: int
     channels: List[ChannelData]
 
-    def pack(self, seq_number: int) -> List[bytes]:
+    def pack(self, seq_number: int) -> List[bytearray]:
         """
         Pack the data into an NDTPMessage that can be sent via the StreamOut node.
         """
@@ -45,11 +47,11 @@ class ElectricalBroadbandData:
                         seq_number=seq_number + seq_number_offset,
                     ),
                     payload=NDTPPayloadBroadband(
-                        bit_width=self.bit_width,
-                        signed=self.signed,
-                        sample_rate=self.sample_rate,
-                        channels=[
-                            NDTPPayloadBroadband.ChannelData(
+                        self.signed,
+                        self.bit_width,
+                        self.sample_rate,
+                        [
+                            ChannelData(
                                 channel_id=c.channel_id,
                                 channel_data=c.channel_data,
                             )
@@ -66,7 +68,7 @@ class ElectricalBroadbandData:
         return ElectricalBroadbandData(
             t0=msg.header.timestamp,
             bit_width=msg.payload.bit_width,
-            signed=msg.payload.signed,
+            signed=msg.payload.is_signed,
             sample_rate=msg.payload.sample_rate,
             channels=[
                 ElectricalBroadbandData.ChannelData(
@@ -78,7 +80,7 @@ class ElectricalBroadbandData:
         )
 
     @staticmethod
-    def unpack(data: bytes) -> "ElectricalBroadbandData":
+    def unpack(data) -> "ElectricalBroadbandData":
         """
         Unpack the data from an NDTPMessage that was received via the StreamIn node.
         """
@@ -97,7 +99,7 @@ class SpiketrainData:
     t0: int
     spike_counts: List[int]
 
-    def pack(self, seq_number: int) -> List[bytes]:
+    def pack(self, seq_number: int) -> List[bytearray]:
         """
         Pack the data into an NDTPMessage that can be sent via the StreamOut node.
         """
@@ -120,7 +122,7 @@ class SpiketrainData:
         )
 
     @staticmethod
-    def unpack(data: bytes) -> "SpiketrainData":
+    def unpack(data) -> "SpiketrainData":
         """
         Unpack the data from an NDTPMessage that was received via the StreamIn node.
         """

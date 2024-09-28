@@ -1,18 +1,19 @@
+import queue
 from collections import defaultdict
 from typing import List
+
 import numpy as np
-import queue
 from scipy import signal
 
-from synapse.server.nodes import BaseNode
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.spectral_filter_pb2 import (
     SpectralFilterConfig,
     SpectralFilterMethod,
 )
+from synapse.server.nodes import BaseNode
 from synapse.server.status import Status
-from synapse.utils.types import ElectricalBroadbandData, SynapseData
+from synapse.utils.datatypes import ElectricalBroadbandData, SynapseData
 
 
 def get_filter_coefficients(method, low_cutoff_hz, high_cutoff_hz, sample_rate):

@@ -2,11 +2,12 @@ import queue
 import socket
 import struct
 from typing import List
-from synapse.server.nodes.base import BaseNode
+
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
+from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status, StatusCode
-from synapse.utils.types import SynapseData
+from synapse.utils.datatypes import SynapseData
 
 PORT = 6480
 MULTICAST_TTL = 3
