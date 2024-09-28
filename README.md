@@ -89,5 +89,10 @@ To build:
     git submodule update --init
     pip install -r requirements.txt
     make
+
+    cd synapse/utils
+    python setup.py build_ext --inplace -v
+    cd ../../
+
     python -m build
     pip install dist/synapse-0.1.0-py3-none-any.whl

@@ -160,7 +160,7 @@ def test_ndtp_payload_broadband():
 
     assert p[0] >> 1 == bit_width
 
-    assert ((p[1] << 16) | (p[2] << 8) | p[3]) == 3
+    assert (p[1] << 16) | (p[2] << 8) | p[3] == 3
     p = p[6:]
 
     unpacked, offset, p = to_ints(p, bit_width=24, count=1)
