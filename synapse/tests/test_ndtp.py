@@ -163,16 +163,16 @@ def test_ndtp_payload_broadband():
     assert ((p[1] << 16) | (p[2] << 8) | p[3]) == 3
     p = p[6:]
 
-    unpacked, offset, p = to_ints(p, 24, 1, is_signed=False)
+    unpacked, offset, p = to_ints(p, bit_width=24, count=1)
     assert unpacked[0] == 0
     assert offset == 24
 
-    unpacked, offset, p = to_ints(p, 16, 1, offset, is_signed=False)
+    unpacked, offset, p = to_ints(p, bit_width=16, count=1, start_bit=offset)
     assert unpacked[0] == 3
     assert offset == 16
 
-    unpacked, offset, p = to_ints(p, bit_width, 3, offset, is_signed=False)
-    assert list(unpacked) == [1, 2, 3]
+    unpacked, offset, p = to_ints(p, bit_width=bit_width, count=3, start_bit=offset)
+    assert unpacked == [1, 2, 3]
     assert offset == 36
 
     # TODO(emma): why are these tests failing? need to look further,
