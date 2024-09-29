@@ -13,11 +13,10 @@ from synapse.api.nodes.spectral_filter_pb2 import (
 )
 from synapse.server.nodes import BaseNode
 from synapse.server.status import Status
-from synapse.utils.ndtp import (
+from synapse.utils.ndtp_types import (
     ElectricalBroadbandData,
-    ElectricalBroadbandDataChannelData,
+    SynapseData,
 )
-from synapse.utils.ndtp_types import SynapseData
 
 
 def get_filter_coefficients(method, low_cutoff_hz, high_cutoff_hz, sample_rate):
@@ -72,10 +71,10 @@ class SpectralFilter(BaseNode):
 
         self.data_queue.put(data)
 
-    def apply_filter(self, channels: List[ElectricalBroadbandDataChannelData]):
-        # vectorize channel data so we can apply the filter to all channels at once
-        channel_ids = [ch.channel_id for ch in channels]
-        samples_array = np.array([ch.channel_data for ch in channels], dtype=np.int16)
+    def apply_filter(self, sample_data):
+        # vectorize sample data so we can apply the filter to all channels at once
+        channel_ids, samples = zip(*sample_data)
+        samples_array = np.array([np.frombuffer(s, dtype=np.int16) for s in samples])
 
         filtered_samples = np.zeros_like(samples_array)
         for i, channel_id in enumerate(channel_ids):
@@ -88,9 +87,7 @@ class SpectralFilter(BaseNode):
             )
 
         return [
-            ElectricalBroadbandDataChannelData(
-                channel_id=channel_id, channel_data=filtered_samples[i].tolist()
-            )
+            [channel_id, filtered_samples[i].tolist()]
             for i, channel_id in enumerate(channel_ids)
         ]
 
@@ -101,12 +98,9 @@ class SpectralFilter(BaseNode):
             except queue.Empty:
                 continue
 
+            filtered_samples = self.apply_filter(data.samples)
             filtered_data = ElectricalBroadbandData(
-                bit_width=data.bit_width,
-                signed=data.signed,
-                sample_rate=data.sample_rate,
-                t0=data.t0,
-                channels=self.apply_filter(data.channels),
+                data.t0, filtered_samples, data.sample_rate
             )
 
             self.emit_data(filtered_data)
