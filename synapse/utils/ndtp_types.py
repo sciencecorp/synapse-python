@@ -2,6 +2,7 @@ from typing import Union
 
 import numpy as np
 
+from synapse.api.datatype_pb2 import DataType
 from synapse.utils.ndtp import (
     NDTPHeader,
     NDTPMessage,
@@ -9,7 +10,6 @@ from synapse.utils.ndtp import (
     NDTPPayloadBroadbandChannelData,
     NDTPPayloadSpiketrain,
 )
-from synapse.api.datatype_pb2 import DataType
 
 
 class ElectricalBroadbandData:
@@ -53,9 +53,11 @@ class ElectricalBroadbandData:
     def from_ndtp_message(msg: NDTPMessage):
         return ElectricalBroadbandData(
             t0=msg.header.timestamp,
-            samples=msg.payload.channels,
             sample_rate=msg.payload.sample_rate,
-            channels=np.array(msg.payload.channels, dtype=np.int16),
+            samples=[
+                (ch.channel_id, np.array(ch.channel_data, dtype=np.int16))
+                for ch in msg.payload.channels
+            ],
         )
 
     @staticmethod
