@@ -1,29 +1,3 @@
-[project]
-name = "synapse"
-version = "0.1.0"
-description = "Client library and CLI for the Synapse API"
-authors = [
-    {name = "Science Team", email = "team@science.xyz"},
-]
-dependencies = [
-    "grpcio-tools",
-    "protoletariat",
-    "pyserial"
-]
-readme = "README.md"
-license = {text = "TBD"}
-
-[tool.pdm.dev-dependencies]
-dev = [
-    "pytest"
-]
-
-[tool.pdm]
-distribution = false
-
-[project.scripts]
-synapsectl = "synapse.cli:main"
-synapse-sim = "synapse.simulator:main"
-
-[tool.setuptools]
-packages = { find = { exclude = ["config", "data"] } }
+[build-system]
+requires = ["setuptools", "wheel", "Cython"]
+build-backend = "setuptools.build_meta"
