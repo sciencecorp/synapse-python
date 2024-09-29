@@ -84,15 +84,17 @@ For an example, see the [Blackrock Neurotech CerePlex driver](https://github.com
 
 ## Building
 
-To build:
+Dependencies:
 
     git submodule update --init
     pip install -r requirements.txt
     make
 
-    cd synapse/utils
-    python setup.py build_ext --inplace -v
-    cd ../../
+To build and install in development mode:
+
+    pip install -e .
+
+To build and install a wheel:
 
     python -m build
     pip install dist/synapse-0.1.0-py3-none-any.whl
