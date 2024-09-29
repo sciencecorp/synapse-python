@@ -1,10 +1,7 @@
-# setup.py
-
 from setuptools import setup, find_packages, Extension
 from Cython.Build import cythonize
 import os
 
-# Determine the platform-specific compiler arguments
 extra_compile_args = []
 if os.name == "nt":  # Windows
     extra_compile_args = ["/w"]
@@ -22,24 +19,17 @@ extensions = [
     ),
 ]
 
-# Correctly find all packages under 'synapse'
-packages_list = find_packages(include=["synapse", "synapse.*"])
-print("Packages found:", packages_list)  # For verification, remove after testing
-
 setup(
     name="synapse",
     version="0.1.0",
     description="Client library and CLI for the Synapse API",
     author="Science Team",
     author_email="team@science.xyz",
-    packages=packages_list,
+    packages=find_packages(include=["synapse", "synapse.*"]),
     ext_modules=cythonize(
         extensions,
         compiler_directives={"language_level": "3"},
     ),
-    # Remove unneeded arguments
-    # include_package_data=True,
-    # zip_safe=False,
     install_requires=[
         "grpcio-tools",
         "protoletariat",
