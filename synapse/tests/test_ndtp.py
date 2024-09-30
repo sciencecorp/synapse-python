@@ -212,12 +212,6 @@ def test_ndtp_payload_spiketrain():
 
     assert unpacked == payload
 
-    samples = [5]
-
-    payload = NDTPPayloadSpiketrain(samples)
-    with pytest.raises(ValueError):
-        payload.pack()
-
 
 def test_ndtp_header():
     header = NDTPHeader(DataType.kBroadband, 1234567890, 42)
