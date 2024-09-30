@@ -4,7 +4,7 @@ from collections import defaultdict
 from synapse.server.nodes import BaseNode
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
-from synapse.api.nodes.spike_detect_pb2 import SpikeDetectConfig, SpikeDetectOptions
+from synapse.api.nodes.spike_detect_pb2 import SpikeDetectConfig
 from synapse.server.status import Status, StatusCode
 from synapse.utils.types import SpiketrainData
 
@@ -31,14 +31,14 @@ class SpikeDetect(BaseNode):
         self.sort = config.sort
         self.bin_size_ms = config.bin_size_ms
 
-        if self.mode == SpikeDetectOptions.SpikeDetectMode.kThreshold:
+        if self.mode == SpikeDetectConfig.SpikeDetectMode.kThreshold:
             if self.threshold_uV == 0:
                 self.logger.warning("Threshold mode selected but threshold_uV is 0")
-        elif self.mode == SpikeDetectOptions.SpikeDetectMode.kTemplate:
+        elif self.mode == SpikeDetectConfig.SpikeDetectMode.kTemplate:
             return Status(
                 StatusCode.kUnimplemented, "Template mode is not yet implemented"
             )
-        elif self.mode == SpikeDetectConfig.SpikeDetectOptions.SpikeDetectMode.kWavelet:
+        elif self.mode == SpikeDetectConfig.SpikeDetectConfig.SpikeDetectMode.kWavelet:
             return Status(
                 StatusCode.kUnimplemented, "Wavelet mode is not yet implemented"
             )

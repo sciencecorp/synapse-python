@@ -1,6 +1,6 @@
 from typing import Optional, List
 from synapse.api.node_pb2 import NodeConfig, NodeType
-from synapse.api.nodes.spike_detect_pb2 import SpikeDetectConfig, SpikeDetectOptions
+from synapse.api.nodes.spike_detect_pb2 import SpikeDetectConfig
 from synapse.client.node import Node
 
 
@@ -9,7 +9,7 @@ class SpikeDetect(Node):
 
     def __init__(
         self,
-        mode: SpikeDetectOptions.SpikeDetectMode,
+        mode: SpikeDetectConfig.SpikeDetectMode,
         threshold_uV: int = None,
         template_uV: List[int] = None,
         sort: bool = False,

@@ -35,7 +35,7 @@ class StreamOut(BaseNode):
         if not self.__iface_ip:
             return Status(StatusCode.kUndefinedError, "No interface IP specified")
 
-        if config.use_multicast and not config.multicast_group:
+        if not config.multicast_group:
             return Status(StatusCode.kUndefinedError, "No multicast group specified")
 
         self.__config = config
@@ -50,22 +50,18 @@ class StreamOut(BaseNode):
 
         self.__socket.bind((self.__iface_ip, port))
 
-        if config.use_multicast:
-            mreq = struct.pack(
-                "=4sl", socket.inet_aton(config.multicast_group), socket.INADDR_ANY
-            )
-            self.__socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-            self.__socket.setsockopt(
-                socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL
-            )
+        mreq = struct.pack(
+            "=4sl", socket.inet_aton(config.multicast_group), socket.INADDR_ANY
+        )
+        self.__socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        self.__socket.setsockopt(
+            socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL
+        )
 
-            self.socket = [config.multicast_group, port]
-            self.logger.info(
-                f"created multicast socket on {self.socket}, group {config.multicast_group}"
-            )
-        else:
-            self.socket = [self.__iface_ip, port]
-            self.logger.info(f"created multicast socket on {self.socket}")
+        self.socket = [config.multicast_group, port]
+        self.logger.info(
+            f"created multicast socket on {self.socket}, group {config.multicast_group}"
+        )
 
         return Status()
 

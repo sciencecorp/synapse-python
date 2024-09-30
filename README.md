@@ -1,4 +1,6 @@
-# Synapse implementation for Python
+# Synapse Python client
+
+This repo contains the python client for the [Synapse API](https://science.xyz/docs/d/synapse/index).
 
 Includes `synapsectl` command line utility:
 
@@ -27,10 +29,12 @@ Includes `synapsectl` command line utility:
         read                Read from a device's StreamOut node
         write               Write to a device's StreamIn node
 
-As well as a toy device `synapse-server` for local development, or using as the base for a device implementation:
+As well as the base for a device implementation (`synapse/server`),
 
-    % synapse-server --help
-    usage: synapse-server [-h] --iface-ip IFACE_IP [--hidden] [--passphrase PASSPHRASE] [--rpc-port RPC_PORT]
+And a toy device `synapse-sim` for local development,
+
+    % synapse-sim --help
+    usage: synapse-sim [-h] --iface-ip IFACE_IP [--hidden] [--passphrase PASSPHRASE] [--rpc-port RPC_PORT]
                         [--discovery-port DISCOVERY_PORT] [--discovery-addr DISCOVERY_ADDR] [--name NAME] [--serial SERIAL]
                         [-v]
 
@@ -56,24 +60,33 @@ As well as a toy device `synapse-server` for local development, or using as the 
 This library offers an idiomatic Python interpretation of the Synapse API:
 
 ```python
-import synapse.client as syn
+from synapse.client import Channel, Config, Device, StreamOut
+from synapse.client.nodes import ElectricalBroadband, StreamOut
 
-dev = syn.Device("127.0.0.1:647")
+device = Device("127.0.0.1:647")
+info = device.info()
 
-print("Device info: ", dev.info())
+print("Device info: ", device.info())
 
-recorder = syn.ElectricalBroadband(2, [syn.Channel(0, 1, 2)])
-self.out1 = syn.StreamOut()
+stream_out = StreamOut(label="my broadband", multicast_group="239.0.0.1")
+e_broadband = ElectricalBroadband(
+    peripheral_id=2,
+    channels=[Channel(id=c, electrode_id=c * 2, reference_id=c * 2 + 1) for c in range(32)],
+    sample_rate=30000,
+    bit_width=12,
+    gain=20.0,
+    low_cutoff_hz=500.0,
+    high_cutoff_hz=6000.0,
+)
 
-stimulator = syn.OpticalStimulation(syn.ChannelMask(range(0, 1023)))
-self.stim_in = syn.StreamIn()
+config = Config()
+config.add_node(stream_out)
+config.add_node(e_broadband)
+config.connect(e_broadband, stream_out)
 
-config = syn.Config()
-config.add([recorder, self.out1, stimulator, self.stim_in])
-config.connect(recorder, self.out1)
-config.connect(self.stim_in, stimulator)
+device.configure(config)
+device.start()
 
-dev.start()
 ```
 
 ## Implementing new Synapse devices

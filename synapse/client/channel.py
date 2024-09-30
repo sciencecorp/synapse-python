@@ -2,9 +2,8 @@ from synapse.api.channel_pb2 import Channel as PBChannel
 
 
 class Channel(object):
-    def __init__(self, channel_id, electrode_id=None, reference_id=None):
-        self.channel_id = channel_id
-
+    def __init__(self, id, electrode_id=None, reference_id=None):
+        self.id = id
         self.electrode_id = electrode_id
         self.reference_id = reference_id
 
@@ -14,7 +13,7 @@ class Channel(object):
 
     def to_proto(self):
         return PBChannel(
-            id=self.channel_id,
+            id=self.id,
             electrode_id=self.electrode_id,
             reference_id=self.reference_id,
         )

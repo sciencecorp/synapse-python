@@ -1,11 +1,13 @@
 import select
 import socket
 import threading
+from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_in_pb2 import StreamInConfig
 from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status
-from synapse.utils.types import SynapseData
+from synapse.utils.ndtp import NDTPMessage
+from synapse.utils.types import ElectricalBroadbandData, SpiketrainData, SynapseData
 
 
 class StreamIn(BaseNode):
@@ -17,16 +19,13 @@ class StreamIn(BaseNode):
     def config(self):
         c = super().config()
 
-        i = StreamInConfig()
-        i.data_type = self.data_type
-        i.shape.extend(self.shape)
+        if self.__config:
+            c.stream_in.CopyFrom(self.__config)
 
-        c.stream_in.CopyFrom(i)
         return c
 
     def configure(self, config: StreamInConfig) -> Status:
-        self.data_type = config.data_type
-        self.shape = config.shape
+        self.__config = config
 
         self.__socket = socket.socket(
             socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP

@@ -1,12 +1,11 @@
 from typing import Optional
 from synapse.api.node_pb2 import NodeConfig, NodeType
-from synapse.api.nodes.electrical_broadband_pb2 import ElectricalBroadbandConfig
+from synapse.api.nodes.electrical_stim_pb2 import ElectricalStimConfig
 from synapse.client.channel import Channel
 from synapse.client.node import Node
 
-
-class ElectricalBroadband(Node):
-    type = NodeType.kElectricalBroadband
+class ElectricalStimulation(Node):
+    type = NodeType.kElectricalStim
 
     def __init__(
         self,
@@ -14,47 +13,39 @@ class ElectricalBroadband(Node):
         channels,
         bit_width,
         sample_rate,
-        gain,
-        low_cutoff_hz,
-        high_cutoff_hz
+        lsb
     ):
         self.peripheral_id = peripheral_id
         self.channels = channels
         self.bit_width = bit_width
         self.sample_rate = sample_rate
-        self.gain = gain
-        self.low_cutoff_hz = low_cutoff_hz
-        self.high_cutoff_hz = high_cutoff_hz    
+        self.lsb = lsb
 
     def _to_proto(self):
         channels = [c.to_proto() for c in self.channels]
         n = NodeConfig()
-        p = ElectricalBroadbandConfig(
+        p = ElectricalStimConfig(
             peripheral_id=self.peripheral_id,
             channels=channels,
             bit_width=self.bit_width,
             sample_rate=self.sample_rate,
-            gain=self.gain,
-            low_cutoff_hz=self.low_cutoff_hz,
-            high_cutoff_hz=self.high_cutoff_hz,
+            lsb=self.lsb
         )
-        n.electrical_broadband.CopyFrom(p)
+        n.electrical_stim.CopyFrom(p)
         return n
 
     @staticmethod
-    def _from_proto(proto: Optional[ElectricalBroadbandConfig]):
+    def _from_proto(proto: Optional[ElectricalStimConfig]):
         if not proto:
             raise ValueError("parameter 'proto' is missing")
-        if not isinstance(proto, ElectricalBroadbandConfig):
-            raise ValueError("proto is not of type ElectricalBroadbandConfig")
+        if not isinstance(proto, ElectricalStimConfig):
+            raise ValueError("proto is not of type ElectricalStimConfig")
 
         channels = [Channel.from_proto(c) for c in proto.channels]
-        return ElectricalBroadband(
+        return ElectricalStimulation(
             peripheral_id=proto.peripheral_id,
             channels=channels,
             bit_width=proto.bit_width,
             sample_rate=proto.sample_rate,
-            gain=proto.gain,
-            low_cutoff_hz=proto.low_cutoff_hz,
-            high_cutoff_hz=proto.high_cutoff_hz,
+            lsb=proto.lsb
         )

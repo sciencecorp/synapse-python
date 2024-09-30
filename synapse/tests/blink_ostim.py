@@ -9,7 +9,8 @@ from synapse.nodes.stream_in import StreamIn
 from synapse.api.synapse_pb2 import DeviceConfiguration
 from google.protobuf.json_format import Parse
 
-dev = Device("10.40.61.234:647")
+addr = "localhost:647"
+dev = Device(addr)
 with open("synapse/tests/test_input_config.json") as config_json:
     config_proto = Parse(config_json.read(), DeviceConfiguration())
     print("Configuring device with the following configuration:")
