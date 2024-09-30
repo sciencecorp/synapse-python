@@ -1,11 +1,11 @@
 from typing import Optional
 from synapse.api.node_pb2 import NodeConfig, NodeType
-from synapse.api.nodes.electrical_stim_pb2 import ElectricalStimConfig
+from synapse.api.nodes.electrical_stimulation_pb2 import ElectricalStimulationConfig
 from synapse.client.channel import Channel
 from synapse.client.node import Node
 
 class ElectricalStimulation(Node):
-    type = NodeType.kElectricalStim
+    type = NodeType.kElectricalStimulation
 
     def __init__(
         self,
@@ -24,22 +24,22 @@ class ElectricalStimulation(Node):
     def _to_proto(self):
         channels = [c.to_proto() for c in self.channels]
         n = NodeConfig()
-        p = ElectricalStimConfig(
+        p = ElectricalStimulationConfig(
             peripheral_id=self.peripheral_id,
             channels=channels,
             bit_width=self.bit_width,
             sample_rate=self.sample_rate,
             lsb=self.lsb
         )
-        n.electrical_stim.CopyFrom(p)
+        n.electrical_stimulation.CopyFrom(p)
         return n
 
     @staticmethod
-    def _from_proto(proto: Optional[ElectricalStimConfig]):
+    def _from_proto(proto: Optional[ElectricalStimulationConfig]):
         if not proto:
             raise ValueError("parameter 'proto' is missing")
-        if not isinstance(proto, ElectricalStimConfig):
-            raise ValueError("proto is not of type ElectricalStimConfig")
+        if not isinstance(proto, ElectricalStimulationConfig):
+            raise ValueError("proto is not of type ElectricalStimulationConfig")
 
         channels = [Channel.from_proto(c) for c in proto.channels]
         return ElectricalStimulation(

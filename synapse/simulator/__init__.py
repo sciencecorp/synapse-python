@@ -10,7 +10,7 @@ SIMULATOR_NODE_OBJECT_MAP = {
   NodeType.kStreamIn: StreamIn,
   NodeType.kStreamOut: StreamOut,
   NodeType.kElectricalBroadband: ElectricalBroadband,
-  NodeType.kOpticalStim: OpticalStimulation
+  NodeType.kOpticalStimulation: OpticalStimulation
 }
 
 SIMULATOR_PERIPHERALS = []

@@ -9,9 +9,9 @@
       }
     },
     {
-      "type": "kOpticalStim",
+      "type": "kOpticalStimulation",
       "id": 2,
-      "optical_stim": {
+      "optical_stimulation": {
         "peripheral_id": 1
       }
     }

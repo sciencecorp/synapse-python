@@ -1,5 +1,5 @@
 from synapse.client.nodes.electrical_broadband import ElectricalBroadband
-from synapse.client.nodes.electrical_stim import ElectricalStimulation
+from synapse.client.nodes.electrical_stimulation import ElectricalStimulation
 from synapse.client.nodes.optical_broadband import OpticalBroadband
 from synapse.client.nodes.optical_stimulation import OpticalStimulation
 from synapse.client.nodes.spectral_filter import SpectralFilter
@@ -11,9 +11,9 @@ from synapse.api.node_pb2 import NodeType
 
 NODE_TYPE_OBJECT_MAP = {
     NodeType.kElectricalBroadband: ElectricalBroadband,
-    NodeType.kElectricalStim: ElectricalStimulation,
+    NodeType.kElectricalStimulation: ElectricalStimulation,
     NodeType.kOpticalBroadband: OpticalBroadband,
-    NodeType.kOpticalStim: OpticalStimulation,
+    NodeType.kOpticalStimulation: OpticalStimulation,
     NodeType.kSpectralFilter: SpectralFilter,
     NodeType.kSpikeDetect: SpikeDetect,
     NodeType.kStreamIn: StreamIn,

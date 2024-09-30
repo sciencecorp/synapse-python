@@ -1,11 +1,11 @@
 from typing import Optional
 from synapse.api.node_pb2 import NodeConfig, NodeType
-from synapse.api.nodes.optical_stim_pb2 import OpticalStimConfig
+from synapse.api.nodes.optical_stimulation_pb2 import OpticalStimulationConfig
 from synapse.client.node import Node
 
 
 class OpticalStimulation(Node):
-    type = NodeType.kOpticalStim
+    type = NodeType.kOpticalStimulation
 
     def __init__(
         self, peripheral_id, pixel_mask, bit_width, sample_rate, gain
@@ -18,7 +18,7 @@ class OpticalStimulation(Node):
 
     def _to_proto(self):
         n = NodeConfig()
-        p = OpticalStimConfig()
+        p = OpticalStimulationConfig()
         p.peripheral_id = self.peripheral_id
         for i in self.pixel_mask.iter_channels():
             p.pixel_mask.append(i)
@@ -26,16 +26,16 @@ class OpticalStimulation(Node):
         p.sample_rate = self.sample_rate
         p.gain = self.gain
 
-        n.optical_stim.CopyFrom(p)
+        n.optical_stimulation.CopyFrom(p)
         return n
 
     @staticmethod
-    def _from_proto(proto: Optional[OpticalStimConfig]):
+    def _from_proto(proto: Optional[OpticalStimulationConfig]):
         if proto is None:
             return OpticalStimulation()
 
-        if not isinstance(proto, OpticalStimConfig):
-            raise ValueError("proto is not of type OpticalStimConfig")
+        if not isinstance(proto, OpticalStimulationConfig):
+            raise ValueError("proto is not of type OpticalStimulationConfig")
 
         new_node = OpticalStimulation(
             peripheral_id=proto.peripheral_id,
