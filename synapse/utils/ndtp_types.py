@@ -65,6 +65,15 @@ class ElectricalBroadbandData:
         u = NDTPMessage.unpack(data)
         return ElectricalBroadbandData.from_ndtp_message(u)
 
+    def to_list(self):
+        return [
+            self.t0,
+            [
+                (int(channel_id), samples.tolist())
+                for channel_id, samples in self.samples
+            ],
+        ]
+
 
 class SpiketrainData:
     __slots__ = ["data_type", "t0", "spike_counts"]
@@ -97,6 +106,9 @@ class SpiketrainData:
     def unpack(data):
         u = NDTPMessage.unpack(data)
         return SpiketrainData.from_ndtp_message(u)
+
+    def to_list(self):
+        return [self.t0, list(self.spike_counts)]
 
 
 SynapseData = Union[SpiketrainData, ElectricalBroadbandData]
