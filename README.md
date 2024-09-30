@@ -1,6 +1,6 @@
 # Synapse Python client
 
-This repo contains the python client for the [Synapse API](https://science.xyz/docs/d/synapse/index).
+This repo contains the Python client for the [Synapse API](https://science.xyz/technologies/synapse). More information about the API can be found in the [docs](https://science.xyz/docs/d/synapse/index).
 
 Includes `synapsectl` command line utility:
 
