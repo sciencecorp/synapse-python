@@ -1,5 +1,5 @@
 [project]
-name = "synapse"
+name = "science-synapse"
 version = "0.1.0"
 description = "Client library and CLI for the Synapse API"
 authors = [
@@ -11,7 +11,11 @@ dependencies = [
     "pyserial"
 ]
 readme = "README.md"
-license = "Apache-2.0"
+license = {file = "LICENSE"}
+
+[projects.urls]
+Homepage = "https://github.com/sciencecorp/synapse-python"
+Documentation = "https://science.xyz/docs/d/synapse/index"
 
 [tool.pdm.dev-dependencies]
 dev = [
@@ -27,3 +31,4 @@ synapse-sim = "synapse.simulator:main"
 
 [tool.setuptools]
 packages = { find = { exclude = ["config", "data"] } }
+
