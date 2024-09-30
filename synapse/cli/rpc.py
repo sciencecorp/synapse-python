@@ -1,5 +1,5 @@
 from pathlib import Path
-from synapse.client import Config, Device
+import synapse as syn
 from synapse.api.synapse_pb2 import DeviceConfiguration
 from synapse.api.channel_pb2 import Channel
 from synapse.api.query_pb2 import QueryRequest, ImpedanceQuery
@@ -32,7 +32,7 @@ def add_commands(subparsers):
 
 
 def info(args):
-    info = Device(args.uri).info()
+    info = syn.Device(args.uri).info()
     if info:
         print(text_format.MessageToString(info))
 
@@ -47,17 +47,17 @@ def query(args):
         print("Running query:")
         print(query_proto)
 
-        result = Device(args.uri).query(query_proto)
+        result = syn.Device(args.uri).query(query_proto)
         if result:
             print(text_format.MessageToString(result))
 
 
 def start(args):
-    return Device(args.uri).start()
+    return syn.Device(args.uri).start()
 
 
 def stop(args):
-    return Device(args.uri).stop()
+    return syn.Device(args.uri).stop()
 
 
 def configure(args):
@@ -70,4 +70,4 @@ def configure(args):
         print("Configuring device with the following configuration:")
         print(config_proto)
 
-        return Device(args.uri).configure(Config.from_proto(config_proto))
+        return syn.Device(args.uri).configure(syn.Config.from_proto(config_proto))

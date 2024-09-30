@@ -57,18 +57,17 @@ And a toy device `synapse-sim` for local development,
 This library offers an idiomatic Python interpretation of the Synapse API:
 
 ```python
-from synapse.client import Channel, Config, Device, StreamOut
-from synapse.client.nodes import ElectricalBroadband, StreamOut
+import synapse as syn
 
-device = Device("127.0.0.1:647")
+device = syn.Device("127.0.0.1:647")
 info = device.info()
 
 print("Device info: ", device.info())
 
-stream_out = StreamOut(label="my broadband", multicast_group="239.0.0.1")
-e_broadband = ElectricalBroadband(
+stream_out = syn.StreamOut(label="my broadband", multicast_group="239.0.0.1")
+e_broadband = syn.ElectricalBroadband(
     peripheral_id=2,
-    channels=[Channel(id=c, electrode_id=c * 2, reference_id=c * 2 + 1) for c in range(32)],
+    channels=[syn.Channel(id=c, electrode_id=c * 2, reference_id=c * 2 + 1) for c in range(32)],
     sample_rate=30000,
     bit_width=12,
     gain=20.0,
@@ -76,7 +75,7 @@ e_broadband = ElectricalBroadband(
     high_cutoff_hz=6000.0,
 )
 
-config = Config()
+config = syn.Config()
 config.add_node(stream_out)
 config.add_node(e_broadband)
 config.connect(e_broadband, stream_out)

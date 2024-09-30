@@ -11,7 +11,7 @@ from google.protobuf.json_format import Parse
 from synapse.api.node_pb2 import NodeType
 from synapse.api.status_pb2 import DeviceState
 from synapse.api.synapse_pb2 import DeviceConfiguration
-from synapse.client import Config, Device, StreamOut
+import synapse as syn
 
 
 class DataclassJSONEncoder(json.JSONEncoder):
@@ -34,7 +34,7 @@ def load_config_from_file(path):
     with open(path, "r") as f:
         data = f.read()
         proto = Parse(data, DeviceConfiguration())
-        return Config.from_proto(proto)
+        return syn.Config.from_proto(proto)
 
 
 def read(args):
@@ -44,7 +44,7 @@ def read(args):
         print("Either `--config` or `--node_id` must be specified.")
         return
 
-    device = Device(args.uri)
+    device = syn.Device(args.uri)
     info = device.info()
     assert info is not None, "Couldn't get device info"
     print(info)
@@ -71,7 +71,7 @@ def read(args):
             print("No StreamOut node found in device configuration; please configure the device with a StreamOut node.")
             return
         
-        stream_out = StreamOut._from_proto(node.stream_out)
+        stream_out = syn.StreamOut._from_proto(node.stream_out)
         stream_out.id = args.node_id
         stream_out.device = device
 
@@ -98,7 +98,7 @@ def read(args):
         print("Stopped")
 
 
-def read_packets(node: StreamOut, q: queue.Queue, duration: Optional[int] = None):
+def read_packets(node: syn.StreamOut, q: queue.Queue, duration: Optional[int] = None):
     packet_count = 0
     seq_number = None
     start = time.time()
