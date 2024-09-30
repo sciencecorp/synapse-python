@@ -11,7 +11,7 @@ dependencies = [
     "pyserial"
 ]
 readme = "README.md"
-license = {text = "TBD"}
+license = "Apache-2.0"
 
 [tool.pdm.dev-dependencies]
 dev = [
