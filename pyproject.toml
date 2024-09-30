@@ -1,6 +1,6 @@
 [project]
 name = "science-synapse"
-version = "0.1.0"
+version = "0.9.0"
 description = "Client library and CLI for the Synapse API"
 authors = [
     {name = "Science Team", email = "team@science.xyz"},
@@ -31,4 +31,3 @@ synapse-sim = "synapse.simulator:main"
 
 [tool.setuptools]
 packages = { find = { exclude = ["config", "data"] } }
-
