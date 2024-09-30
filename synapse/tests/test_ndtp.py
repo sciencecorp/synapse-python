@@ -175,33 +175,6 @@ def test_ndtp_payload_broadband():
     assert unpacked == [1, 2, 3]
     assert offset == 36
 
-    # TODO(emma): why are these tests failing? need to look further,
-    # but all the data types we're actually using seem to be working
-
-    # unpacked, offset, p = to_ints(p, bit_width=24, count=1, start_bit=offset)
-    # assert unpacked[0] == 1
-    # assert offset == 24 + 4
-
-    # unpacked, offset, p = to_ints(p, bit_width=16, count=1, start_bit=offset)
-    # assert unpacked[0] == 3
-    # assert offset == 16 + 4
-
-    # unpacked, offset, p = to_ints(p, bit_width=bit_width, count=3, start_bit=offset)
-    # assert unpacked == [4, 5, 6]
-    # assert offset == 36 + 4
-
-    # unpacked, offset, p = to_ints(p, bit_width=24, count=1, start_bit=offset)
-    # assert unpacked[0] == 2
-    # assert offset == 24
-
-    # unpacked, offset, p = to_ints(p, bit_width=16, count=1, start_bit=offset)
-    # assert unpacked[0] == 3
-    # assert offset == 16
-
-    # unpacked, offset, p = to_ints(p, bit_width=bit_width, count=3, start_bit=offset)
-    # assert unpacked == [3000, 2000, 1000]
-    # assert offset == 36
-
 
 def test_ndtp_payload_spiketrain():
     samples = [0, 1, 2, 3, 2]
