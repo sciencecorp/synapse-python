@@ -394,13 +394,20 @@ cdef class NDTPPayloadSpiketrain:
     def pack(self):
         cdef bytearray payload = bytearray()
         cdef int spike_counts_len = len(self.spike_counts)
+        cdef int max_value = (1 << NDTPPayloadSpiketrain_BIT_WIDTH) - 1  # Maximum value for the given bit width
+        cdef int[::1] clamped_counts = cython.view.array(shape=(spike_counts_len,), itemsize=cython.sizeof(cython.int), format="i")
+        cdef int i
+
+        # Clamp the values
+        for i in range(spike_counts_len):
+            clamped_counts[i] = min(self.spike_counts[i], max_value)
 
         # Pack the number of spikes (4 bytes)
         payload += struct.pack("<I", spike_counts_len)  # Use "<I" for unsigned int
 
-        # Pack spike counts
+        # Pack clamped spike counts
         spike_counts_bytes, _ = to_bytes(
-            self.spike_counts, NDTPPayloadSpiketrain_BIT_WIDTH, is_signed=False
+            clamped_counts, NDTPPayloadSpiketrain_BIT_WIDTH, is_signed=False
         )
         payload += spike_counts_bytes
         return payload

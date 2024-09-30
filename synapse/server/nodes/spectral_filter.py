@@ -1,6 +1,5 @@
 import queue
 from collections import defaultdict
-from typing import List
 
 import numpy as np
 from scipy import signal
@@ -72,24 +71,23 @@ class SpectralFilter(BaseNode):
         self.data_queue.put(data)
 
     def apply_filter(self, sample_data):
-        # vectorize sample data so we can apply the filter to all channels at once
         channel_ids, samples = zip(*sample_data)
-        samples_array = np.array([np.frombuffer(s, dtype=np.int16) for s in samples])
+        samples_array = np.stack(samples)
 
-        filtered_samples = np.zeros_like(samples_array)
-        for i, channel_id in enumerate(channel_ids):
-            if self.channel_states[channel_id] is None:
-                zi = signal.lfilter_zi(self.b, self.a)
-                self.channel_states[channel_id] = zi * samples_array[i, 0]
+        if not hasattr(self, "zi"):
+            zi = signal.lfilter_zi(self.b, self.a)
+            self.zi = np.outer(np.ones(samples_array.shape[0]), zi)
 
-            filtered_samples[i], self.channel_states[channel_id] = signal.lfilter(
-                self.b, self.a, samples_array[i], zi=self.channel_states[channel_id]
-            )
+        # Apply the filter to all channels at once
+        filtered_samples, self.zi = signal.lfilter(
+            self.b, self.a, samples_array, axis=1, zi=self.zi
+        )
 
-        return [
-            [channel_id, filtered_samples[i].tolist()]
+        result = [
+            [channel_id, filtered_samples[i]]
             for i, channel_id in enumerate(channel_ids)
         ]
+        return result
 
     def run(self):
         while not self.stop_event.is_set():
@@ -99,8 +97,7 @@ class SpectralFilter(BaseNode):
                 continue
 
             filtered_samples = self.apply_filter(data.samples)
-            filtered_data = ElectricalBroadbandData(
-                data.t0, filtered_samples, data.sample_rate
-            )
 
-            self.emit_data(filtered_data)
+            self.emit_data(
+                ElectricalBroadbandData(data.t0, filtered_samples, data.sample_rate)
+            )
