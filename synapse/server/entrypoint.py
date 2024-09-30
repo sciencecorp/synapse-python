@@ -15,8 +15,6 @@ from synapse.server.nodes import SERVER_NODE_OBJECT_MAP
 
 ENTRY_DEFAULTS = {
     "iface_ip": None,
-    "hidden": False,
-    "passphrase": None,
     "rpc_port": 647,
     "discovery_port": 6470,
     "discovery_addr": "224.0.0.245",
@@ -38,12 +36,6 @@ def main(
         help="IP of the network interface to use for multicast traffic",
         required=True,
     )
-    parser.add_argument(
-        "--hidden",
-        help="Don't reply to discovery requests without a passphrase",
-        action="store_true",
-    )
-    parser.add_argument("--passphrase", help="Discovery passphrase")
     parser.add_argument(
         "--rpc-port",
         help="Port to listen for RPC requests",
@@ -69,10 +61,6 @@ def main(
         "-v", "--verbose", action="store_true", help="Enable verbose output"
     )
     args = parser.parse_args()
-
-    if args.hidden and args.passphrase is None:
-        parser.error("--hidden requires --passphrase")
-
     # verify that network interface is real
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -99,7 +87,7 @@ def main(
 
     listen = loop.create_datagram_endpoint(
         lambda: MulticastDiscoveryProtocol(
-            args.name, args.serial, args.hidden, args.passphrase, args.rpc_port
+            args.name, args.serial, args.rpc_port
         ),
         sock=sock,
     )

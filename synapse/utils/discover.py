@@ -15,7 +15,7 @@ class DeviceInfo:
     serial: str
 
 
-def discover(auth_code, timeout_sec = 3):
+def discover(timeout_sec = 3):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(timeout_sec)
     ttl = struct.pack("b", 3)
@@ -27,7 +27,7 @@ def discover(auth_code, timeout_sec = 3):
         start_time = time.time()
 
         sent = sock.sendto(
-            "DISCOVER {}".format(auth_code).encode("ascii"),
+            "DISCOVER".encode("ascii"),
             (BROADCAST_ADDR, BROADCAST_PORT),
         )
         while True:

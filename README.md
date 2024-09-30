@@ -34,7 +34,7 @@ As well as the base for a device implementation (`synapse/server`),
 And a toy device `synapse-sim` for local development,
 
     % synapse-sim --help
-    usage: synapse-sim [-h] --iface-ip IFACE_IP [--hidden] [--passphrase PASSPHRASE] [--rpc-port RPC_PORT]
+    usage: synapse-sim [-h] --iface-ip IFACE_IP [--rpc-port RPC_PORT]
                         [--discovery-port DISCOVERY_PORT] [--discovery-addr DISCOVERY_ADDR] [--name NAME] [--serial SERIAL]
                         [-v]
 
@@ -43,9 +43,6 @@ And a toy device `synapse-sim` for local development,
     options:
     -h, --help            show this help message and exit
     --iface-ip IFACE_IP   IP of the network interface to use for multicast traffic
-    --hidden              Don't reply to discovery requests without a passphrase
-    --passphrase PASSPHRASE
-                            Discovery passphrase
     --rpc-port RPC_PORT   Port to listen for RPC requests
     --discovery-port DISCOVERY_PORT
                             Port to listen for discovery requests
