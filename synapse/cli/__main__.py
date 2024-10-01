@@ -16,7 +16,7 @@ def main():
     parser.add_argument(
         "--version",
         action="version",
-        version="synapsectl %s" % metadata.version("synapse"),
+        version="synapsectl %s" % metadata.version("science-synapse"),
     )
     parser.add_argument(
         "--uri", metavar="-u", type=str, default=None, help="Device control plane URI"
