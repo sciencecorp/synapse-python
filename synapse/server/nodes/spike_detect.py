@@ -51,7 +51,7 @@ class SpikeDetect(BaseNode):
         self.__config = config
         return Status()
 
-    def run(self):
+    async def run(self):
         while not self.stop_event.is_set():
             try:
                 data = self.data_queue.get(timeout=1)
@@ -93,4 +93,6 @@ class SpikeDetect(BaseNode):
 
                     spike_counts.append(spike_count)
 
-                self.emit_data(SpiketrainData(t0=data.t0, spike_counts=spike_counts))
+                await self.emit_data(
+                    SpiketrainData(t0=data.t0, spike_counts=spike_counts)
+                )

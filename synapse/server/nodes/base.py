@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import queue
 import threading
@@ -16,6 +17,7 @@ class BaseNode(object):
         self.socket: Tuple[str, int] = None
         self.logger = logging.getLogger(f"[{self.__class__.__name__} id: {self.id}]")
         self.data_queue = queue.Queue()
+        self.downstream_nodes = []
 
     def config(self) -> NodeConfig:
         return NodeConfig(
@@ -25,6 +27,9 @@ class BaseNode(object):
 
     def configure(self, config) -> Status:
         raise NotImplementedError
+
+    def add_downstream_node(self, node):
+        self.downstream_nodes.append(node)
 
     def start(self):
         self.logger.info("starting...")
@@ -44,11 +49,12 @@ class BaseNode(object):
         self.logger.info("stopped")
         return Status()
 
-    def on_data_received(self, data: SynapseData):
+    async def on_data_received(self, data: SynapseData):
         self.data_queue.put(data)
 
-    def emit_data(self, data):
-        pass
+    async def emit_data(self, data):
+        for node in self.downstream_nodes:
+            asyncio.create_task(node.on_data_received(data))
 
     def node_socket(self):
         if self.socket is None:

@@ -28,7 +28,7 @@ class ElectricalBroadband(BaseNode):
         self.__config = config
         return Status()
 
-    def run(self):
+    async def run(self):
         if not self.__config:
             self.logger.error("node not configured")
             return
@@ -53,7 +53,7 @@ class ElectricalBroadband(BaseNode):
                 samples=[[ch.id, [r_sample(bit_width) for _ in range(n_samples)]] for ch in channels]
             )
 
-            self.emit_data(data)
+            await self.emit_data(data)
 
             t0 = now
 

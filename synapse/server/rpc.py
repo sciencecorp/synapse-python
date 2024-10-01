@@ -1,16 +1,11 @@
-import grpc
 import logging
 
-from synapse.api.node_pb2 import (
-    NodeConnection,
-)
-from synapse.api.synapse_pb2 import (
-    DeviceConfiguration,
-    DeviceInfo,
-)
-from synapse.api.status_pb2 import Status, StatusCode, DeviceState
+import grpc
+
+from synapse.api.node_pb2 import NodeConnection, NodeType
 from synapse.api.query_pb2 import QueryResponse
-from synapse.api.node_pb2 import NodeType
+from synapse.api.status_pb2 import DeviceState, Status, StatusCode
+from synapse.api.synapse_pb2 import DeviceConfiguration, DeviceInfo
 from synapse.api.synapse_pb2_grpc import (
     SynapseDeviceServicer,
     add_SynapseDeviceServicer_to_server,
@@ -204,7 +199,7 @@ class SynapseServicer(SynapseDeviceServicer):
             self.logger.info(
                 f"Connecting node {source_node.id} to node {target_node.id}"
             )
-            source_node.emit_data = target_node.on_data_received
+            source_node.add_downstream_node(target_node)
             self.connections.append([source_node.id, target_node.id])
 
         self.logger.info(

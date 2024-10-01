@@ -12,10 +12,7 @@ from synapse.api.nodes.spectral_filter_pb2 import (
 )
 from synapse.server.nodes import BaseNode
 from synapse.server.status import Status
-from synapse.utils.ndtp_types import (
-    ElectricalBroadbandData,
-    SynapseData,
-)
+from synapse.utils.ndtp_types import ElectricalBroadbandData, SynapseData
 
 
 def get_filter_coefficients(method, low_cutoff_hz, high_cutoff_hz, sample_rate):
@@ -56,7 +53,7 @@ class SpectralFilter(BaseNode):
         self.__config = config
         return Status()
 
-    def on_data_received(self, data: SynapseData):
+    async def on_data_received(self, data: SynapseData):
         if data.data_type != DataType.kBroadband:
             self.logger.warning("Received non-broadband data")
             return
@@ -89,7 +86,7 @@ class SpectralFilter(BaseNode):
         ]
         return result
 
-    def run(self):
+    async def run(self):
         while not self.stop_event.is_set():
             try:
                 data = self.data_queue.get(timeout=1)
@@ -98,6 +95,6 @@ class SpectralFilter(BaseNode):
 
             filtered_samples = self.apply_filter(data.samples)
 
-            self.emit_data(
+            await self.emit_data(
                 ElectricalBroadbandData(data.t0, filtered_samples, data.sample_rate)
             )
