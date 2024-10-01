@@ -99,4 +99,6 @@ To build:
     pip install -r requirements.txt
     make
     python -m build
-    pip install dist/synapse-0.1.0-py3-none-any.whl
+
+    # and optionally install
+    pip install dist/synapse-*-py3-none-any.whl
