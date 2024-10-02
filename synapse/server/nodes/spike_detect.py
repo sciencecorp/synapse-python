@@ -54,7 +54,7 @@ class SpikeDetect(BaseNode):
     async def run(self):
         while self.running:
             try:
-                data = self.data_queue.get(timeout=1)
+                data = await self.data_queue.get()
             except queue.Empty:
                 continue
 

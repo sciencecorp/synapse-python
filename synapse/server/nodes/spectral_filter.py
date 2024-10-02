@@ -65,7 +65,7 @@ class SpectralFilter(BaseNode):
             self.sample_rate = data.sample_rate
             self.channel_states.clear()
 
-        self.data_queue.put(data)
+        await self.data_queue.put(data)
 
     def apply_filter(self, sample_data):
         channel_ids, samples = zip(*sample_data)
@@ -89,7 +89,7 @@ class SpectralFilter(BaseNode):
     async def run(self):
         while self.running:
             try:
-                data = self.data_queue.get(timeout=1)
+                data = await self.data_queue.get()
             except queue.Empty:
                 continue
 

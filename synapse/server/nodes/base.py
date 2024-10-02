@@ -55,7 +55,7 @@ class BaseNode(object):
         return Status()
 
     async def on_data_received(self, data: SynapseData):
-        self.data_queue.put(data)
+        await self.data_queue.put(data)
 
     async def emit_data(self, data):
         for node in self.downstream_nodes:

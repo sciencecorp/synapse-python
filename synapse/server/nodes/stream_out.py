@@ -77,7 +77,7 @@ class StreamOut(BaseNode):
                 self.logger.error("socket not configured")
                 return
             try:
-                data = self.data_queue.get(True, 1)
+                data = await self.data_queue.get()
             except queue.Empty:
                 continue
 
