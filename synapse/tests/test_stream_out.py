@@ -13,15 +13,18 @@ from synapse.utils.ndtp_types import (
 def test_packing_broadband_data():
     node = StreamOut(id=1)
 
+    # Signed
     sample_data = [
-        (1, np.array([-1000, 2000, 3000], dtype=np.int16)),
+        (1, np.array([-1000, 2000, 1000], dtype=np.int16)),
         (2, np.array([1234, -1234, 1234, 1234], dtype=np.int16)),
-        (3, np.array([3000, -2000, 1000, 2000, 3000], dtype=np.int16)),
+        (3, np.array([2000, -2000, 1000, 2000, -2000], dtype=np.int16)),
     ]
     bdata = ElectricalBroadbandData(
+        bit_width=16,
         sample_rate=3,
         t0=1234567890,
         samples=sample_data,
+        is_signed=True
     )
 
     packed = node._pack(bdata)
@@ -32,6 +35,34 @@ def test_packing_broadband_data():
         assert unpacked.header.timestamp == bdata.t0
         assert unpacked.header.seq_number == i
 
+        assert unpacked.payload.bit_width == 16
+        assert unpacked.payload.channels[0].channel_id == bdata.samples[i][0]
+        assert list(unpacked.payload.channels[0].channel_data) == list(
+            bdata.samples[i][1]
+        )
+
+    # Unsigned
+    sample_data = [
+        (1, np.array([1000, 2000, 3000], dtype=np.int16)),
+        (2, np.array([1234, 1234, 1234, 1234], dtype=np.int16)),
+        (3, np.array([1000, 2000, 3000, 4000, 3000], dtype=np.int16)),
+    ]
+    bdata = ElectricalBroadbandData(
+        bit_width=12,
+        sample_rate=3,
+        t0=1234567890,
+        samples=sample_data,
+        is_signed=False
+    )
+
+    packed = node._pack(bdata)
+
+    for i, p in enumerate(packed):
+        unpacked = NDTPMessage.unpack(p)
+
+        assert unpacked.header.timestamp == bdata.t0
+
+        assert unpacked.payload.bit_width == 12
         assert unpacked.payload.channels[0].channel_id == bdata.samples[i][0]
         assert list(unpacked.payload.channels[0].channel_data) == list(
             bdata.samples[i][1]

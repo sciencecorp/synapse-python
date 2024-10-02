@@ -46,12 +46,11 @@ class ElectricalBroadband(BaseNode):
             n_samples = int(sample_rate * elapsed / 1e6)
 
             data = ElectricalBroadbandData(
-                signed=False,
+                bit_width=bit_width,
+                is_signed=False,
                 sample_rate=sample_rate,
                 t0=t0,
-                samples=[
-                    [[ch.id, [r_sample(bit_width) for _ in range(n_samples)]] for ch in channels]
-                ]
+                samples=[[ch.id, [r_sample(bit_width) for _ in range(n_samples)]] for ch in channels]
             )
 
             self.emit_data(data)

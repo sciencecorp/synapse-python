@@ -125,7 +125,7 @@ def test_to_ints():
 def test_ndtp_payload_broadband():
     bit_width = 12
     sample_rate = 3
-    signed = False
+    is_signed = False
     channels = [
         NDTPPayloadBroadbandChannelData(
             channel_id=0,
@@ -141,12 +141,12 @@ def test_ndtp_payload_broadband():
         ),
     ]
 
-    payload = NDTPPayloadBroadband(signed, bit_width, sample_rate, channels)
+    payload = NDTPPayloadBroadband(is_signed, bit_width, sample_rate, channels)
     p = payload.pack()
 
     u = NDTPPayloadBroadband.unpack(p)
     assert u.bit_width == bit_width
-    assert u.is_signed == signed
+    assert u.is_signed == is_signed
     assert len(u.channels) == 3
 
     assert u.channels[0].channel_id == 0

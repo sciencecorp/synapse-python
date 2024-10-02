@@ -13,15 +13,17 @@ from synapse.utils.ndtp import (
 
 
 class ElectricalBroadbandData:
-    __slots__ = ["data_type", "t0", "samples", "sample_rate"]
+    __slots__ = ["data_type", "t0", "is_signed", "bit_width", "samples", "sample_rate"]
 
-    def __init__(self, t0, samples: Tuple[int, List[float]], sample_rate):
+    def __init__(self, t0, bit_width, samples: Tuple[int, List[float]], sample_rate, is_signed=True):
         self.data_type = DataType.kBroadband
         self.t0 = t0
+        self.is_signed = is_signed
+        self.bit_width = bit_width
         self.samples = samples
         self.sample_rate = sample_rate
 
-    def pack(self, seq_number):
+    def pack(self, seq_number: int):
         packets = []
         seq_number_offset = 0
 
@@ -34,8 +36,8 @@ class ElectricalBroadbandData:
                         seq_number=seq_number + seq_number_offset,
                     ),
                     payload=NDTPPayloadBroadband(
-                        is_signed=True,
-                        bit_width=16,
+                        is_signed=self.is_signed,
+                        bit_width=self.bit_width,
                         sample_rate=self.sample_rate,
                         channels=[
                             NDTPPayloadBroadbandChannelData(
@@ -53,6 +55,7 @@ class ElectricalBroadbandData:
     def from_ndtp_message(msg: NDTPMessage):
         return ElectricalBroadbandData(
             t0=msg.header.timestamp,
+            bit_width=msg.payload.bit_width,
             sample_rate=msg.payload.sample_rate,
             samples=[
                 (ch.channel_id, np.array(ch.channel_data, dtype=np.int16))
@@ -83,7 +86,7 @@ class SpiketrainData:
         self.t0 = t0
         self.spike_counts = spike_counts
 
-    def pack(self, seq_number):
+    def pack(self, seq_number: int):
         message = NDTPMessage(
             header=NDTPHeader(
                 data_type=DataType.kSpiketrain,
