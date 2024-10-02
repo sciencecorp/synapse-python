@@ -43,7 +43,7 @@ class SynapseServicer(SynapseDeviceServicer):
         self.peripherals = peripherals
         self.logger = logging.getLogger("server")
 
-    def Info(self, request, context):
+    async def Info(self, request, context):
         self.logger.info("Info()")
         connections = [
             NodeConnection(src_node_id=src, dst_node_id=dst)
@@ -66,7 +66,7 @@ class SynapseServicer(SynapseDeviceServicer):
             ),
         )
 
-    def Configure(self, request, context):
+    async def Configure(self, request, context):
         self.logger.info("Configure()")
         if not self._reconfigure(request):
             return Status(
@@ -83,9 +83,9 @@ class SynapseServicer(SynapseDeviceServicer):
             state=self.state,
         )
 
-    def Start(self, request, context):
+    async def Start(self, request, context):
         self.logger.info("Start()")
-        if not self._start_streaming():
+        if not await self._start_streaming():
             return Status(
                 message="Failed to start streaming",
                 code=StatusCode.kUndefinedError,
@@ -99,9 +99,9 @@ class SynapseServicer(SynapseDeviceServicer):
             state=self.state,
         )
 
-    def Stop(self, request, context):
+    async def Stop(self, request, context):
         self.logger.info("Stop()")
-        if not self._stop_streaming():
+        if not await self._stop_streaming():
             return Status(
                 message="Failed to stop streaming",
                 code=StatusCode.kUndefinedError,
@@ -115,7 +115,7 @@ class SynapseServicer(SynapseDeviceServicer):
             state=self.state,
         )
 
-    def Query(self, request, context):
+    async def Query(self, request, context):
         self.logger.info("Query()")
 
         if self.state != DeviceState.kRunning:
@@ -212,7 +212,7 @@ class SynapseServicer(SynapseDeviceServicer):
 
         return True
 
-    def _start_streaming(self):
+    async def _start_streaming(self):
         self.logger.info("starting streaming...")
         for node in self.nodes:
             node.start()
@@ -220,7 +220,7 @@ class SynapseServicer(SynapseDeviceServicer):
         self.logger.info("streaming started.")
         return True
 
-    def _stop_streaming(self):
+    async def _stop_streaming(self):
         if self.state != DeviceState.kRunning:
             return False
         self.logger.info("stopping streaming...")

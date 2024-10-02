@@ -1,3 +1,4 @@
+import asyncio
 import queue
 import socket
 import struct
@@ -69,15 +70,9 @@ class StreamOut(BaseNode):
     def configure_iface_ip(self, iface_ip):
         self.__iface_ip = iface_ip
 
-    def stop(self):
-        status = super().stop()
-        if self.__socket:
-            self.__socket.close()
-            self.__socket = None
-        return status
-
-    def run(self):
-        while not self.stop_event.is_set():
+    async def run(self):
+        loop = asyncio.get_running_loop()
+        while self.running:
             if not self.socket:
                 self.logger.error("socket not configured")
                 return
@@ -90,7 +85,12 @@ class StreamOut(BaseNode):
 
             for packet in packets:
                 try:
-                    self.__socket.sendto(packet, (self.socket[0], self.socket[1]))
+                    await loop.run_in_executor(
+                        None,
+                        self.__socket.sendto,
+                        packet,
+                        (self.socket[0], self.socket[1]),
+                    )
                 except Exception as e:
                     self.logger.error(f"Error sending data: {e}")
 

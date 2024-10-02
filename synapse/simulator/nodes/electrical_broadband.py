@@ -40,7 +40,7 @@ class ElectricalBroadband(BaseNode):
         sample_rate = c.sample_rate if c.sample_rate else 16000
 
         t0 = time.time_ns() // 1000
-        while not self.stop_event.is_set():
+        while self.running:
             now = time.time_ns() // 1000
             elapsed = now - t0
             n_samples = int(sample_rate * elapsed / 1e6)

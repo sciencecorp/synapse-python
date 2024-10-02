@@ -1,6 +1,7 @@
 import signal
 import struct
 import socket
+import sys
 import asyncio
 import logging
 import argparse
@@ -74,8 +75,12 @@ def main(
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
 
-    loop = asyncio.get_event_loop()
-    loop.set_debug(True)
+    asyncio.run(async_main(args, node_object_map, peripherals))
+
+
+async def async_main(args, node_object_map, peripherals):
+    logger = logging.getLogger("async_main")
+    logger.info("Starting event loop...")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -85,16 +90,17 @@ def main(
     mreq = struct.pack("=4sL", group, socket.INADDR_ANY)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
-    listen = loop.create_datagram_endpoint(
+    loop = asyncio.get_running_loop()
+    transport, protocol = await loop.create_datagram_endpoint(
         lambda: MulticastDiscoveryProtocol(
             args.name, args.serial, args.rpc_port
         ),
         sock=sock,
     )
-    transport, protocol = loop.run_until_complete(listen)
+    logger.info("MulticastDiscoveryProtocol endpoint created")
 
-    async def serve_factory():
-        return await serve(
+    serve_task = asyncio.create_task(
+        serve(
             args.name,
             args.serial,
             args.rpc_port,
@@ -102,14 +108,47 @@ def main(
             node_object_map,
             peripherals,
         )
+    )
+    logger.info("serve task created")
 
-    main_task = loop.create_task(serve_factory())
-    loop.run_until_complete(main_task)
+    if sys.platform == "win32":
+        # Windows-specific signal handling
+        def signal_handler(signum, frame):
+            logger.info(f"Received signal {signum}, initiating shutdown...")
+            asyncio.create_task(
+                shutdown(loop, [serve_task], transport, signal.Signals(signum))
+            )
 
-    signal.signal(signal.SIGINT, main_task.cancel)
-    signal.signal(signal.SIGINT, listen.cancel)
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, signal_handler)
+    else:
+        # Unix-like systems can use add_signal_handler
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(
+                sig,
+                lambda s=sig: asyncio.create_task(
+                    shutdown(loop, [serve_task], transport, s)
+                ),
+            )
 
     try:
-        loop.run_forever()
+        await serve_task
+    except asyncio.CancelledError:
+        logger.info("Serve task cancelled")
     finally:
-        loop.close()
+        logger.info("Closing transport")
+        transport.close()
+
+
+async def shutdown(loop, tasks, transport, signal):
+    logger = logging.getLogger("shutdown")
+    logger.info(f"Received exit signal from {signal.name}, shutting down...")
+
+    for task in tasks:
+        task.cancel()
+
+    logger.info("Closing transport")
+    transport.close()
+
+    await asyncio.gather(*tasks, return_exceptions=True)
+    loop.stop()
