@@ -2,12 +2,14 @@ import select
 import socket
 import threading
 from synapse.api.datatype_pb2 import DataType
+
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.stream_in_pb2 import StreamInConfig
 from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status
 from synapse.utils.ndtp import NDTPMessage
-from synapse.utils.types import ElectricalBroadbandData, SpiketrainData, SynapseData
+
+from synapse.utils.ndtp_types import ElectricalBroadbandData, SpiketrainData, SynapseData
 
 
 class StreamIn(BaseNode):

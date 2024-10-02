@@ -93,11 +93,18 @@ For an example, see the [Blackrock Neurotech CerePlex driver](https://github.com
 
 ## Building
 
-To build:
+Dependencies:
 
     git submodule update --init
     pip install -r requirements.txt
     make
+
+To build and install in development mode:
+
+    pip install -e .
+
+To build and install a wheel:
+
     python -m build
 
     # and optionally install

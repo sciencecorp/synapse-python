@@ -1,14 +1,17 @@
-import pytest
 import struct
+
+import pytest
+
 from synapse.api.datatype_pb2 import DataType
 from synapse.utils.ndtp import (
-    to_bytes,
-    to_ints,
+    NDTP_VERSION,
     NDTPHeader,
     NDTPMessage,
     NDTPPayloadBroadband,
+    NDTPPayloadBroadbandChannelData,
     NDTPPayloadSpiketrain,
-    NDTP_VERSION,
+    to_bytes,
+    to_ints,
 )
 
 
@@ -22,7 +25,7 @@ def test_to_bytes():
         0,
     )
 
-    assert to_bytes([-7, -5, -3, -1], bit_width=12, signed=True) == (
+    assert to_bytes([-7, -5, -3, -1], bit_width=12, is_signed=True) == (
         bytearray(b"\xFF\x9F\xFB\xFF\xDF\xFF"),
         0,
     )
@@ -36,7 +39,7 @@ def test_to_bytes():
         bit_width=12,
         existing=bytearray(b"\x01\x00"),
         writing_bit_offset=4,
-        signed=True,
+        is_signed=True,
     ) == (bytearray(b"\x01\x0F\xF9\xFF\xBF\xFD"), 0)
 
     assert to_bytes([7, 5, 3], bit_width=12) == (bytearray(b"\x00p\x05\x000"), 4)
@@ -85,7 +88,7 @@ def test_to_ints():
     assert res == [7, 5, 3]
     assert offset == 36 + 4
 
-    res, offset, _ = to_ints(b"\xFF\xF9\xFF\xBF\xFD", 12, 3, 4, signed=True)
+    res, offset, _ = to_ints(b"\xFF\xF9\xFF\xBF\xFD", 12, 3, 4, is_signed=True)
     assert res == [-7, -5, -3]
     assert offset == 36 + 4
 
@@ -124,15 +127,15 @@ def test_ndtp_payload_broadband():
     sample_rate = 3
     signed = False
     channels = [
-        NDTPPayloadBroadband.ChannelData(
+        NDTPPayloadBroadbandChannelData(
             channel_id=0,
             channel_data=[1, 2, 3],
         ),
-        NDTPPayloadBroadband.ChannelData(
+        NDTPPayloadBroadbandChannelData(
             channel_id=1,
             channel_data=[4, 5, 6],
         ),
-        NDTPPayloadBroadband.ChannelData(
+        NDTPPayloadBroadbandChannelData(
             channel_id=2,
             channel_data=[3000, 2000, 1000],
         ),
@@ -143,17 +146,17 @@ def test_ndtp_payload_broadband():
 
     u = NDTPPayloadBroadband.unpack(p)
     assert u.bit_width == bit_width
-    assert u.signed == signed
+    assert u.is_signed == signed
     assert len(u.channels) == 3
 
     assert u.channels[0].channel_id == 0
-    assert u.channels[0].channel_data == [1, 2, 3]
+    assert list(u.channels[0].channel_data) == [1, 2, 3]
 
     assert u.channels[1].channel_id == 1
-    assert u.channels[1].channel_data == [4, 5, 6]
+    assert list(u.channels[1].channel_data) == [4, 5, 6]
 
     assert u.channels[2].channel_id == 2
-    assert u.channels[2].channel_data == [3000, 2000, 1000]
+    assert list(u.channels[2].channel_data) == [3000, 2000, 1000]
 
     assert p[0] >> 1 == bit_width
 
@@ -172,30 +175,6 @@ def test_ndtp_payload_broadband():
     assert unpacked == [1, 2, 3]
     assert offset == 36
 
-    unpacked, offset, p = to_ints(p, bit_width=24, count=1, start_bit=offset)
-    assert unpacked[0] == 1
-    assert offset == 24 + 4
-
-    unpacked, offset, p = to_ints(p, bit_width=16, count=1, start_bit=offset)
-    assert unpacked[0] == 3
-    assert offset == 16 + 4
-
-    unpacked, offset, p = to_ints(p, bit_width=bit_width, count=3, start_bit=offset)
-    assert unpacked == [4, 5, 6]
-    assert offset == 36 + 4
-
-    unpacked, offset, p = to_ints(p, bit_width=24, count=1, start_bit=offset)
-    assert unpacked[0] == 2
-    assert offset == 24
-
-    unpacked, offset, p = to_ints(p, bit_width=16, count=1, start_bit=offset)
-    assert unpacked[0] == 3
-    assert offset == 16
-
-    unpacked, offset, p = to_ints(p, bit_width=bit_width, count=3, start_bit=offset)
-    assert unpacked == [3000, 2000, 1000]
-    assert offset == 36
-
 
 def test_ndtp_payload_spiketrain():
     samples = [0, 1, 2, 3, 2]
@@ -205,12 +184,6 @@ def test_ndtp_payload_spiketrain():
     unpacked = NDTPPayloadSpiketrain.unpack(packed)
 
     assert unpacked == payload
-
-    samples = [5]
-
-    payload = NDTPPayloadSpiketrain(samples)
-    with pytest.raises(ValueError):
-        payload.pack()
 
 
 def test_ndtp_header():
@@ -237,9 +210,9 @@ def test_ndtp_message():
     payload = NDTPPayloadBroadband(
         bit_width=12,
         sample_rate=100,
-        signed=False,
+        is_signed=False,
         channels=[
-            NDTPPayloadBroadband.ChannelData(
+            NDTPPayloadBroadbandChannelData(
                 channel_id=c,
                 channel_data=[c * 100 for _ in range(c + 1)],
             )

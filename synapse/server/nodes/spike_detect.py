@@ -1,12 +1,12 @@
 import queue
 from collections import defaultdict
 
-from synapse.server.nodes import BaseNode
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.spike_detect_pb2 import SpikeDetectConfig
+from synapse.server.nodes import BaseNode
 from synapse.server.status import Status, StatusCode
-from synapse.utils.types import SpiketrainData
+from synapse.utils.ndtp_types import SpiketrainData
 
 REFRACTORY_PERIOD_S = 0.001
 
@@ -62,8 +62,8 @@ class SpikeDetect(BaseNode):
                 self.logger.warning("Received non-broadband data")
                 continue
 
-            for channel in data.channels:
-                self.channel_buffers[channel.channel_id].extend(channel.channel_data)
+            for channel_id, samples in data.samples:
+                self.channel_buffers[channel_id].extend(samples)
 
             refractory_period_in_samples = int(REFRACTORY_PERIOD_S * data.sample_rate)
             bin_size_in_samples = int(self.bin_size_ms * data.sample_rate / 1000)

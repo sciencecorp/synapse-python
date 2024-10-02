@@ -1,11 +1,12 @@
 import socket
 import time
 from typing import List, Optional
+
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.nodes.stream_in_pb2 import StreamInConfig
 from synapse.client.node import Node
-from synapse.utils.types import ElectricalBroadbandData, SpiketrainData, SynapseData
+from synapse.utils.ndtp_types import ElectricalBroadbandData, SpiketrainData, SynapseData
 
 MULTICAST_TTL = 3
 

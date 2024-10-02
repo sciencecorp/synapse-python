@@ -14,17 +14,14 @@ from synapse.api.synapse_pb2 import DeviceConfiguration
 import synapse as syn
 
 
-class DataclassJSONEncoder(json.JSONEncoder):
-    def default(self, o):
-        if dataclasses.is_dataclass(o):
-            return dataclasses.asdict(o)
-        return super().default(o)
-
-
 def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device's StreamOut node")
     a.add_argument("uri", type=str, help="IP address of Synapse device")
-    a.add_argument("--config", type=str, help="Configuration file",)
+    a.add_argument(
+        "--config",
+        type=str,
+        help="Configuration file",
+    )
     a.add_argument("--duration", type=int, help="Duration to read for in seconds")
     a.add_argument("--node_id", type=int, help="ID of the StreamOut node to read from")
     a.set_defaults(func=read)
@@ -54,7 +51,9 @@ def read(args):
     if args.config:
         print("Configuring device...")
         config = load_config_from_file(args.config)
-        stream_out = next((n for n in config.nodes if n.type == NodeType.kStreamOut), None)
+        stream_out = next(
+            (n for n in config.nodes if n.type == NodeType.kStreamOut), None
+        )
         assert stream_out is not None, "No StreamOut node found in config"
 
         if not device.configure(config):
@@ -66,11 +65,20 @@ def read(args):
                 raise ValueError("Failed to start device")
 
     else:
-        node = next((n for n in info.configuration.nodes if n.type == NodeType.kStreamOut and n.id == args.node_id), None)
+        node = next(
+            (
+                n
+                for n in info.configuration.nodes
+                if n.type == NodeType.kStreamOut and n.id == args.node_id
+            ),
+            None,
+        )
         if node is None:
-            print("No StreamOut node found in device configuration; please configure the device with a StreamOut node.")
+            print(
+                "No StreamOut node found in device configuration; please configure the device with a StreamOut node."
+            )
             return
-        
+
         stream_out = syn.StreamOut._from_proto(node.stream_out)
         stream_out.id = args.node_id
         stream_out.device = device
@@ -133,7 +141,7 @@ def _data_writer(stop, q):
             continue
 
         try:
-            fd.write(json.dumps(data, cls=DataclassJSONEncoder).encode("utf-8"))
+            fd.write(json.dumps(data.to_list()).encode("utf-8"))
             fd.write(b"\n")
 
         except Exception as e:

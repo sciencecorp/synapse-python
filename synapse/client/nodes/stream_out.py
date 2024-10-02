@@ -1,14 +1,19 @@
+import logging
 import socket
 import struct
-import logging
 import traceback
 from typing import Optional
+
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.nodes.stream_out_pb2 import StreamOutConfig
 from synapse.client.node import Node
 from synapse.utils.ndtp import NDTPMessage
-from synapse.utils.types import ElectricalBroadbandData, SpiketrainData, SynapseData
+from synapse.utils.ndtp_types import (
+    ElectricalBroadbandData,
+    SpiketrainData,
+    SynapseData,
+)
 
 
 class StreamOut(Node):

@@ -1,18 +1,21 @@
-from collections import defaultdict
-from typing import List
-import numpy as np
 import queue
+from collections import defaultdict
+
+import numpy as np
 from scipy import signal
 
-from synapse.server.nodes import BaseNode
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.spectral_filter_pb2 import (
     SpectralFilterConfig,
     SpectralFilterMethod,
 )
+from synapse.server.nodes import BaseNode
 from synapse.server.status import Status
-from synapse.utils.types import ElectricalBroadbandData, SynapseData
+from synapse.utils.ndtp_types import (
+    ElectricalBroadbandData,
+    SynapseData,
+)
 
 
 def get_filter_coefficients(method, low_cutoff_hz, high_cutoff_hz, sample_rate):
@@ -67,27 +70,24 @@ class SpectralFilter(BaseNode):
 
         self.data_queue.put(data)
 
-    def apply_filter(self, channels: List[ElectricalBroadbandData.ChannelData]):
-        # vectorize channel data so we can apply the filter to all channels at once
-        channel_ids = [ch.channel_id for ch in channels]
-        samples_array = np.array([ch.channel_data for ch in channels], dtype=np.int16)
+    def apply_filter(self, sample_data):
+        channel_ids, samples = zip(*sample_data)
+        samples_array = np.stack(samples)
 
-        filtered_samples = np.zeros_like(samples_array)
-        for i, channel_id in enumerate(channel_ids):
-            if self.channel_states[channel_id] is None:
-                zi = signal.lfilter_zi(self.b, self.a)
-                self.channel_states[channel_id] = zi * samples_array[i, 0]
+        if not hasattr(self, "zi"):
+            zi = signal.lfilter_zi(self.b, self.a)
+            self.zi = np.outer(np.ones(samples_array.shape[0]), zi)
 
-            filtered_samples[i], self.channel_states[channel_id] = signal.lfilter(
-                self.b, self.a, samples_array[i], zi=self.channel_states[channel_id]
-            )
+        # Apply the filter to all channels at once
+        filtered_samples, self.zi = signal.lfilter(
+            self.b, self.a, samples_array, axis=1, zi=self.zi
+        )
 
-        return [
-            ElectricalBroadbandData.ChannelData(
-                channel_id=channel_id, channel_data=filtered_samples[i].tolist()
-            )
+        result = [
+            [channel_id, filtered_samples[i]]
             for i, channel_id in enumerate(channel_ids)
         ]
+        return result
 
     def run(self):
         while not self.stop_event.is_set():
@@ -96,12 +96,8 @@ class SpectralFilter(BaseNode):
             except queue.Empty:
                 continue
 
-            filtered_data = ElectricalBroadbandData(
-                bit_width=data.bit_width,
-                signed=data.signed,
-                sample_rate=data.sample_rate,
-                t0=data.t0,
-                channels=self.apply_filter(data.channels),
-            )
+            filtered_samples = self.apply_filter(data.samples)
 
-            self.emit_data(filtered_data)
+            self.emit_data(
+                ElectricalBroadbandData(data.t0, filtered_samples, data.sample_rate)
+            )

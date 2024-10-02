@@ -2,10 +2,11 @@ import logging
 import queue
 import threading
 from typing import Tuple
+
 from synapse.api.datatype_pb2 import DataType
-from synapse.api.node_pb2 import NodeConfig, NodeType, NodeSocket
+from synapse.api.node_pb2 import NodeConfig, NodeSocket, NodeType
 from synapse.server.status import Status
-from synapse.utils.types import SynapseData
+from synapse.utils.ndtp_types import SynapseData
 
 
 class BaseNode(object):
