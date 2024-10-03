@@ -76,35 +76,25 @@ class StreamOut(BaseNode):
             if not self.socket:
                 self.logger.error("socket not configured")
                 return
-            try:
-                data = await self.data_queue.get()
-            except queue.Empty:
-                continue
 
+            data = await self.data_queue.get()
             packets = self._pack(data)
 
             for packet in packets:
-                try:
-                    await loop.run_in_executor(
-                        None,
-                        self.__socket.sendto,
-                        packet,
-                        (self.socket[0], self.socket[1]),
-                    )
-                except Exception as e:
-                    self.logger.error(f"Error sending data: {e}")
+                await loop.run_in_executor(
+                    None,
+                    self.__socket.sendto,
+                    packet,
+                    (self.socket[0], self.socket[1]),
+                )
 
     def _pack(self, data: SynapseData) -> List[bytes]:
         packets = []
 
-        if hasattr(data, "pack"):
-            try:
-                packets = data.pack(self.__sequence_number)
-                self.__sequence_number += len(packets)
-
-            except Exception as e:
-                raise ValueError(f"Error packing data: {e}")
-        else:
-            raise ValueError(f"Invalid payload: {type(data)}, {data}")
+        try:
+            packets = data.pack(self.__sequence_number)
+            self.__sequence_number += len(packets)
+        except Exception as e:
+            raise ValueError(f"Error packing data: {e}")
 
         return packets

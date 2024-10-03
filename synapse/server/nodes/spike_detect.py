@@ -53,10 +53,7 @@ class SpikeDetect(BaseNode):
 
     async def run(self):
         while self.running:
-            try:
-                data = await self.data_queue.get()
-            except queue.Empty:
-                continue
+            data = await self.data_queue.get()
 
             if data.data_type != DataType.kBroadband:
                 self.logger.warning("Received non-broadband data")
