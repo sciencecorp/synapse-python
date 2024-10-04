@@ -1,3 +1,4 @@
+import asyncio
 import queue
 import socket
 import struct
@@ -69,42 +70,31 @@ class StreamOut(BaseNode):
     def configure_iface_ip(self, iface_ip):
         self.__iface_ip = iface_ip
 
-    def stop(self):
-        status = super().stop()
-        if self.__socket:
-            self.__socket.close()
-            self.__socket = None
-        return status
-
-    def run(self):
-        while not self.stop_event.is_set():
+    async def run(self):
+        loop = asyncio.get_running_loop()
+        while self.running:
             if not self.socket:
                 self.logger.error("socket not configured")
                 return
-            try:
-                data = self.data_queue.get(True, 1)
-            except queue.Empty:
-                continue
 
+            data = await self.data_queue.get()
             packets = self._pack(data)
 
             for packet in packets:
-                try:
-                    self.__socket.sendto(packet, (self.socket[0], self.socket[1]))
-                except Exception as e:
-                    self.logger.error(f"Error sending data: {e}")
+                await loop.run_in_executor(
+                    None,
+                    self.__socket.sendto,
+                    packet,
+                    (self.socket[0], self.socket[1]),
+                )
 
     def _pack(self, data: SynapseData) -> List[bytes]:
         packets = []
 
-        if hasattr(data, "pack"):
-            try:
-                packets = data.pack(self.__sequence_number)
-                self.__sequence_number += len(packets)
-
-            except Exception as e:
-                raise ValueError(f"Error packing data: {e}")
-        else:
-            raise ValueError(f"Invalid payload: {type(data)}, {data}")
+        try:
+            packets = data.pack(self.__sequence_number)
+            self.__sequence_number += len(packets)
+        except Exception as e:
+            raise ValueError(f"Error packing data: {e}")
 
         return packets

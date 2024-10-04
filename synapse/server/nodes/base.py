@@ -1,7 +1,6 @@
+import asyncio
 import logging
-import queue
-import threading
-from typing import Tuple
+from typing import List, Tuple
 
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeConfig, NodeSocket, NodeType
@@ -15,7 +14,10 @@ class BaseNode(object):
         self.type: NodeType = type
         self.socket: Tuple[str, int] = None
         self.logger = logging.getLogger(f"[{self.__class__.__name__} id: {self.id}]")
-        self.data_queue = queue.Queue()
+        self.data_queue = asyncio.Queue()
+        self.downstream_nodes = []
+        self.running = False
+        self.tasks: List[asyncio.Task] = []
 
     def config(self) -> NodeConfig:
         return NodeConfig(
@@ -26,29 +28,38 @@ class BaseNode(object):
     def configure(self, config) -> Status:
         raise NotImplementedError
 
+    def add_downstream_node(self, node):
+        self.downstream_nodes.append(node)
+
     def start(self):
         self.logger.info("starting...")
-        self.stop_event = threading.Event()
-        self.thread = threading.Thread(target=self.run, args=())
-        self.thread.start()
+        if self.running:
+            return Status()
+
+        self.running = True
+        task = asyncio.create_task(self.run())
+        self.tasks.append(task)
         self.logger.info("started")
         return Status()
 
     def stop(self):
         self.logger.info("stopping...")
-        if not hasattr(self, "thread") or not self.thread.is_alive():
-            return
+        if not self.running:
+            return Status()
 
-        self.stop_event.set()
-        self.thread.join()
+        self.running = False
+        for task in self.tasks:
+            task.cancel()
+        self.tasks = []
         self.logger.info("stopped")
         return Status()
 
-    def on_data_received(self, data: SynapseData):
-        self.data_queue.put(data)
+    async def on_data_received(self, data: SynapseData):
+        await self.data_queue.put(data)
 
-    def emit_data(self, data):
-        pass
+    async def emit_data(self, data):
+        for node in self.downstream_nodes:
+            asyncio.create_task(node.on_data_received(data))
 
     def node_socket(self):
         if self.socket is None:

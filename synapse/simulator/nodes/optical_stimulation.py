@@ -20,13 +20,11 @@ class OpticalStimulation(BaseNode):
         self.__config = config
         return Status()
 
-    def run(self):
+    async def run(self):
         self.logger.debug("Starting to receive data...")
-        while not self.stop_event.is_set():
-            try:
-                data = self.data_queue.get(True, 1)
-            except queue.Empty:
-                continue
+        while self.running:
+            data = await self.data_queue.get()
+
             # write to the device somehow, but here, just log it
             value = int.from_bytes(data, byteorder="big")
             self.logger.debug("received data: %i" % (self.id, value))
