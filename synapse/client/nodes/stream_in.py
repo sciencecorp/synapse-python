@@ -14,12 +14,13 @@ MULTICAST_TTL = 3
 class StreamIn(Node):
     type = NodeType.kStreamIn
 
-    def __init__(self, data_type: DataType):
+    def __init__(self, data_type: DataType, shape: List[int]):
         self.__sequence_number = 0
         self.__socket = socket.socket(
             socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
         )
         self.data_type = data_type
+        self.shape = shape
 
     def write(self, data: SynapseData):
         if self.device is None:
@@ -76,6 +77,7 @@ class StreamIn(Node):
         n = NodeConfig()
         i = StreamInConfig()
         i.data_type = self.data_type
+        i.shape = self.shape
     
         n.stream_in.CopyFrom(i)
         return n
@@ -88,4 +90,4 @@ class StreamIn(Node):
         if not isinstance(proto, StreamInConfig):
             raise ValueError("proto is not of type StreamInConfig")
 
-        return StreamIn(data_type=proto.data_type)
+        return StreamIn(data_type=proto.data_type, shape=proto.shape)
