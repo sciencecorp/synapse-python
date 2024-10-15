@@ -199,9 +199,9 @@ def test_ndtp_header():
     # Data too smol
     with pytest.raises(ValueError):
         NDTPHeader.unpack(
-            struct.pack("<B", NDTP_VERSION)
-            + struct.pack("<I", DataType.kBroadband)
-            + struct.pack("<Q", 123)
+            struct.pack(">B", NDTP_VERSION)
+            + struct.pack(">I", DataType.kBroadband)
+            + struct.pack(">Q", 123)
         )
 
 

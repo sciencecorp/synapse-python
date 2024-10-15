@@ -14,7 +14,7 @@ from synapse.api.datatype_pb2 import DataType
 cdef int DATA_TYPE_K_BROADBAND = DataType.kBroadband
 cdef int DATA_TYPE_K_SPIKETRAIN = DataType.kSpiketrain
 
-cdef object NDTPHeader_STRUCT = struct.Struct("<BIQH")
+cdef object NDTPHeader_STRUCT = struct.Struct(">BIQH")
 
 NDTP_VERSION = 0x01
 cdef int NDTPPayloadSpiketrain_BIT_WIDTH = 2
@@ -403,7 +403,7 @@ cdef class NDTPPayloadSpiketrain:
             clamped_counts[i] = min(self.spike_counts[i], max_value)
 
         # Pack the number of spikes (4 bytes)
-        payload += struct.pack("<I", spike_counts_len)  # Use "<I" for unsigned int
+        payload += struct.pack(">I", spike_counts_len)
 
         # Pack clamped spike counts
         spike_counts_bytes, _ = to_bytes(
@@ -423,7 +423,7 @@ cdef class NDTPPayloadSpiketrain:
                 f"Invalid spiketrain data size {len_data}: expected at least 4 bytes"
             )
 
-        cdef int num_spikes = struct.unpack("<I", data[:4])[0]
+        cdef int num_spikes = struct.unpack(">I", data[:4])[0]
         cdef bytearray payload = data[4:]
         cdef int bits_needed = num_spikes * NDTPPayloadSpiketrain_BIT_WIDTH
         cdef int bytes_needed = (bits_needed + 7) // 8
@@ -452,7 +452,7 @@ cdef class NDTPHeader:
     cdef public long long timestamp
     cdef public int seq_number
 
-    STRUCT = struct.Struct("<BIQH")  # Define as a Python class attribute
+    STRUCT = struct.Struct(">BIQH")  # Define as a Python class attribute
 
     def __init__(self, int data_type, long long timestamp, int seq_number):
         self.data_type = data_type
@@ -538,7 +538,7 @@ cdef class NDTPMessage:
         message += payload_bytes
 
         crc = NDTPMessage.crc16(message)
-        crc_bytes = struct.pack("<H", crc)
+        crc_bytes = struct.pack(">H", crc)
 
         message += crc_bytes  # Appending bytes to bytearray is acceptable
 
@@ -557,7 +557,7 @@ cdef class NDTPMessage:
         cdef object payload = None
 
         header = NDTPHeader.unpack(data[:header_size])
-        crc16_value = struct.unpack("<H", bytes(data[-2:]))[0]
+        crc16_value = struct.unpack(">H", bytes(data[-2:]))[0]
 
         pbytes = data[header_size:-2]
         pdtype = header.data_type
