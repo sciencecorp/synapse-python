@@ -14,8 +14,6 @@ from synapse.api.datatype_pb2 import DataType
 cdef int DATA_TYPE_K_BROADBAND = DataType.kBroadband
 cdef int DATA_TYPE_K_SPIKETRAIN = DataType.kSpiketrain
 
-cdef object NDTPHeader_STRUCT = struct.Struct(">BIQH")
-
 NDTP_VERSION = 0x01
 cdef int NDTPPayloadSpiketrain_BIT_WIDTH = 2
 
@@ -36,15 +34,18 @@ def to_bytes(
     # Initialize buffer
     cdef bytearray buffer
     cdef int buffer_length
-    cdef int bit_offset
+    cdef int bit_offset = 0
     if existing is None:
         buffer = bytearray()
         buffer_length = 0
-        bit_offset = 0
     else:
         buffer = existing
         buffer_length = len(buffer)
-        bit_offset = (buffer_length - 1) * 8 + writing_bit_offset if buffer_length > 0 else 0
+        if buffer_length > 0:
+            if writing_bit_offset > 0:
+                bit_offset = (buffer_length - 1) * 8 + writing_bit_offset
+            else:
+                bit_offset = (buffer_length) * 8
 
     cdef int total_bits_needed = bit_offset + num_bits_to_write
     cdef int total_bytes_needed = (total_bits_needed + 7) // 8
@@ -162,12 +163,11 @@ def to_ints(
     cdef int value_index = 0
     cdef int max_values = count if count > 0 else (data_len * 8) // bit_width
     cdef int[::1] values_array = cython.view.array(shape=(max_values,), itemsize=cython.sizeof(cython.int), format="i")
-    cdef int bit_width_minus1 = bit_width - 1
-    cdef int sign_bit = 1 << bit_width_minus1
-    cdef uint8_t byte  # Declare byte here, outside the loop
+    cdef int sign_bit = 1 << (bit_width - 1)
+    cdef uint8_t byte
 
     for byte_index in range(data_len):
-        byte = data_view[byte_index]  # Initialize byte inside the loop
+        byte = data_view[byte_index]
 
         if byteorder == 'little':
             start = start_bit if byte_index == 0 else 0
@@ -286,18 +286,31 @@ cdef class NDTPPayloadBroadband:
         payload += struct.pack(">H", self.sample_rate)
 
         cdef NDTPPayloadBroadbandChannelData c
+        bit_offset = 0
         for c in self.channels:
-            # Pack channel_id (3 bytes, 24 bits)
-            payload += c.channel_id.to_bytes(3, byteorder='big', signed=False)
-
-            # Pack number of samples (2 bytes, 16 bits)
-            payload += struct.pack(">H", len(c.channel_data))
-
-            # Pack channel_data
-            channel_data_bytes, _ = to_bytes(
-                c.channel_data, self.bit_width, is_signed=self.is_signed
+            payload, bit_offset = to_bytes(
+                values=[c.channel_id],
+                bit_width=24,
+                is_signed=False,
+                existing=payload,
+                writing_bit_offset=bit_offset,
             )
-            payload += channel_data_bytes
+
+            payload, bit_offset = to_bytes(
+                values=[len(c.channel_data)],
+                bit_width=16,
+                is_signed=False,
+                existing=payload,
+                writing_bit_offset=bit_offset,
+            )
+
+            payload, bit_offset = to_bytes(
+                values=c.channel_data,
+                bit_width=self.bit_width,
+                is_signed=self.is_signed,
+                existing=payload,
+                writing_bit_offset=bit_offset,
+            )
 
         return payload
 
@@ -324,33 +337,16 @@ cdef class NDTPPayloadBroadband:
         cdef list channel_data
         cdef NDTPPayloadBroadbandChannelData channel
 
+        data = data[6:]
+        bit_offset = 0
         for _ in range(num_channels):
-            # Unpack channel_id (3 bytes, big-endian)
-            if pos + 3 > len(data):
-                raise ValueError("Incomplete data for channel_id")
-            channel_id = int.from_bytes(data[pos:pos+3], 'big')
-            pos += 3
+            a_channel_id, bit_offset, data = to_ints(data=data, bit_width=24, count=1, start_bit=bit_offset, is_signed=is_signed)
+            channel_id = a_channel_id[0]
 
-            # Unpack num_samples (2 bytes, big-endian)
-            if pos + 2 > len(data):
-                raise ValueError("Incomplete data for num_samples")
-            num_samples = struct.unpack(">H", data[pos:pos+2])[0]
-            pos += 2
+            a_num_samples, bit_offset, data = to_ints(data=data, bit_width=16, count=1, start_bit=bit_offset, is_signed=is_signed)
+            num_samples = a_num_samples[0]
 
-            # Calculate the number of bits and bytes needed for channel data
-            total_bits = num_samples * bit_width
-            bytes_needed = (total_bits + 7) // 8  # Round up to the nearest byte
-
-            # Ensure we have enough data
-            if pos + bytes_needed > len(data):
-                raise ValueError("Incomplete data for channel_data")
-            channel_data_bytes = data[pos:pos + bytes_needed]
-            pos += bytes_needed
-
-            # Unpack channel_data
-            channel_data, _, _ = to_ints(
-                channel_data_bytes, bit_width, num_samples, is_signed=is_signed
-            )
+            channel_data, bit_offset, data = to_ints(data=data, bit_width=bit_width, count=num_samples, start_bit=bit_offset, is_signed=is_signed)
 
             channel = NDTPPayloadBroadbandChannelData(channel_id, channel_data)
             channels.append(channel)
@@ -452,7 +448,7 @@ cdef class NDTPHeader:
     cdef public long long timestamp
     cdef public int seq_number
 
-    STRUCT = struct.Struct(">BIQH")  # Define as a Python class attribute
+    STRUCT = struct.Struct(">BBQH")  # Define as a Python class attribute
 
     def __init__(self, int data_type, long long timestamp, int seq_number):
         self.data_type = data_type
@@ -549,7 +545,7 @@ cdef class NDTPMessage:
         if isinstance(data, bytes):
             data = bytearray(data)
 
-        cdef int header_size = NDTPHeader_STRUCT.size
+        cdef int header_size = NDTPHeader.STRUCT.size
         cdef NDTPHeader header
         cdef int crc16_value
         cdef object pbytes

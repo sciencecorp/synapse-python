@@ -144,6 +144,47 @@ def test_ndtp_payload_broadband():
     payload = NDTPPayloadBroadband(is_signed, bit_width, sample_rate, channels)
     p = payload.pack()
 
+    assert p[0] == (bit_width << 1) | (is_signed << 0)
+    
+    # number of channels
+    assert p[1] == 0
+    assert p[2] == 0
+    assert p[3] == 3
+
+    # sample rate
+    assert p[4] == 0
+    assert p[5] == 3
+
+    # ch 0 channel_id, 0 (24 bits, 3 bytes)
+    assert p[6] == 0
+    assert p[7] == 0
+    assert p[8] == 0
+
+    # ch 0 num_samples, 3 (16 bits, 2 bytes)
+    assert p[9] == 0
+    assert p[10] == 3
+
+    # ch 0 channel_data, 1, 2, 3 (12 bits, 1.5 bytes each)
+    # 0000 0000  0001 0000  0000 0010  0000 0000  0011 ....
+    assert p[11] == 0
+    assert p[12] == 16
+    assert p[13] == 2
+    assert p[14] == 0
+    assert p[15] >= 3
+
+    # ch 1 channel_id, 1 (24 bits, 3 bytes, starting from 4 bit offset)
+    # 0011 0000  0000 0000  0000 0000  0001 ....
+    assert p[15] == 48
+    assert p[16] == 0
+    assert p[17] == 0
+    assert p[18] >= 16
+
+    # ch 1 num_samples, 3 (16 bits, 2 bytes, starting from 4 bit offset)
+    # 0001 0000  0000 0000  0011 ....
+    assert p[18] == 16
+    assert p[19] == 0
+    assert p[20] >= 48
+
     u = NDTPPayloadBroadband.unpack(p)
     assert u.bit_width == bit_width
     assert u.is_signed == is_signed
@@ -200,7 +241,7 @@ def test_ndtp_header():
     with pytest.raises(ValueError):
         NDTPHeader.unpack(
             struct.pack(">B", NDTP_VERSION)
-            + struct.pack(">I", DataType.kBroadband)
+            + struct.pack(">B", DataType.kBroadband)
             + struct.pack(">Q", 123)
         )
 
@@ -209,12 +250,12 @@ def test_ndtp_message():
     header = NDTPHeader(DataType.kBroadband, timestamp=1234567890, seq_number=42)
     payload = NDTPPayloadBroadband(
         bit_width=12,
-        sample_rate=100,
+        sample_rate=3,
         is_signed=False,
         channels=[
             NDTPPayloadBroadbandChannelData(
                 channel_id=c,
-                channel_data=[c * 100 for _ in range(c + 1)],
+                channel_data=[c * 3 for _ in range(c + 1)],
             )
             for c in range(3)
         ],
@@ -222,6 +263,7 @@ def test_ndtp_message():
     message = NDTPMessage(header, payload)
 
     packed = message.pack()
+
     unpacked = NDTPMessage.unpack(packed)
 
     assert unpacked.header == message.header
