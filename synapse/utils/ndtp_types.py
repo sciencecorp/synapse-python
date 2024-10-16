@@ -53,12 +53,14 @@ class ElectricalBroadbandData:
 
     @staticmethod
     def from_ndtp_message(msg: NDTPMessage):
+        dtype = np.int16 if msg.payload.is_signed else np.uint16
         return ElectricalBroadbandData(
             t0=msg.header.timestamp,
             bit_width=msg.payload.bit_width,
+            is_signed=msg.payload.is_signed,
             sample_rate=msg.payload.sample_rate,
             samples=[
-                (ch.channel_id, np.array(ch.channel_data, dtype=np.int16))
+                (ch.channel_id, np.array(ch.channel_data, dtype=dtype))
                 for ch in msg.payload.channels
             ],
         )
