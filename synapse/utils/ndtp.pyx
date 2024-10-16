@@ -162,6 +162,8 @@ def to_ints(
     cdef int start
     cdef int value_index = 0
     cdef int max_values = count if count > 0 else (data_len * 8) // bit_width
+    if max_values == 0:
+        raise ValueError(f"max_values must be > 0 (got {len(data)} data, {count} count, bit width {bit_width})")
     cdef int[::1] values_array = cython.view.array(shape=(max_values,), itemsize=cython.sizeof(cython.int), format="i")
     cdef int sign_bit = 1 << (bit_width - 1)
     cdef uint8_t byte
@@ -282,8 +284,8 @@ cdef class NDTPPayloadBroadband:
         # Next three bytes: number of channels (24-bit integer)
         payload += n_channels.to_bytes(3, byteorder='big', signed=False)
 
-        # Next two bytes: sample rate (16-bit integer)
-        payload += struct.pack(">H", self.sample_rate)
+        # Next three bytes: sample rate (24-bit integer)
+        payload += self.sample_rate.to_bytes(3, byteorder='big', signed=False)
 
         cdef NDTPPayloadBroadbandChannelData c
         bit_offset = 0
@@ -318,35 +320,35 @@ cdef class NDTPPayloadBroadband:
     def unpack(data):
         if isinstance(data, bytes):
             data = bytearray(data)
-
+            
+        cdef int payload_h_size = 7
         cdef int len_data = len(data)
-        if len_data < 6:
+        if len_data < payload_h_size:
             raise ValueError(
-                f"Invalid broadband data size {len_data}: expected at least 6 bytes"
+                f"Invalid broadband data size {len_data}: expected at least {payload_h_size} bytes"
             )
 
         cdef int bit_width = data[0] >> 1
         cdef bint is_signed = (data[0] & 1) == 1
         cdef int num_channels = int.from_bytes(data[1:4], 'big')
-        cdef int sample_rate = struct.unpack(">H", data[4:6])[0]
-
-        cdef int pos = 6  # Starting byte position after the header
+        cdef int sample_rate = int.from_bytes(data[4:7], 'big')
 
         cdef list channels = []
         cdef int channel_id, num_samples
         cdef list channel_data
         cdef NDTPPayloadBroadbandChannelData channel
 
-        data = data[6:]
+        truncated = data[7:]
         bit_offset = 0
-        for _ in range(num_channels):
-            a_channel_id, bit_offset, data = to_ints(data=data, bit_width=24, count=1, start_bit=bit_offset, is_signed=is_signed)
+
+        for c in range(num_channels):
+            a_channel_id, bit_offset, truncated = to_ints(data=truncated, bit_width=24, count=1, start_bit=bit_offset, is_signed=False)
             channel_id = a_channel_id[0]
 
-            a_num_samples, bit_offset, data = to_ints(data=data, bit_width=16, count=1, start_bit=bit_offset, is_signed=is_signed)
+            a_num_samples, bit_offset, truncated = to_ints(data=truncated, bit_width=16, count=1, start_bit=bit_offset, is_signed=False)
             num_samples = a_num_samples[0]
 
-            channel_data, bit_offset, data = to_ints(data=data, bit_width=bit_width, count=num_samples, start_bit=bit_offset, is_signed=is_signed)
+            channel_data, bit_offset, truncated = to_ints(data=truncated, bit_width=bit_width, count=num_samples, start_bit=bit_offset, is_signed=is_signed)
 
             channel = NDTPPayloadBroadbandChannelData(channel_id, channel_data)
             channels.append(channel)
@@ -496,6 +498,7 @@ cdef class NDTPHeader:
 cdef class NDTPMessage:
     cdef public NDTPHeader header
     cdef public object payload
+    cdef public int _crc16
 
     def __init__(self, NDTPHeader header, payload=None):
         self.header = header
@@ -533,8 +536,9 @@ cdef class NDTPMessage:
         message += header_bytes
         message += payload_bytes
 
-        crc = NDTPMessage.crc16(message)
-        crc_bytes = struct.pack(">H", crc)
+        self._crc16 = NDTPMessage.crc16(message)
+        crc_bytes = struct.pack(">H", self._crc16)
+        print(f"crc16: {self._crc16}")
 
         message += crc_bytes  # Appending bytes to bytearray is acceptable
 
@@ -568,4 +572,6 @@ cdef class NDTPMessage:
         if not NDTPMessage.crc16_verify(data[:-2], crc16_value):
             raise ValueError(f"CRC16 verification failed (expected {crc16_value})")
 
-        return NDTPMessage(header, payload)
+        msg = NDTPMessage(header, payload)
+        msg._crc16 = crc16_value
+        return msg

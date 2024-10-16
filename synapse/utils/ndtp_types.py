@@ -1,3 +1,4 @@
+import math
 from typing import List, Tuple, Union
 
 import numpy as np
@@ -11,6 +12,15 @@ from synapse.utils.ndtp import (
     NDTPPayloadSpiketrain,
 )
 
+MAX_CH_PAYLOAD_SIZE_BYTES = 1400
+
+def chunk_channel_data(ch_data: List[float], max_payload_size_bytes: int):
+    n_packets = math.ceil(len(ch_data) / max_payload_size_bytes)
+    n_pts_per_packet = math.ceil(len(ch_data) / n_packets)
+    for i in range(n_packets):
+        start_idx = i * n_pts_per_packet
+        end_idx = min(start_idx + n_pts_per_packet, len(ch_data))
+        yield ch_data[start_idx:end_idx]
 
 class ElectricalBroadbandData:
     __slots__ = ["data_type", "t0", "is_signed", "bit_width", "samples", "sample_rate"]
@@ -27,27 +37,36 @@ class ElectricalBroadbandData:
         packets = []
         seq_number_offset = 0
 
-        for ch_samples in self.samples:
-            packets.append(
-                NDTPMessage(
-                    header=NDTPHeader(
-                        data_type=DataType.kBroadband,
-                        timestamp=self.t0,
-                        seq_number=seq_number + seq_number_offset,
-                    ),
-                    payload=NDTPPayloadBroadband(
-                        is_signed=self.is_signed,
-                        bit_width=self.bit_width,
-                        sample_rate=self.sample_rate,
-                        channels=[
-                            NDTPPayloadBroadbandChannelData(
-                                channel_id=ch_samples[0], channel_data=ch_samples[1]
-                            )
-                        ],
-                    ),
-                ).pack()
-            )
-            seq_number_offset += 1
+        try: 
+            for ch_samples in self.samples:
+                ch_id = ch_samples[0]
+                ch_data = ch_samples[1]
+                if (len(ch_data) == 0):
+                    continue
+
+                for ch_sample_sub in chunk_channel_data(ch_data, MAX_CH_PAYLOAD_SIZE_BYTES):
+                    msg = NDTPMessage(
+                        header=NDTPHeader(
+                            data_type=DataType.kBroadband,
+                            timestamp=self.t0,
+                            seq_number=seq_number + seq_number_offset,
+                        ),
+                        payload=NDTPPayloadBroadband(
+                            is_signed=self.is_signed,
+                            bit_width=self.bit_width,
+                            sample_rate=self.sample_rate,
+                            channels=[
+                                NDTPPayloadBroadbandChannelData(
+                                    channel_id=ch_id, channel_data=ch_sample_sub
+                                )
+                            ],
+                        ),
+                    )
+                    packed = msg.pack()
+                    packets.append(packed)
+                    seq_number_offset += 1
+        except Exception as e:
+            print(f"Error packing NDTP message: {e}")
 
         return packets
 
