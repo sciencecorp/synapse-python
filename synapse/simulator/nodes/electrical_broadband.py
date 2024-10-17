@@ -1,3 +1,4 @@
+import asyncio
 import random
 import time
 
@@ -57,4 +58,4 @@ class ElectricalBroadband(BaseNode):
 
             t0 = now
 
-            time.sleep(0.100)
+            await asyncio.sleep(0.100)
