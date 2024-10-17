@@ -538,7 +538,6 @@ cdef class NDTPMessage:
 
         self._crc16 = NDTPMessage.crc16(message)
         crc_bytes = struct.pack(">H", self._crc16)
-        print(f"crc16: {self._crc16}")
 
         message += crc_bytes  # Appending bytes to bytearray is acceptable
 
