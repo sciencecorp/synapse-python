@@ -100,11 +100,12 @@ class ElectricalBroadbandData:
 
 
 class SpiketrainData:
-    __slots__ = ["data_type", "t0", "spike_counts"]
+    __slots__ = ["data_type", "t0", "bin_size_ms", "spike_counts"]
 
-    def __init__(self, t0, spike_counts):
+    def __init__(self, t0, bin_size_ms, spike_counts):
         self.data_type = DataType.kSpiketrain
         self.t0 = t0
+        self.bin_size_ms = bin_size_ms
         self.spike_counts = spike_counts
 
     def pack(self, seq_number: int):
@@ -114,7 +115,10 @@ class SpiketrainData:
                 timestamp=self.t0,
                 seq_number=seq_number,
             ),
-            payload=NDTPPayloadSpiketrain(spike_counts=self.spike_counts),
+            payload=NDTPPayloadSpiketrain(
+                bin_size_ms=self.bin_size_ms,
+                spike_counts=self.spike_counts
+            ),
         )
 
         return [message.pack()]
@@ -123,6 +127,7 @@ class SpiketrainData:
     def from_ndtp_message(msg: NDTPMessage):
         return SpiketrainData(
             t0=msg.header.timestamp,
+            bin_size_ms=msg.payload.bin_size_ms,
             spike_counts=msg.payload.spike_counts,
         )
 
@@ -132,7 +137,7 @@ class SpiketrainData:
         return SpiketrainData.from_ndtp_message(u)
 
     def to_list(self):
-        return [self.t0, list(self.spike_counts)]
+        return [self.t0, self.bin_size_ms, list(self.spike_counts)]
 
 
 SynapseData = Union[SpiketrainData, ElectricalBroadbandData]

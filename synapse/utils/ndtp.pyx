@@ -370,10 +370,12 @@ cdef class NDTPPayloadBroadband:
 
 
 cdef class NDTPPayloadSpiketrain:
+    cdef public int bin_size_ms
     cdef public int[::1] spike_counts  # Memoryview of integers
 
-    def __init__(self, spike_counts):
+    def __init__(self, bin_size_ms, spike_counts):
         cdef int size, i
+        self.bin_size_ms = bin_size_ms
         self.spike_counts = None
 
         if isinstance(spike_counts, list):
@@ -403,6 +405,9 @@ cdef class NDTPPayloadSpiketrain:
         # Pack the number of spikes (4 bytes)
         payload += struct.pack(">I", spike_counts_len)
 
+        # Pack the bin_size (1 byte)
+        payload += struct.pack(">B", self.bin_size_ms)
+
         # Pack clamped spike counts
         spike_counts_bytes, _ = to_bytes(
             clamped_counts, NDTPPayloadSpiketrain_BIT_WIDTH, is_signed=False
@@ -422,7 +427,8 @@ cdef class NDTPPayloadSpiketrain:
             )
 
         cdef int num_spikes = struct.unpack(">I", data[:4])[0]
-        cdef bytearray payload = data[4:]
+        cdef int bin_size_ms = struct.unpack(">B", data[4:5])[0]
+        cdef bytearray payload = data[5:]
         cdef int bits_needed = num_spikes * NDTPPayloadSpiketrain_BIT_WIDTH
         cdef int bytes_needed = (bits_needed + 7) // 8
 
@@ -434,7 +440,7 @@ cdef class NDTPPayloadSpiketrain:
             payload[:bytes_needed], NDTPPayloadSpiketrain_BIT_WIDTH, num_spikes, is_signed=False
         )
 
-        return NDTPPayloadSpiketrain(spike_counts)
+        return NDTPPayloadSpiketrain(bin_size_ms, spike_counts)
 
     def __eq__(self, other):
         if not isinstance(other, NDTPPayloadSpiketrain):

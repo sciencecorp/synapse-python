@@ -140,6 +140,7 @@ def test_packing_spiketrain_data():
 
     sdata = SpiketrainData(
         t0=1234567890,
+        bin_size_ms=10,
         spike_counts=[0, 1, 2, 3, 2, 1, 0],
     )
 
@@ -147,6 +148,7 @@ def test_packing_spiketrain_data():
     unpacked = NDTPMessage.unpack(packed)
 
     assert unpacked.header.timestamp == sdata.t0
+    assert unpacked.payload.bin_size_ms == sdata.bin_size_ms
     assert len(unpacked.payload.spike_counts) == len(sdata.spike_counts)
 
     assert list(unpacked.payload.spike_counts) == list(sdata.spike_counts)
