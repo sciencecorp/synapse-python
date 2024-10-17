@@ -91,5 +91,5 @@ class SpikeDetect(BaseNode):
                     spike_counts.append(spike_count)
 
                 await self.emit_data(
-                    SpiketrainData(t0=data.t0, spike_counts=spike_counts)
+                    SpiketrainData(t0=data.t0, bin_size_ms=self.bin_size_ms, spike_counts=spike_counts)
                 )
