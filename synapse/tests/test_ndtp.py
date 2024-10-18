@@ -344,6 +344,29 @@ def test_ndtp_message_broadband():
     assert isinstance(unpacked.payload, NDTPPayloadBroadband)
     assert unpacked.payload == message.payload
 
+def test_ndtp_message_broadband_signed():
+    header = NDTPHeader(DataType.kBroadband, timestamp=1234567890, seq_number=42)
+    payload = NDTPPayloadBroadband(
+        bit_width=12,
+        sample_rate=3,
+        is_signed=True,
+        channels=[
+            NDTPPayloadBroadbandChannelData(
+                channel_id=c,
+                channel_data=[s * -100 for s in range(c + 1)],
+            )
+            for c in range(3)
+        ],
+    )
+    message = NDTPMessage(header, payload)
+
+    packed = message.pack()
+    unpacked = NDTPMessage.unpack(packed)
+
+    assert unpacked.header == message.header
+    assert isinstance(unpacked.payload, NDTPPayloadBroadband)
+    assert unpacked.payload == message.payload
+
 def test_ndtp_message_broadband_large():
     header = NDTPHeader(DataType.kBroadband, timestamp=1234567890, seq_number=42)
     payload = NDTPPayloadBroadband(
@@ -365,6 +388,38 @@ def test_ndtp_message_broadband_large():
 
     unpacked = NDTPMessage.unpack(packed)
     assert unpacked._crc16 == 45907
+
+    assert unpacked.header == message.header
+    assert isinstance(unpacked.payload, NDTPPayloadBroadband)
+    assert unpacked.payload == message.payload
+    
+    u_payload = unpacked.payload
+    assert u_payload.bit_width == payload.bit_width
+    assert u_payload.sample_rate == payload.sample_rate
+    assert u_payload.is_signed == payload.is_signed
+    assert len(u_payload.channels) == len(payload.channels)
+    for i, c in enumerate(payload.channels):
+        assert u_payload.channels[i].channel_id == c.channel_id
+        assert list(u_payload.channels[i].channel_data) == list(c.channel_data)
+
+def test_ndtp_message_broadband_large_signed():
+    header = NDTPHeader(DataType.kBroadband, timestamp=1234567890, seq_number=42)
+    payload = NDTPPayloadBroadband(
+        bit_width=16,
+        sample_rate=36000,
+        is_signed=True,
+        channels=[
+            NDTPPayloadBroadbandChannelData(
+                channel_id=c,
+                channel_data=[i * -1 for i in range(10000)],
+            )
+            for c in range(20)
+        ],
+    )
+    message = NDTPMessage(header, payload)
+
+    packed = message.pack()
+    unpacked = NDTPMessage.unpack(packed)
 
     assert unpacked.header == message.header
     assert isinstance(unpacked.payload, NDTPPayloadBroadband)
