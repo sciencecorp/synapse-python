@@ -287,11 +287,13 @@ def test_ndtp_payload_broadband_large():
 def test_ndtp_payload_spiketrain():
     samples = [0, 1, 2, 3, 2]
 
-    payload = NDTPPayloadSpiketrain(samples)
+    payload = NDTPPayloadSpiketrain(10, samples)
     packed = payload.pack()
     unpacked = NDTPPayloadSpiketrain.unpack(packed)
 
     assert unpacked == payload
+    assert unpacked.bin_size_ms == 10
+    assert list(unpacked.spike_counts) == samples
 
 
 def test_ndtp_header():
@@ -379,7 +381,7 @@ def test_ndtp_message_broadband_large():
 
 def test_ndtp_message_spiketrain():
     header = NDTPHeader(DataType.kSpiketrain, timestamp=1234567890, seq_number=42)
-    payload = NDTPPayloadSpiketrain(spike_counts=[1, 2, 3, 2, 1])
+    payload = NDTPPayloadSpiketrain(bin_size_ms=10, spike_counts=[1, 2, 3, 2, 1])
     message = NDTPMessage(header, payload)
 
     packed = message.pack()
