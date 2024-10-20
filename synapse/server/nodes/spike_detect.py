@@ -102,7 +102,4 @@ class SpikeDetect(BaseNode):
 
                 # Advance the timestamp for the next bin
                 bin_duration_us = bin_size_in_samples * 1e6 / data.sample_rate
-                self.logger.info(
-                    f"Emitting spike train for bin of size {bin_duration_us}us"
-                )
                 self.buffer_start_ts += bin_duration_us
