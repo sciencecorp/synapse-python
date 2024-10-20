@@ -16,6 +16,7 @@ class SpikeDetect(BaseNode):
         super().__init__(id, NodeType.kSpikeDetect)
         self.samples_since_last_spike = defaultdict(lambda: 0)
         self.channel_buffers = defaultdict(list)
+        self.buffer_start_ts = None
         self.__config = None
 
     def config(self):
@@ -59,37 +60,49 @@ class SpikeDetect(BaseNode):
                 self.logger.warning("Received non-broadband data")
                 continue
 
+            if self.buffer_start_ts is None:
+                self.buffer_start_ts = data.t0
+
             for channel_id, samples in data.samples:
                 self.channel_buffers[channel_id].extend(samples)
 
             refractory_period_in_samples = int(REFRACTORY_PERIOD_S * data.sample_rate)
             bin_size_in_samples = int(self.bin_size_ms * data.sample_rate / 1000)
 
-            while any(
+            while all(
                 len(buffer) >= bin_size_in_samples
                 for buffer in self.channel_buffers.values()
             ):
                 spike_counts = []
                 for channel_id, buffer in self.channel_buffers.items():
                     spike_count = 0
-                    if len(buffer) >= bin_size_in_samples:
-                        # pop a bin's worth of samples off the buffer
-                        self.channel_buffers[channel_id] = buffer[bin_size_in_samples:]
-                        bin_samples = buffer[:bin_size_in_samples]
+                    bin_samples = buffer[:bin_size_in_samples]
+                    self.channel_buffers[channel_id] = buffer[bin_size_in_samples:]
 
-                        for sample in bin_samples:
-                            threshold_crossed = abs(sample) > self.threshold_uV
-                            since_spike = self.samples_since_last_spike[channel_id]
-                            recovered = since_spike > refractory_period_in_samples
+                    for sample in bin_samples:
+                        threshold_crossed = abs(sample) > self.threshold_uV
+                        since_spike = self.samples_since_last_spike[channel_id]
+                        recovered = since_spike > refractory_period_in_samples
 
-                            if threshold_crossed and recovered:
-                                spike_count += 1
-                                self.samples_since_last_spike[channel_id] = 0
-                            else:
-                                self.samples_since_last_spike[channel_id] += 1
+                        if threshold_crossed and recovered:
+                            spike_count += 1
+                            self.samples_since_last_spike[channel_id] = 0
+                        else:
+                            self.samples_since_last_spike[channel_id] += 1
 
                     spike_counts.append(spike_count)
 
                 await self.emit_data(
-                    SpiketrainData(t0=data.t0, bin_size_ms=self.bin_size_ms, spike_counts=spike_counts)
+                    SpiketrainData(
+                        t0=self.buffer_start_ts,
+                        bin_size_ms=self.bin_size_ms,
+                        spike_counts=spike_counts,
+                    )
                 )
+
+                # Advance the timestamp for the next bin
+                bin_duration_us = bin_size_in_samples * 1e6 / data.sample_rate
+                self.logger.info(
+                    f"Emitting spike train for bin of size {bin_duration_us}us"
+                )
+                self.buffer_start_ts += bin_duration_us
