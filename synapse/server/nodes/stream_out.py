@@ -93,7 +93,7 @@ class StreamOut(BaseNode):
 
         try:
             packets = data.pack(self.__sequence_number)
-            self.__sequence_number += len(packets)
+            self.__sequence_number = (self.__sequence_number + len(packets)) % 2**16
         except Exception as e:
             raise ValueError(f"Error packing data: {e}")
 

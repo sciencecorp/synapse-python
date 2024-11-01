@@ -1,5 +1,7 @@
-import queue
 from collections import defaultdict
+
+import numpy as np
+from scipy.signal import find_peaks
 
 from synapse.api.datatype_pb2 import DataType
 from synapse.api.node_pb2 import NodeType
@@ -8,16 +10,18 @@ from synapse.server.nodes import BaseNode
 from synapse.server.status import Status, StatusCode
 from synapse.utils.ndtp_types import SpiketrainData
 
-REFRACTORY_PERIOD_S = 0.001
-
 
 class SpikeDetect(BaseNode):
     def __init__(self, id):
         super().__init__(id, NodeType.kSpikeDetect)
-        self.samples_since_last_spike = defaultdict(lambda: 0)
         self.channel_buffers = defaultdict(list)
         self.buffer_start_ts = None
         self.__config = None
+
+        self.upper_threshold_uV = 200.0
+        self.min_spike_width_ms = 0.2
+        self.max_spike_width_ms = 0.4
+        self.refractory_period_ms = 1.0
 
     def config(self):
         c = super().config()
@@ -39,7 +43,7 @@ class SpikeDetect(BaseNode):
             return Status(
                 StatusCode.kUnimplemented, "Template mode is not yet implemented"
             )
-        elif self.mode == SpikeDetectConfig.SpikeDetectConfig.SpikeDetectMode.kWavelet:
+        elif self.mode == SpikeDetectConfig.SpikeDetectMode.kWavelet:
             return Status(
                 StatusCode.kUnimplemented, "Wavelet mode is not yet implemented"
             )
@@ -53,6 +57,7 @@ class SpikeDetect(BaseNode):
         return Status()
 
     async def run(self):
+        sample_rate = None
         while self.running:
             data = await self.data_queue.get()
 
@@ -63,33 +68,66 @@ class SpikeDetect(BaseNode):
             if self.buffer_start_ts is None:
                 self.buffer_start_ts = data.t0
 
+            if sample_rate is None:
+                sample_rate = data.sample_rate
+
+                self.bin_size_samples = int(self.bin_size_ms * sample_rate / 1000)
+                self.min_width_samples = int(
+                    self.min_spike_width_ms * sample_rate / 1000
+                )
+                self.max_width_samples = int(
+                    self.max_spike_width_ms * sample_rate / 1000
+                )
+                self.refractory_period_samples = int(
+                    self.refractory_period_ms * sample_rate / 1000
+                )
+                self.overlap_samples = self.max_width_samples
+                self.bin_duration_us = self.bin_size_samples * 1e6 / sample_rate
+
             for channel_id, samples in data.samples:
                 self.channel_buffers[channel_id].extend(samples)
 
-            refractory_period_in_samples = int(REFRACTORY_PERIOD_S * data.sample_rate)
-            bin_size_in_samples = int(self.bin_size_ms * data.sample_rate / 1000)
+            # Check if all channels have enough data to process
+            min_buffer_length = min(
+                len(buffer) for buffer in self.channel_buffers.values()
+            )
 
-            while all(
-                len(buffer) >= bin_size_in_samples
-                for buffer in self.channel_buffers.values()
-            ):
+            while min_buffer_length >= self.bin_size_samples + self.overlap_samples:
+                window_data = []
+                channel_ids = sorted(self.channel_buffers.keys())
+                for channel_id in channel_ids:
+                    buffer = self.channel_buffers[channel_id]
+                    processing_samples = buffer[
+                        : self.bin_size_samples + self.overlap_samples
+                    ]
+                    window_data.append(processing_samples)
+                window_data = np.array(window_data)
+                # Invert signal for negative peaks
+                signal_data = -np.array(window_data)
+
                 spike_counts = []
-                for channel_id, buffer in self.channel_buffers.items():
-                    spike_count = 0
-                    bin_samples = buffer[:bin_size_in_samples]
-                    self.channel_buffers[channel_id] = buffer[bin_size_in_samples:]
+                for idx, channel_id in enumerate(channel_ids):
+                    channel_signal = signal_data[idx]
 
-                    for sample in bin_samples:
-                        threshold_crossed = abs(sample) > self.threshold_uV
-                        since_spike = self.samples_since_last_spike[channel_id]
-                        recovered = since_spike > refractory_period_in_samples
+                    peaks, properties = find_peaks(
+                        channel_signal,
+                        height=self.threshold_uV,
+                        prominence=self.threshold_uV,
+                        width=(self.min_width_samples, self.max_width_samples),
+                        distance=self.refractory_period_samples,
+                    )
 
-                        if threshold_crossed and recovered:
-                            spike_count += 1
-                            self.samples_since_last_spike[channel_id] = 0
-                        else:
-                            self.samples_since_last_spike[channel_id] += 1
+                    # Only consider peaks that start within the current bin (exclude overlap)
+                    peaks_in_bin = peaks[peaks < self.bin_size_samples]
+                    heights_in_bin = properties["peak_heights"][
+                        peaks < self.bin_size_samples
+                    ]
 
+                    # Exclude peaks exceeding the upper threshold
+                    valid_peaks = heights_in_bin <= self.upper_threshold_uV
+                    peaks_in_bin = peaks_in_bin[valid_peaks]
+
+                    spike_count = len(peaks_in_bin)
                     spike_counts.append(spike_count)
 
                 await self.emit_data(
@@ -101,5 +139,15 @@ class SpikeDetect(BaseNode):
                 )
 
                 # Advance the timestamp for the next bin
-                bin_duration_us = bin_size_in_samples * 1e6 / data.sample_rate
-                self.buffer_start_ts += bin_duration_us
+                self.buffer_start_ts += self.bin_duration_us
+
+                # Update buffers by removing the processed bin (excluding the overlap)
+                for channel_id in self.channel_buffers:
+                    buffer = self.channel_buffers[channel_id]
+                    # Keep overlap_samples for next bin
+                    self.channel_buffers[channel_id] = buffer[self.bin_size_samples :]
+
+                # Update min_buffer_length for the next iteration
+                min_buffer_length = min(
+                    len(buffer) for buffer in self.channel_buffers.values()
+                )
