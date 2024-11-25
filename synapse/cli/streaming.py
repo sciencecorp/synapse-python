@@ -111,6 +111,7 @@ def read_packets(node: syn.StreamOut, q: queue.Queue, duration: Optional[int] = 
     seq_number = None
     start = time.time()
 
+    print(f"Reading packets for duration {duration} seconds" if duration else "Reading packets...")
     while True:
         header, data = node.read()
         if not data:

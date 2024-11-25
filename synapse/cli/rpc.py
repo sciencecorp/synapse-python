@@ -1,8 +1,9 @@
 from pathlib import Path
+import time
 import synapse as syn
 from synapse.api.synapse_pb2 import DeviceConfiguration
 from synapse.api.channel_pb2 import Channel
-from synapse.api.query_pb2 import QueryRequest, ImpedanceQuery
+from synapse.api.query_pb2 import QueryRequest, ImpedanceQuery, QueryResponse
 from google.protobuf import text_format
 from google.protobuf.json_format import Parse
 
@@ -47,9 +48,18 @@ def query(args):
         print("Running query:")
         print(query_proto)
 
-        result = syn.Device(args.uri).query(query_proto)
+        result: QueryResponse = syn.Device(args.uri).query(query_proto)
         if result:
+            
             print(text_format.MessageToString(result))
+
+            if result.HasField("impedance_response"):
+                measurements = result.impedance_response
+                # Write impedance measurements to a CSV file
+                with open(f"impedance_measurements_{time.strftime('%Y%m%d-%H%M%S')}.csv", "w") as f:
+                    f.write("Electrode ID,Magnitude (Ohms),Phase (degrees),Status\n")
+                    for measurement in measurements.measurements:
+                        f.write(f"{measurement.electrode_id},{measurement.magnitude},{measurement.phase},1\n")
 
 
 def start(args):
