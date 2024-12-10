@@ -92,8 +92,8 @@ class StreamOut(BaseNode):
         packets = []
 
         try:
-            packets = data.pack(self.__sequence_number)
-            self.__sequence_number += len(packets)
+            packets, seq = data.pack(self.__sequence_number)
+            self.__sequence_number = seq
         except Exception as e:
             raise ValueError(f"Error packing data: {e}")
 

@@ -14,9 +14,10 @@ from synapse.utils.ndtp import (
 
 MAX_CH_PAYLOAD_SIZE_BYTES = 1400
 
-def chunk_channel_data(ch_data: List[float], max_payload_size_bytes: int):
-    n_packets = math.ceil(len(ch_data) / max_payload_size_bytes)
+def chunk_channel_data(bit_width: int, ch_data: List[float], max_payload_size_bytes: int):
+    n_packets = math.ceil(len(ch_data) * bit_width / (max_payload_size_bytes * 8))
     n_pts_per_packet = math.ceil(len(ch_data) / n_packets)
+
     for i in range(n_packets):
         start_idx = i * n_pts_per_packet
         end_idx = min(start_idx + n_pts_per_packet, len(ch_data))
@@ -33,9 +34,9 @@ class ElectricalBroadbandData:
         self.samples = samples
         self.sample_rate = sample_rate
 
-    def pack(self, seq_number: int):
+    def pack(self, seq_number: int) -> Tuple[List[bytes], int]:
         packets = []
-        seq_number_offset = 0
+        seq = seq_number
 
         try: 
             for ch_samples in self.samples:
@@ -44,12 +45,16 @@ class ElectricalBroadbandData:
                 if (len(ch_data) == 0):
                     continue
 
-                for ch_sample_sub in chunk_channel_data(ch_data, MAX_CH_PAYLOAD_SIZE_BYTES):
+                n_samples = 0
+
+                for ch_sample_sub in chunk_channel_data(self.bit_width, ch_data, MAX_CH_PAYLOAD_SIZE_BYTES):
+                    t_offset = round(n_samples * 1e6 / self.sample_rate)
+                    timestamp = self.t0 + t_offset
                     msg = NDTPMessage(
                         header=NDTPHeader(
                             data_type=DataType.kBroadband,
-                            timestamp=self.t0,
-                            seq_number=seq_number + seq_number_offset,
+                            timestamp=timestamp,
+                            seq_number=seq,
                         ),
                         payload=NDTPPayloadBroadband(
                             is_signed=self.is_signed,
@@ -62,13 +67,14 @@ class ElectricalBroadbandData:
                             ],
                         ),
                     )
+                    n_samples += len(ch_sample_sub)
                     packed = msg.pack()
                     packets.append(packed)
-                    seq_number_offset += 1
+                    seq = (seq + 1) % 2**16
         except Exception as e:
             print(f"Error packing NDTP message: {e}")
 
-        return packets
+        return packets, seq
 
     @staticmethod
     def from_ndtp_message(msg: NDTPMessage):
@@ -120,8 +126,8 @@ class SpiketrainData:
                 spike_counts=self.spike_counts
             ),
         )
-
-        return [message.pack()]
+        seq_number = (seq_number + 1) % 2**16
+        return [message.pack()], seq_number
 
     @staticmethod
     def from_ndtp_message(msg: NDTPMessage):
