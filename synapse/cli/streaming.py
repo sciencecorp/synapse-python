@@ -59,11 +59,11 @@ def read(args):
             (n for n in config.nodes if n.type == NodeType.kStreamOut), None
         )
         assert stream_out is not None, "No StreamOut node found in config"
-
+        ephys = next(
+            (n for n in config.nodes if n.type == NodeType.kElectricalBroadband), None
+        )
+        num_ch = len(ephys.channels)
         if args.num_ch:
-            ephys = next(
-                (n for n in config.nodes if n.type == NodeType.kElectricalBroadband), None
-            )
             num_ch = args.num_ch
             offset = 0
             channels = []
@@ -138,10 +138,16 @@ def read_packets(node: syn.StreamOut, q: queue.Queue, duration: Optional[int] = 
             continue
 
         packet_count += 1
-        if seq_number is not None and header.seq_number != seq_number + 1:
-            print(f"Seq number out of order: {header.seq_number} != {seq_number + 1}")
-            dropped_packets += header.seq_number - (seq_number + 1)
-        seq_number = header.seq_number
+        if seq_number is None:
+            seq_number = header.seq_number
+        else:
+            expected = seq_number + 1
+            if expected == 2**16:
+                expected = 0
+            if header.seq_number != expected:
+                print(f"Seq number out of order: {header.seq_number} != {expected}")
+                dropped_packets += header.seq_number - (expected)
+            seq_number = header.seq_number
 
         q.put(data)
 
@@ -153,6 +159,8 @@ def read_packets(node: syn.StreamOut, q: queue.Queue, duration: Optional[int] = 
 
 def _binary_writer(stop, q, num_ch):
     filename = f"synapse_data_{time.strftime('%Y%m%d-%H%M%S')}.dat"
+
+    print(f"Writing binary data from {num_ch} channels to {filename}")
     if filename:
         fd = open(filename, "wb")
     

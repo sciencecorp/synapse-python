@@ -71,6 +71,13 @@ class StreamOut(Node):
         self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
 
+        SOCKET_BUFSIZE_BYTES = 5 * 1024 * 1024 # 5MB
+        self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, SOCKET_BUFSIZE_BYTES)
+        recvbuf = self.__socket.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+
+        if recvbuf < SOCKET_BUFSIZE_BYTES:
+            logging.warning(f"Could not set socket buffer size to {SOCKET_BUFSIZE_BYTES}. Current size is {recvbuf}. Consider increasing the system limit.")
+
         logging.info(f"binding to {addr}:{port}")
         self.__socket.bind((addr, port))
 
