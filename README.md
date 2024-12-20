@@ -52,6 +52,45 @@ And a toy device `synapse-sim` for local development,
     --serial SERIAL       Device serial number
     -v, --verbose         Enable verbose output
 
+## A Note on Streaming
+Synapse devices stream data to and from clients with UDP. To minimize packet loss, it is highly recommended that users increase their OS UDP buffer size. 
+### On Linux
+Check the current UDP buffer size with:
+```
+% sysctl net.core.rmem_max # Recieve buffer
+% sysctl net.core.wmem_max # Send buffer
+```  
+
+To update the buffer size immediately:
+```
+% sudo sysctl -w net.core.rmem_max=10485760 # 10 MB
+% sudo sysctl -w net.core.wmem_max=10485760 # 10 MB
+```
+
+Or make a persistent change by adding the following file:
+```
+% sudo touch /etc/sysctl.d/50-udp-buffersize.conf
+# And add these lines:
+net.core.rmem_max=10485760
+net.core.wmem_max=10485760
+```
+then reboot for the changes to take effect. 
+
+### On MacOS
+Check the current UDP buffer size:
+```
+% sysctl kern.ipc.maxsockbuf
+```
+
+To update the buffer size immediately:
+```
+sudo sysctl -w kern.ipc.maxsockbuf=10485760
+```
+or add the following to `/etc/sysctl.conf`:
+```
+kern.ipc.maxsockbuf=10485760
+```
+
 ## Writing clients
 
 This library offers an idiomatic Python interpretation of the Synapse API:
