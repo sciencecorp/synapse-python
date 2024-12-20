@@ -1,4 +1,5 @@
 *.csv
+*.dat
 # Generated protobuf code
 synapse/api/
 bin/
