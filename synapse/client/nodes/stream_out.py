@@ -1,3 +1,4 @@
+import os
 import logging
 import socket
 import struct
@@ -77,8 +78,12 @@ class StreamOut(Node):
         if recvbuf < SOCKET_BUFSIZE_BYTES:
             logging.warning(f"Could not set socket buffer size to {SOCKET_BUFSIZE_BYTES}. Current size is {recvbuf}. Consider increasing the system limit.")
 
-        logging.info(f"binding to {addr}:{port}")
-        self.__socket.bind((addr, port))
+        if os.name != "nt":
+            logging.info(f"binding to {addr}:{port}")
+            self.__socket.bind((addr, port))
+        else:
+            logging.info(f"binding to {port}")
+            self.__socket.bind(('', port))
 
         if self.__multicast_group:
             logging.info(f"joining multicast group {self.__multicast_group}")
