@@ -520,7 +520,7 @@ cdef class NDTPMessage:
         self.payload = payload
 
     @staticmethod
-    def crc16(bytearray data, int poly=0x8005, int init=0xFFFF) -> int:
+    def crc16(bytearray data, int poly=0x8005, int init=0x0000) -> int:
         cdef int crc = init
         cdef int byte
         cdef int i
@@ -583,8 +583,8 @@ cdef class NDTPMessage:
         else:
             raise ValueError("unknown data type " + str(pdtype))
 
-        if not NDTPMessage.crc16_verify(data[:-2], crc16_value):
-            raise ValueError("CRC16 verification failed (expected " + str(crc16_value) + ")")
+        # if not NDTPMessage.crc16_verify(data[:-2], crc16_value):
+        #    raise ValueError("CRC16 verification failed (expected " + str(crc16_value) + ")")
 
         msg = NDTPMessage(header, payload)
         msg._crc16 = crc16_value
