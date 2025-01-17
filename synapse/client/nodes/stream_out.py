@@ -69,7 +69,6 @@ class StreamOut(Node):
             socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
         )
         self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
 
         SOCKET_BUFSIZE_BYTES = 5 * 1024 * 1024 # 5MB
         self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, SOCKET_BUFSIZE_BYTES)

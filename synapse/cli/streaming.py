@@ -130,7 +130,7 @@ def read_packets(node: syn.StreamOut, q: queue.Queue, duration: Optional[int] = 
     seq_number = None
     dropped_packets = 0
     start = time.time()
-
+    print_interval = 1000
     print(f"Reading packets for duration {duration} seconds" if duration else "Reading packets...")
     while True:
         header, data = node.read()
@@ -150,7 +150,10 @@ def read_packets(node: syn.StreamOut, q: queue.Queue, duration: Optional[int] = 
             seq_number = header.seq_number
 
         q.put(data)
-
+        if packet_count == 1:
+            print(f"First packet received at {time.time() - start} seconds")
+        if packet_count % print_interval == 0:
+            print(f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)")
         if duration and (time.time() - start) > duration:
             break
 
