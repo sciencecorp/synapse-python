@@ -285,10 +285,48 @@ def test_ndtp_payload_broadband_large():
     
 
 def test_ndtp_payload_spiketrain():
-    samples = [0, 1, 2, 3, 2]
+    samples = [0, 1, 2, 3, 4, 5, 6]
 
     payload = NDTPPayloadSpiketrain(10, samples)
     packed = payload.pack()
+    hexstring = " ".join(f"{i:02x}" for i in packed)
+    print(hexstring)
+
+    assert packed[0] == 0
+    assert packed[1] == 0
+    assert packed[2] == 0
+    assert packed[3] == 7
+    assert packed[4] == 10
+
+    # 0000 0001 0010 0011 0100 0101 0110 0000
+    assert packed[5] == 1
+    assert packed[6] == 35
+    assert packed[7] == 69
+    assert packed[8] == 96
+
+
+    unpacked = NDTPPayloadSpiketrain.unpack(packed)
+
+    assert unpacked == payload
+    assert unpacked.bin_size_ms == 10
+    assert list(unpacked.spike_counts) == samples
+
+    print("2s")
+    samples = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+
+    payload = NDTPPayloadSpiketrain(10, samples)
+    packed = payload.pack()
+    hexstring = " ".join(f"{i:02x}" for i in packed)
+    print(hexstring)
+
+    assert packed[3] == 10
+    assert packed[4] == 10
+    assert packed[5] == 34
+    assert packed[6] == 34
+    assert packed[7] == 34
+    assert packed[8] == 34
+    assert packed[8] == 34
+
     unpacked = NDTPPayloadSpiketrain.unpack(packed)
 
     assert unpacked == payload
@@ -313,7 +351,6 @@ def test_ndtp_header():
             + struct.pack(">B", DataType.kBroadband)
             + struct.pack(">Q", 123)
         )
-
 
 def test_ndtp_message_broadband():
     header = NDTPHeader(DataType.kBroadband, timestamp=1234567890, seq_number=42)
