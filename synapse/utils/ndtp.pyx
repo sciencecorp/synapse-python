@@ -9,6 +9,8 @@ from cython.view cimport array as cvarray
 from libc.stdint cimport uint8_t, uint16_t, uint64_t, int64_t
 
 from synapse.api.datatype_pb2 import DataType
+import crcmod
+from crcmod import *
 
 
 cdef int DATA_TYPE_K_BROADBAND = DataType.kBroadband
@@ -17,6 +19,7 @@ cdef int DATA_TYPE_K_SPIKETRAIN = DataType.kSpiketrain
 NDTP_VERSION = 0x01
 cdef int NDTPPayloadSpiketrain_BIT_WIDTH = 2
 
+CRC_16 = crcmod.predefined.mkCrcFun('crc-16')
 
 @boundscheck(False)
 @wraparound(False)
@@ -514,27 +517,18 @@ cdef class NDTPMessage:
     cdef public NDTPHeader header
     cdef public object payload
     cdef public int _crc16
+    
+
 
     def __init__(self, NDTPHeader header, payload=None):
         self.header = header
         self.payload = payload
 
     @staticmethod
-    def crc16(bytearray data, int poly=0x8005, int init=0x0000) -> int:
-        cdef int crc = init
-        cdef int byte
-        cdef int i
-
-        for byte in data:
-            crc ^= byte << 8
-            for i in range(8):
-                if crc & 0x8000:
-                    crc = (crc << 1) ^ poly
-                else:
-                    crc <<= 1
-                crc &= 0xFFFF  # Ensure crc stays within 16 bits
-
-        return crc & 0xFFFF
+    def crc16(bytearray data, int poly=8005, int init=0) -> int:
+        import crcmod
+        crc = CRC_16(data)
+        return crc
 
     @staticmethod
     def crc16_verify(bytearray data, int crc16):
@@ -571,7 +565,7 @@ cdef class NDTPMessage:
         cdef object payload = None
 
         header = NDTPHeader.unpack(data[:header_size])
-        crc16_value = struct.unpack(">H", bytes(data[-2:]))[0]
+        crc16_value = (data[-2] << 8) | data[-1]
 
         pbytes = data[header_size:-2]
         pdtype = header.data_type
@@ -583,8 +577,8 @@ cdef class NDTPMessage:
         else:
             raise ValueError("unknown data type " + str(pdtype))
 
-        # if not NDTPMessage.crc16_verify(data[:-2], crc16_value):
-        #    raise ValueError("CRC16 verification failed (expected " + str(crc16_value) + ")")
+        if not NDTPMessage.crc16_verify(data[:-2], crc16_value):
+            raise ValueError("CRC16 verification failed (expected " + str(crc16_value) + ")")
 
         msg = NDTPMessage(header, payload)
         msg._crc16 = crc16_value
