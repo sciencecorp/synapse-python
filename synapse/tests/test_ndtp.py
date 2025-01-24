@@ -332,13 +332,13 @@ def test_ndtp_message_broadband():
     message = NDTPMessage(header, payload)
 
     packed = message.pack()
-    assert message._crc16 == 23793
+    assert message._crc16 == 19660
 
     hexstring = " ".join(f"{i:02x}" for i in packed)
-    assert hexstring == "01 02 00 00 00 00 49 96 02 d2 00 2a 18 00 00 03 00 00 03 00 00 00 00 01 00 00 00 00 10 00 20 00 3e 80 00 00 20 00 30 00 3e 87 d0 5c f1"
+    assert hexstring == "01 02 00 00 00 00 49 96 02 d2 00 2a 18 00 00 03 00 00 03 00 00 00 00 01 00 00 00 00 10 00 20 00 3e 80 00 00 20 00 30 00 3e 87 d0 4c cc"
 
     unpacked = NDTPMessage.unpack(packed)
-    assert message._crc16 == 23793
+    assert message._crc16 == 19660
 
     assert unpacked.header == message.header
     assert isinstance(unpacked.payload, NDTPPayloadBroadband)
@@ -361,10 +361,10 @@ def test_ndtp_message_broadband_large():
     message = NDTPMessage(header, payload)
 
     packed = message.pack()
-    assert message._crc16 == 45907
+    assert message._crc16 == 32263
 
     unpacked = NDTPMessage.unpack(packed)
-    assert unpacked._crc16 == 45907
+    assert unpacked._crc16 == 32263
 
     assert unpacked.header == message.header
     assert isinstance(unpacked.payload, NDTPPayloadBroadband)
