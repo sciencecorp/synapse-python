@@ -57,7 +57,7 @@ class SynapsePlotter:
             dpg.add_text("", tag="elapsed_time_text")
 
             dpg.add_text("Signal Separation:")
-            dpg.add_input_int(label="", default_value=self.signal_separation, tag="signal_separation_input")
+            dpg.add_input_int(label="", default_value=self.signal_separation, tag="signal_separation_input", callback=self.set_signal_separation)
 
             # Zoomed Channel Y-range
             dpg.add_text("Zoomed Y-Axis Range (Manual):")
@@ -118,6 +118,9 @@ class SynapsePlotter:
 
     def set_zoom_y_max(self, sender, app_data):
         self.zoom_y_max = app_data
+
+    def set_signal_separation(self, sender, app_data):
+        self.signal_separation = app_data
 
     def update_plot(self):
         """
