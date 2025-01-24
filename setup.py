@@ -42,7 +42,8 @@ setup(
         "protoletariat",
         "numpy",
         "pyserial",
-        "scipy"
+        "scipy",
+        "crcmod",
     ],
     entry_points={
         "console_scripts": [
