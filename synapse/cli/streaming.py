@@ -294,6 +294,6 @@ def _plot_data(stop, q, num_channels):
     window_size_seconds = 3
     sample_rate_hz = 32000
 
-    plotter = plotter.SynapsePlotter(num_channels, sample_rate_hz, window_size_seconds)
+    #plotter = SynapsePlotter(num_channels, sample_rate_hz, window_size_seconds)
 
     plotter.plot_synapse_data(stop, q, num_channels)

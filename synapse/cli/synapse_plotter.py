@@ -86,7 +86,7 @@ class SynapsePlotter:
                 
                 # Create line series for each channel
                 self.lines_all = []
-                for ch in range(NUM_CHANNELS):
+                for ch in range(self.num_channels):
                     line_tag = f"all_line_ch{ch}"
                     line = dpg.add_line_series([], [],
                                                label=f"Ch {ch}",
@@ -232,5 +232,7 @@ class SynapsePlotter:
         dpg.destroy_context()
 
 def plot_synapse_data(stop: Event, data_queue: queue.Queue, num_channels: int):
-    plotter = SynapsePlotter()
+    window_size_seconds = 3
+    sample_rate_hz = 32000
+    plotter = SynapsePlotter(num_channels, sample_rate_hz, window_size_seconds)
     plotter.start(stop, data_queue)
