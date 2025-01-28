@@ -291,9 +291,4 @@ def _plot_data(stop, q, num_channels):
     import dearpygui.dearpygui as dpg
 
     # TODO(gilbert): Make these configurable
-    window_size_seconds = 3
-    sample_rate_hz = 32000
-
-    #plotter = SynapsePlotter(num_channels, sample_rate_hz, window_size_seconds)
-
     plotter.plot_synapse_data(stop, q, num_channels)

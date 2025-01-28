@@ -28,8 +28,8 @@ class SynapsePlotter:
         self.start_time = None
 
         # Defaults for the zoomed channel plot
-        self.zoom_y_min = 1800
-        self.zoom_y_max = 2800
+        self.zoom_y_min = 0
+        self.zoom_y_max = 4096
 
         self.signal_separation = 1000
         
@@ -108,6 +108,15 @@ class SynapsePlotter:
                 # Single line series for the "zoomed" channel
                 dpg.add_line_series([], [], label="Zoomed Channel",
                                     parent=self.y_axis_zoom, tag="zoomed_line")
+            
+            # ========== FFT PLOT: Single Channel ==========
+            # dpg.add_text("FFT of Selected Channel:")
+            # with dpg.plot(label="FFT of Selected Channel", height=350, width=-1):
+            #     dpg.add_plot_legend()
+            #     dpg.add_plot_axis(dpg.mvXAxis, label="Frequency (Hz)")
+            #     self.x_axis_fft = dpg.add_plot_axis(dpg.) 
+            #     self.y_axis_fft = dpg.add_plot_axis(dpg.mvYAxis, label="Magnitude", tag="y_axis_fft")
+            #     dpg.add_line_series([], [], label="FFT", parent=self.y_axis_fft, tag="fft_line")
 
     def channel_selection_callback(self, sender, app_data, user_data):
         """Called when user picks a channel from the combo."""
@@ -170,6 +179,16 @@ class SynapsePlotter:
         # Optionally set the zoomed plot Y-axis range for a closer look
         # For example, if data in each channel is in [0..4096]:
         dpg.set_axis_limits("y_axis_zoom", self.zoom_y_min, self.zoom_y_max)
+
+        # -----------------------------
+        # Update FFT of the selected channel
+        # -----------------------------
+        # fft_data = np.fft.fft(ds_y_ch)
+        # fft_magnitudes = np.abs(fft_data)
+        # fft_freqs = np.fft.fftfreq(len(fft_data), 1 / self.sample_rate_hz)
+        # dpg.set_value("fft_line", [fft_freqs.tolist(), fft_magnitudes.tolist()])
+        # max_magnitude = np.max(fft_magnitudes)
+        # dpg.set_axis_limits("y_axis_fft", 0, max_magnitude * 1.1)
 
         # -----------------------------
         # Update Elapsed Time Text
