@@ -17,7 +17,7 @@ cdef int DATA_TYPE_K_BROADBAND = DataType.kBroadband
 cdef int DATA_TYPE_K_SPIKETRAIN = DataType.kSpiketrain
 
 NDTP_VERSION = 0x01
-cdef int NDTPPayloadSpiketrain_BIT_WIDTH = 2
+cdef int NDTPPayloadSpiketrain_BIT_WIDTH = 4
 
 CRC_16 = crcmod.predefined.mkCrcFun('crc-16')
 

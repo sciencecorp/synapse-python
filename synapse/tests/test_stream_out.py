@@ -151,7 +151,7 @@ def test_packing_spiketrain_data():
     sdata = SpiketrainData(
         t0=1234567890,
         bin_size_ms=10,
-        spike_counts=[0, 1, 2, 3, 2, 1, 0],
+        spike_counts=[0, 1, 2, 3, 4, 5, 6],
     )
 
     packed = node._pack(sdata)[0]
