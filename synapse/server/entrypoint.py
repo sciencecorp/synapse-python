@@ -73,7 +73,7 @@ def main(
         s.close()
 
     if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG, force=True)
 
     asyncio.run(async_main(args, node_object_map, peripherals))
 
