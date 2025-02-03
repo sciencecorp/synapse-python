@@ -7,3 +7,4 @@ pyzmq
 build
 scipy
 cython
+rich

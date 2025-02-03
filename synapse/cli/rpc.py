@@ -7,7 +7,8 @@ from synapse.api.query_pb2 import QueryRequest, ImpedanceQuery, QueryResponse
 from google.protobuf import text_format
 from google.protobuf.json_format import Parse
 
-
+from rich.console import Console
+from rich.pretty import pprint
 def add_commands(subparsers):
     a = subparsers.add_parser("info", help="Get device information")
     a.add_argument("uri", type=str)
@@ -33,9 +34,14 @@ def add_commands(subparsers):
 
 
 def info(args):
-    info = syn.Device(args.uri).info()
-    if info:
-        print(text_format.MessageToString(info))
+    console = Console()
+    with console.status("Getting device information...", spinner="bouncingBall"):
+        info = syn.Device(args.uri, args.verbose).info()
+
+    if not info:
+        console.print(f"[bold red]Failed to get device information from {args.uri}")
+        return
+    pprint(info)
 
 
 def query(args):
@@ -48,7 +54,7 @@ def query(args):
         print("Running query:")
         print(query_proto)
 
-        result: QueryResponse = syn.Device(args.uri).query(query_proto)
+        result: QueryResponse = syn.Device(args.uri, args.verbose).query(query_proto)
         if result:
             
             print(text_format.MessageToString(result))
@@ -63,11 +69,11 @@ def query(args):
 
 
 def start(args):
-    return syn.Device(args.uri).start()
+    return syn.Device(args.uri, args.verbose).start()
 
 
 def stop(args):
-    return syn.Device(args.uri).stop()
+    return syn.Device(args.uri, args.verbose).stop()
 
 
 def configure(args):
@@ -80,4 +86,4 @@ def configure(args):
         print("Configuring device with the following configuration:")
         print(config_proto)
 
-        return syn.Device(args.uri).configure(syn.Config.from_proto(config_proto))
+        return syn.Device(args.uri, args.verbose).configure(syn.Config.from_proto(config_proto))

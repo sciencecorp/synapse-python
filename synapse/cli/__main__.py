@@ -19,6 +19,9 @@ def main():
         version="synapsectl %s" % metadata.version("science-synapse"),
     )
     parser.add_argument(
+        "--verbose", "-v", action="store_true", default=False, help="Enable verbose output"
+    )
+    parser.add_argument(
         "--uri", metavar="-u", type=str, default=None, help="Device control plane URI"
     )
 
