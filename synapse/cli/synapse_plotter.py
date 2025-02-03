@@ -108,15 +108,6 @@ class SynapsePlotter:
                 # Single line series for the "zoomed" channel
                 dpg.add_line_series([], [], label="Zoomed Channel",
                                     parent=self.y_axis_zoom, tag="zoomed_line")
-            
-            # ========== FFT PLOT: Single Channel ==========
-            # dpg.add_text("FFT of Selected Channel:")
-            # with dpg.plot(label="FFT of Selected Channel", height=350, width=-1):
-            #     dpg.add_plot_legend()
-            #     dpg.add_plot_axis(dpg.mvXAxis, label="Frequency (Hz)")
-            #     self.x_axis_fft = dpg.add_plot_axis(dpg.) 
-            #     self.y_axis_fft = dpg.add_plot_axis(dpg.mvYAxis, label="Magnitude", tag="y_axis_fft")
-            #     dpg.add_line_series([], [], label="FFT", parent=self.y_axis_fft, tag="fft_line")
 
     def channel_selection_callback(self, sender, app_data, user_data):
         """Called when user picks a channel from the combo."""
@@ -181,16 +172,6 @@ class SynapsePlotter:
         dpg.set_axis_limits("y_axis_zoom", self.zoom_y_min, self.zoom_y_max)
 
         # -----------------------------
-        # Update FFT of the selected channel
-        # -----------------------------
-        # fft_data = np.fft.fft(ds_y_ch)
-        # fft_magnitudes = np.abs(fft_data)
-        # fft_freqs = np.fft.fftfreq(len(fft_data), 1 / self.sample_rate_hz)
-        # dpg.set_value("fft_line", [fft_freqs.tolist(), fft_magnitudes.tolist()])
-        # max_magnitude = np.max(fft_magnitudes)
-        # dpg.set_axis_limits("y_axis_fft", 0, max_magnitude * 1.1)
-
-        # -----------------------------
         # Update Elapsed Time Text
         # -----------------------------
         if self.start_time is not None:
@@ -250,8 +231,6 @@ class SynapsePlotter:
         
         dpg.destroy_context()
 
-def plot_synapse_data(stop: Event, data_queue: queue.Queue, num_channels: int):
-    window_size_seconds = 3
-    sample_rate_hz = 32000
+def plot_synapse_data(stop: Event, data_queue: queue.Queue, sample_rate_hz: int, num_channels: int, window_size_seconds: int):
     plotter = SynapsePlotter(num_channels, sample_rate_hz, window_size_seconds)
     plotter.start(stop, data_queue)

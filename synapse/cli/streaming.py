@@ -65,6 +65,8 @@ def read(args):
     
     status.update(f"Loading recording configuration")
 
+    # Keep track of the sample rate in case we need to plot
+    sample_rate_hz = 32000
     if args.config:
         config = load_config_from_file(args.config)
         if not config:
@@ -118,12 +120,22 @@ def read(args):
                 return
             console.print(f"[bold green]Device configured successfully")
 
-            status.update(f"Starting device")
-            if info.status.state != DeviceState.kRunning:
-                if not device.start():
-                    console.print(f"[bold red]Failed to start device")
-                    return
-            console.print(f"[bold green]Device started successfully")
+        # if not device.configure(config):
+        #     raise ValueError("Failed to configure device")
+
+        # if info.status.state != DeviceState.kRunning:
+        #     print("Starting device...")
+        #     if not device.start():
+        #         raise ValueError("Failed to start device")
+
+        # Get the sample rate from the device
+        # We need to look at the node configuration with type kElectricalBroadband for the sample rate
+        broadband = next(
+            (n for n in config.nodes if n.type == NodeType.kElectricalBroadband), None
+        )
+        assert broadband is not None, "No ElectricalBroadband node found in config"
+        sample_rate_hz = broadband.sample_rate
+
     else:
         # TODO(gilbert): Get rid of this giant if-else block
         node = next(
@@ -156,7 +168,7 @@ def read(args):
         threads.append(threading.Thread(target=_data_writer, args=(stop, q)))
     
     if args.plot:
-        threads.append(threading.Thread(target=_plot_data, args=(stop, plot_q, num_ch)))
+        threads.append(threading.Thread(target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)))
 
     for thread in threads:
         thread.start()
@@ -287,8 +299,9 @@ def _data_writer(stop, q, output_filename_base):
             traceback.print_exc()
             continue
 
-def _plot_data(stop, q, num_channels):
+def _plot_data(stop, q, sample_rate_hz, num_channels):
     import dearpygui.dearpygui as dpg
 
     # TODO(gilbert): Make these configurable
-    plotter.plot_synapse_data(stop, q, num_channels)
+    window_size_seconds = 3
+    plotter.plot_synapse_data(stop, q, sample_rate_hz, num_channels, window_size_seconds)
