@@ -1,10 +1,9 @@
 from dataclasses import dataclass
 import time
 import socket
-import struct
 
 BROADCAST_PORT = 6470
-BROADCAST_ADDR = "224.0.0.245"
+DISCOVERY_TIMEOUT = 2
 
 @dataclass
 class DeviceInfo:
@@ -14,24 +13,18 @@ class DeviceInfo:
     name: str
     serial: str
 
-
-def discover(timeout_sec = 3):
+def discover(timeout_sec = 0.2):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(timeout_sec)
-    ttl = struct.pack("b", 3)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+    sock.bind(("", BROADCAST_PORT))
 
     devices = []
-
     try:
         start_time = time.time()
 
-        sent = sock.sendto(
-            "DISCOVER".encode("ascii"),
-            (BROADCAST_ADDR, BROADCAST_PORT),
-        )
         while True:
-            if time.time() - start_time > 3:
+            now = time.time()
+            if now - start_time > DISCOVERY_TIMEOUT:
                 break
             try:
                 data, server = sock.recvfrom(1024)
@@ -43,7 +36,9 @@ def discover(timeout_sec = 3):
                     if len(data) != 5:
                         continue
                     _, serial, capability, port, name = data
-                    devices.append(DeviceInfo(server[0], int(port), capability, name, serial))
+                    dev_info = DeviceInfo(server[0], int(port), capability, name, serial)
+                    if dev_info not in devices:
+                        devices.append(dev_info)
     finally:
         sock.close()
 

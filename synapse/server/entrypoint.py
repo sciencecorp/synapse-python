@@ -10,7 +10,7 @@ from coolname import generate_slug
 logging.basicConfig(level=logging.INFO)
 
 from synapse.server.rpc import serve
-from synapse.server.autodiscovery import MulticastDiscoveryProtocol
+from synapse.server.autodiscovery import BroadcastDiscoveryProtocol
 from synapse.server.nodes import SERVER_NODE_OBJECT_MAP
 
 
@@ -84,20 +84,16 @@ async def async_main(args, node_object_map, peripherals):
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    sock.bind(("", args.discovery_port))
-    group = socket.inet_aton(args.discovery_addr)
-    mreq = struct.pack("=4sL", group, socket.INADDR_ANY)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
     loop = asyncio.get_running_loop()
     transport, protocol = await loop.create_datagram_endpoint(
-        lambda: MulticastDiscoveryProtocol(
-            args.name, args.serial, args.rpc_port
+        lambda: BroadcastDiscoveryProtocol(
+            args.discovery_port, args.name, args.serial, args.rpc_port
         ),
         sock=sock,
     )
-    logger.info("MulticastDiscoveryProtocol endpoint created")
+    logger.info("BroadcastDiscoveryProtocol endpoint created")
 
     serve_task = asyncio.create_task(
         serve(
