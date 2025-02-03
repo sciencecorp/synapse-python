@@ -2,7 +2,7 @@ import grpc
 from google.protobuf.empty_pb2 import Empty
 import logging
 
-from synapse.api.status_pb2 import StatusCode
+from synapse.api.status_pb2 import StatusCode, Status
 from synapse.api.synapse_pb2_grpc import SynapseDeviceStub
 from synapse.client.config import Config
 
@@ -33,6 +33,14 @@ class Device(object):
         except grpc.RpcError as e:
             self.logger.debug("Error: %s", e.details())
         return False
+
+    def start_with_status(self) -> Status:
+        try:
+            response = self.rpc.Start(Empty())
+            return response
+        except grpc.RpcError as e:
+            self.logger.debug("Error: %s", e.details())
+        return None
 
     def stop(self):
         try:
@@ -71,6 +79,17 @@ class Device(object):
         except grpc.RpcError as e:
             self.logger.debug("Error: %s", e.details())
         return False
+    
+    def configure_with_status(self, config: Config) -> Status:
+        assert isinstance(config, Config), "config must be an instance of Config"
+
+        config.set_device(self)
+        try:
+            response = self.rpc.Configure(config.to_proto())
+            return response
+        except grpc.RpcError as e:
+            self.logger.debug("Error: %s", e.details())
+            return None
 
     def _handle_status_response(self, status):
         if status.code != StatusCode.kOk:

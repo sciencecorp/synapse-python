@@ -1,5 +1,8 @@
 from synapse.utils.discover import discover as _discover
 
+from rich.console import Console
+from rich.table import Table
+
 def add_commands(subparsers):
     a = subparsers.add_parser(
         "discover", help="Discover Synapse devices on the network"
