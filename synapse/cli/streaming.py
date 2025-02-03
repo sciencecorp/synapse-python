@@ -16,6 +16,9 @@ import synapse.client.channel as channel
 import synapse.utils.ndtp_types as ndtp_types
 
 
+from rich.console import Console
+from rich.pretty import pprint
+
 def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device's StreamOut node")
     a.add_argument("uri", type=str, help="IP address of Synapse device")
@@ -28,6 +31,7 @@ def add_commands(subparsers):
     a.add_argument("--bin", type=bool, help="Output binary format instead of JSON")
     a.add_argument("--duration", type=int, help="Duration to read for in seconds")
     a.add_argument("--node_id", type=int, help="ID of the StreamOut node to read from")
+    a.add_argument("--ignore-buffers", action="store_true", default=False,help="Ignore misconfigured UDP buffers")
     a.set_defaults(func=read)
 
 
@@ -39,6 +43,8 @@ def load_config_from_file(path):
 
 
 def read(args):
+    console = Console()
+    
     print(f"Reading from {args.uri}...")
 
     if not args.config and not args.node_id:

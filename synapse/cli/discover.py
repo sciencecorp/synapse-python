@@ -17,7 +17,7 @@ def discover(args):
         console.print(f"[bold red]No Synapse devices found")
         return
     
-    device_table = Table(title="Synapse Devices")
+    device_table = Table(title="Synapse Devices", show_lines=True, row_styles=["dim", ""])
     device_table.add_column("Name", justify="left")
     device_table.add_column("Host", justify="right")
 
