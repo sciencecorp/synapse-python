@@ -8,6 +8,20 @@ def add_commands(subparsers):
 
 
 def discover(args):
-    devices = _discover()
+    console = Console()
+
+    with console.status("Discovering Synapse devices...", spinner="bouncingBall", spinner_style="yellow"):
+        devices = _discover()
+
+    if not devices:
+        console.print(f"[bold red]No Synapse devices found")
+        return
+    
+    device_table = Table(title="Synapse Devices")
+    device_table.add_column("Name", justify="left")
+    device_table.add_column("Host", justify="right")
+
     for d in devices:
-      print(f"{d.host}:{d.port}   {d.capability}   {d.name} ({d.serial})")
+        device_table.add_row(d.name, d.host)
+
+    console.print(device_table)
