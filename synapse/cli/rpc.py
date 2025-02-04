@@ -2,15 +2,16 @@ from pathlib import Path
 import time
 import synapse as syn
 from synapse.api.synapse_pb2 import DeviceConfiguration
-from synapse.api.channel_pb2 import Channel
-from synapse.api.query_pb2 import QueryRequest, ImpedanceQuery, QueryResponse
-from synapse.api.status_pb2 import StatusCode, Status
+from synapse.api.query_pb2 import QueryRequest, QueryResponse
+from synapse.api.status_pb2 import StatusCode
 
 from google.protobuf import text_format
 from google.protobuf.json_format import Parse
 
 from rich.console import Console
 from rich.pretty import pprint
+
+
 def add_commands(subparsers):
     a = subparsers.add_parser("info", help="Get device information")
     a.add_argument("uri", type=str)
@@ -58,16 +59,19 @@ def query(args):
 
         result: QueryResponse = syn.Device(args.uri, args.verbose).query(query_proto)
         if result:
-            
             print(text_format.MessageToString(result))
 
             if result.HasField("impedance_response"):
                 measurements = result.impedance_response
                 # Write impedance measurements to a CSV file
-                with open(f"impedance_measurements_{time.strftime('%Y%m%d-%H%M%S')}.csv", "w") as f:
+                with open(
+                    f"impedance_measurements_{time.strftime('%Y%m%d-%H%M%S')}.csv", "w"
+                ) as f:
                     f.write("Electrode ID,Magnitude (Ohms),Phase (degrees),Status\n")
                     for measurement in measurements.measurements:
-                        f.write(f"{measurement.electrode_id},{measurement.magnitude},{measurement.phase},1\n")
+                        f.write(
+                            f"{measurement.electrode_id},{measurement.magnitude},{measurement.phase},1\n"
+                        )
 
 
 def start(args):
@@ -76,7 +80,7 @@ def start(args):
 
 def stop(args):
     console = Console()
-    with console.status("Stopping device...", spinner="bouncingBall") as status:
+    with console.status("Stopping device...", spinner="bouncingBall"):
         stop_ret = syn.Device(args.uri, args.verbose).stop_with_status()
         if not stop_ret:
             console.print("[bold red]Internal error stopping device")
@@ -85,7 +89,6 @@ def stop(args):
             console.print(f"[bold red]Error stopping\n{stop_ret.message}")
             return
     console.print("[green]Device Stopped")
-        
 
 
 def configure(args):
@@ -98,4 +101,6 @@ def configure(args):
         print("Configuring device with the following configuration:")
         print(config_proto)
 
-        return syn.Device(args.uri, args.verbose).configure(syn.Config.from_proto(config_proto))
+        return syn.Device(args.uri, args.verbose).configure(
+            syn.Config.from_proto(config_proto)
+        )

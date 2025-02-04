@@ -8,3 +8,4 @@ build
 scipy
 cython
 rich
+pre-commit

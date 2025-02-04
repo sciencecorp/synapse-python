@@ -53,13 +53,13 @@ And a toy device `synapse-sim` for local development,
     -v, --verbose         Enable verbose output
 
 ## A Note on Streaming
-Synapse devices stream data to and from clients with UDP. To minimize packet loss, it is highly recommended that users increase their OS UDP buffer size. 
+Synapse devices stream data to and from clients with UDP. To minimize packet loss, it is highly recommended that users increase their OS UDP buffer size.
 ### On Linux
 Check the current UDP buffer size with:
 ```
 % sysctl net.core.rmem_max # Recieve buffer
 % sysctl net.core.wmem_max # Send buffer
-```  
+```
 
 To update the buffer size immediately:
 ```
@@ -74,7 +74,7 @@ Or make a persistent change by adding the following file:
 net.core.rmem_max=10485760
 net.core.wmem_max=10485760
 ```
-then reboot for the changes to take effect. 
+then reboot for the changes to take effect.
 
 ### On MacOS
 Check the current UDP buffer size:
@@ -148,3 +148,14 @@ To build and install a wheel:
 
     # and optionally install
     pip install dist/synapse-*-py3-none-any.whl
+
+## Development
+If you want to catch linting errors before pushing, you can install a pre-commit hook.
+
+```bash
+pre-commit install
+
+# To run manually
+pre-commit run
+```
+
