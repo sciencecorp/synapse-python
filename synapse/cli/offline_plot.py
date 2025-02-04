@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import sys
 import os
 import json
@@ -6,10 +5,35 @@ import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtWidgets
-import argparse
 import logging
+import signal
 
 BACKGROUND_COLOR = "#253252250"
+
+
+def add_commands(subparsers):
+    a = subparsers.add_parser("plot", help="Plot recorded synapse data")
+    a.add_argument("fname", type=str, help="Path to the binary data file")
+    a.add_argument(
+        "config_json",
+        type=str,
+        help="Path to the configuration JSON file used for the recording",
+    )
+    a.add_argument(
+        "--time",
+        type=str,
+        help="Time range to plot in seconds. Can be a range: start:end (e.g. 0:10) or a single end time (e.g. 10)",
+        required=False,
+        default=None,
+    )
+    a.add_argument(
+        "--channels",
+        type=str,
+        help='Channels to plot, comma separated (e.g. "1,2,3")',
+        required=False,
+        default=None,
+    )
+    a.set_defaults(func=plot)
 
 
 def setup_logging():
@@ -21,9 +45,6 @@ def setup_logging():
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     return logger
-
-
-logger = setup_logging()
 
 
 # Function to load binary data produced by the stream recording
@@ -90,32 +111,8 @@ def compute_fft(data, sample_rate):
     return fft_freq, fft_magnitude_db
 
 
-def main():
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Plot Synapse Data Recording")
-    parser.add_argument("fname", type=str, help="Path to the binary data file")
-    parser.add_argument(
-        "config_json",
-        type=str,
-        help="Path to the configuration JSON file used for the recording",
-    )
-
-    # Optionally, allow for a time range to be specified
-    parser.add_argument(
-        "--time",
-        type=str,
-        help="Time range to plot in seconds. Can be a range: start:end (e.g. 0:10) or a single end time (e.g. 10)",
-        required=False,
-        default=None,
-    )
-    parser.add_argument(
-        "--channels",
-        type=str,
-        help='Channels to plot, comma separated (e.g. "1,2,3")',
-        required=False,
-        default=None,
-    )
-    args = parser.parse_args()
+def plot(args):
+    logger = setup_logging()
 
     # Start with loading the config
     sampling_freq, num_channels, channel_ids = load_config(args.config_json)
@@ -293,14 +290,13 @@ def main():
     main_widget.setLayout(main_layout)
     main_widget.show()
 
+    # Handle the case of Ctrl+C (the user might be like me and press this instead of the Exit button)
+    def signal_handler(sig, frame):
+        logger.info("Ctrl+C pressed. Exiting...")
+        QtWidgets.QApplication.quit()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+
     win.show()
-
     QtWidgets.QApplication.instance().exec()
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
