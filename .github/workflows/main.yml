@@ -31,6 +31,11 @@ jobs:
           make
           pip install -e .
 
+      - name: Linting
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: "format --check"
+
       - name: Run tests with pytest
         run: |
           pytest -v
