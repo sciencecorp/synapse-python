@@ -51,6 +51,13 @@ class Device(object):
             self.logger.debug("Error: %s", e.details())
         return False
 
+    def stop_with_status(self) -> Status:
+        try:
+            return self.rpc.Stop(Empty())
+        except grpc.RpcError as e:
+            self.logger.debug("Error: %s", e.details())
+            return None
+
     def info(self):
         try:
             response = self.rpc.Info(Empty())

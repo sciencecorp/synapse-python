@@ -4,6 +4,8 @@ import synapse as syn
 from synapse.api.synapse_pb2 import DeviceConfiguration
 from synapse.api.channel_pb2 import Channel
 from synapse.api.query_pb2 import QueryRequest, ImpedanceQuery, QueryResponse
+from synapse.api.status_pb2 import StatusCode, Status
+
 from google.protobuf import text_format
 from google.protobuf.json_format import Parse
 
@@ -73,7 +75,17 @@ def start(args):
 
 
 def stop(args):
-    return syn.Device(args.uri, args.verbose).stop()
+    console = Console()
+    with console.status("Stopping device...", spinner="bouncingBall") as status:
+        stop_ret = syn.Device(args.uri, args.verbose).stop_with_status()
+        if not stop_ret:
+            console.print("[bold red]Internal error stopping device")
+            return
+        if stop_ret.code != StatusCode.kOk:
+            console.print(f"[bold red]Error stopping\n{stop_ret.message}")
+            return
+    console.print("[green]Device Stopped")
+        
 
 
 def configure(args):
