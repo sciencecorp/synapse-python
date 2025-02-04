@@ -12,3 +12,4 @@ pre-commit
 pytest
 pytest-asyncio
 dearpygui
+pyqtgraph
