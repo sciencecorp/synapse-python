@@ -5,34 +5,34 @@ import os
 import json
 import numpy as np
 import pandas as pd
-import pyqtgraph as pg
-from pyqtgraph.Qt import QtWidgets
 import logging
 
 logger = logging.getLogger(__name__)
 
+
 # Function to load binary data produced by the stream recording
 def process_data(file_path, num_channels):
     _, file_extension = os.path.splitext(file_path)
-    
-    if file_extension in ['.bin', '.dat']:
-        with open(file_path, 'rb') as f:
+
+    if file_extension in [".bin", ".dat"]:
+        with open(file_path, "rb") as f:
             data = np.fromfile(f, dtype=np.int16)
 
         df = pd.DataFrame(data)
         new_len = len(df) // num_channels
         df = df.head(new_len * num_channels)
         df = df.values.reshape(-1, num_channels)
-        
+
         return pd.DataFrame(df)
-    
+
     raise ValueError("Unsupported file format. Expected .bin or .dat")
+
 
 # Load configuration from JSON
 def load_config(json_path):
     with open(json_path) as f:
         config = json.load(f)
-    
+
     nodes = config["nodes"]
     for node in nodes:
         if node["type"] == "kElectricalBroadband":
@@ -41,42 +41,59 @@ def load_config(json_path):
             num_channels = len(recording_config["channels"])
             channel_ids = [channel["id"] for channel in recording_config["channels"]]
             return sampling_freq, num_channels, channel_ids
-    
+
     raise ValueError("Invalid JSON: No 'kElectricalBroadband' node found")
+
 
 # Function to compute FFT
 def compute_fft(data, sample_rate):
     fft_values = np.fft.fft(data)
-    fft_freq = np.fft.fftfreq(len(data), d=1/sample_rate)
-    fft_values = np.abs(fft_values)[:len(fft_values) // 2]
-    fft_freq = fft_freq[:len(fft_freq) // 2]
+    fft_freq = np.fft.fftfreq(len(data), d=1 / sample_rate)
+    fft_values = np.abs(fft_values)[: len(fft_values) // 2]
+    fft_freq = fft_freq[: len(fft_freq) // 2]
     fft_values /= max(fft_values)
     fft_values[1:] *= 2
     fft_values[0] = 0
     return fft_freq, fft_values
 
+
 def main():
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Plot Synapse Data Recording')
-    parser.add_argument('fname', type=str, help='Path to the binary data file', required=True)
-    parser.add_argument('config_json', type=str, help='Path to the configuration JSON file used for the recording', required=True)
+    parser = argparse.ArgumentParser(description="Plot Synapse Data Recording")
+    parser.add_argument(
+        "fname", type=str, help="Path to the binary data file", required=True
+    )
+    parser.add_argument(
+        "config_json",
+        type=str,
+        help="Path to the configuration JSON file used for the recording",
+        required=True,
+    )
 
     # Optionally, allow for a time range to be specified
-    parser.add_argument('--time', type=str, help='Time range to plot in seconds', required=False, default=None)
-    parser.add_argument('--channels', type=str, help='Channels to plot, comma separated (e.g. "1,2,3")', required=False, default=None)
+    parser.add_argument(
+        "--time",
+        type=str,
+        help="Time range to plot in seconds",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--channels",
+        type=str,
+        help='Channels to plot, comma separated (e.g. "1,2,3")',
+        required=False,
+        default=None,
+    )
     args = parser.parse_args()
 
     # Start with loading the config
     sampling_freq, num_channels, channel_ids = load_config(args.config_json)
     logger.info(f"Loaded config with {num_channels} channels: {channel_ids}")
-    
-    
+
 
 #     # Load the data
 #     data = process_data(args.fname, num_channels)
-
-
-
 
 
 #     # GUI Initialization
@@ -147,7 +164,7 @@ def main():
 # main_widget.show()
 
 # Start the Qt event loop
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except Exception as e:
