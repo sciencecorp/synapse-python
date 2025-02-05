@@ -120,13 +120,13 @@ def read(args):
                 return
             console.print(f"[bold green]Device configured successfully")
 
-        # if not device.configure(config):
-        #     raise ValueError("Failed to configure device")
+        if not device.configure(config):
+            raise ValueError("Failed to configure device")
 
-        # if info.status.state != DeviceState.kRunning:
-        #     print("Starting device...")
-        #     if not device.start():
-        #         raise ValueError("Failed to start device")
+        if info.status.state != DeviceState.kRunning:
+            print("Starting device...")
+            if not device.start():
+                raise ValueError("Failed to start device")
 
         # Get the sample rate from the device
         # We need to look at the node configuration with type kElectricalBroadband for the sample rate
