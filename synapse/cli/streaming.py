@@ -9,12 +9,15 @@ from operator import itemgetter
 from google.protobuf.json_format import Parse
 
 from synapse.api.node_pb2 import NodeType
-from synapse.api.status_pb2 import DeviceState
+from synapse.api.status_pb2 import DeviceState, StatusCode
 from synapse.api.synapse_pb2 import DeviceConfiguration
 import synapse as syn
 import synapse.client.channel as channel
 import synapse.utils.ndtp_types as ndtp_types
 
+
+from rich.console import Console
+from rich.pretty import pprint
 
 def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device's StreamOut node")
@@ -28,6 +31,7 @@ def add_commands(subparsers):
     a.add_argument("--bin", type=bool, help="Output binary format instead of JSON")
     a.add_argument("--duration", type=int, help="Duration to read for in seconds")
     a.add_argument("--node_id", type=int, help="ID of the StreamOut node to read from")
+    a.add_argument("--ignore-buffers", action="store_true", default=False,help="Ignore misconfigured UDP buffers")
     a.set_defaults(func=read)
 
 
@@ -39,26 +43,38 @@ def load_config_from_file(path):
 
 
 def read(args):
-    print(f"Reading from {args.uri}...")
-
+    console = Console()
     if not args.config and not args.node_id:
-        print("Either `--config` or `--node_id` must be specified.")
+        console.print(f"[bold red]Either `--config` or `--node_id` must be specified.")
         return
 
-    device = syn.Device(args.uri)
-    info = device.info()
-    assert info is not None, "Couldn't get device info"
-    print(info)
+    device = syn.Device(args.uri, args.verbose)
 
-    print(f"\n")
+    with console.status("Reading from Synapse Device", spinner="bouncingBall", spinner_style="green") as status:
+        status.update(f"Requesting device info")
+        info = device.info()
+        if not info:
+            console.print(f"[bold red]Failed to get device info from {args.uri}")
+            return
+    
+    console.log(f"Got info from: {info.name}")
+    if args.verbose:
+        pprint(info)
+        console.print("\n")
+    
+    status.update(f"Loading recording configuration")
 
     if args.config:
-        print("Configuring device...")
         config = load_config_from_file(args.config)
+        if not config:
+            console.print(f"[bold red]Failed to load config from {args.config}")
+            return
         stream_out = next(
             (n for n in config.nodes if n.type == NodeType.kStreamOut), None
         )
-        assert stream_out is not None, "No StreamOut node found in config"
+        if not stream_out:
+            console.print(f"[bold red]No StreamOut node found in config")
+            return
         ephys = next(
             (n for n in config.nodes if n.type == NodeType.kElectricalBroadband), None
         )
@@ -71,16 +87,32 @@ def read(args):
                 channels.append(channel.Channel(ch, 2*ch, 2*ch + 1))
         
             ephys.channels = channels
+        
+        with console.status("Configuring device", spinner="bouncingBall", spinner_style="green") as status:
+            configure_status = device.configure_with_status(config)
+            if configure_status is None:
+                console.print(f"[bold red]Failed to configure device. Run with `--verbose` for more information.")
+                return
+            if configure_status.code == StatusCode.kInvalidConfiguration:
+                console.print(f"[bold red]Failed to configure device.")
+                console.print(f"[italic red]Why: {configure_status.message}")
+                console.print(f"[yellow]Is there a peripheral connected to the device?")
+                return
+            elif configure_status.code == StatusCode.kFailedPrecondition:
+                console.print(f"[bold red]Failed to configure device.")
+                console.print(f"[italic red]Why: {configure_status.message}")
+                console.print(f"[yellow]If the device is already running, run `synapsectl stop {args.uri}` to stop the device and try again.")
+                return
+            console.print(f"[bold green]Device configured successfully")
 
-        if not device.configure(config):
-            raise ValueError("Failed to configure device")
-
-        if info.status.state != DeviceState.kRunning:
-            print("Starting device...")
-            if not device.start():
-                raise ValueError("Failed to start device")
-
+            status.update(f"Starting device")
+            if info.status.state != DeviceState.kRunning:
+                if not device.start():
+                    console.print(f"[bold red]Failed to start device")
+                    return
+            console.print(f"[bold green]Device started successfully")
     else:
+        # TODO(gilbert): Get rid of this giant if-else block
         node = next(
             (
                 n
@@ -90,39 +122,50 @@ def read(args):
             None,
         )
         if node is None:
-            print(
-                "No StreamOut node found in device configuration; please configure the device with a StreamOut node."
-            )
+            console.print(f"[bold red]No StreamOut node found in device configuration; please configure the device with a StreamOut node.")
             return
 
         stream_out = syn.StreamOut._from_proto(node.stream_out)
         stream_out.id = args.node_id
         stream_out.device = device
 
-    print(f"Streaming data... Ctrl+C to stop")
-    q = queue.Queue()
-    stop = threading.Event()
+    output_filename_base = f"synapse_data_{time.strftime('%Y%m%d-%H%M%S')}"
+
+    status_title = f"Streaming data for {args.duration} seconds" if args.duration else "Streaming data indefinitely"
+    with console.status(status_title, spinner="bouncingBall", spinner_style="green") as status:
+        q = queue.Queue()
+        stop = threading.Event()
+        if args.bin:
+            thread = threading.Thread(target=_binary_writer, args=(stop, q, num_ch, output_filename_base))
+        else:
+            thread = threading.Thread(target=_data_writer, args=(stop, q, output_filename_base))
+        thread.start()
+
+        try:
+            read_packets(stream_out, q, args.duration)
+        except KeyboardInterrupt:
+            pass
+        except Exception as e:
+            console.print(f"[red]Error during streaming: {e}")
+            if args.verbose:
+                traceback.print_exc()
+        finally:
+            console.print("Stopping read...")
+            stop.set()
+            thread.join()
+
+        if args.config:
+            console.print("Stopping device...")
+            if not device.stop():
+                console.print("[red]Failed to stop device")
+                return
+            console.print("Stopped")
+    
+    console.print(f"[bold green]Streaming complete")
     if args.bin:
-        thread = threading.Thread(target=_binary_writer, args=(stop, q, num_ch))
+        console.print(f"Data saved to {output_filename_base}.dat")
     else:
-        thread = threading.Thread(target=_data_writer, args=(stop, q))
-    thread.start()
-
-    try:
-        read_packets(stream_out, q, args.duration)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        print("Stopping read...")
-        stop.set()
-        thread.join()
-
-    if args.config:
-        print("Stopping device...")
-        if not device.stop():
-            print("Failed to stop device")
-            return
-        print("Stopped")
+        console.print(f"Data saved to {output_filename_base}.jsonl")
 
 
 def read_packets(node: syn.StreamOut, q: queue.Queue, duration: Optional[int] = None):
@@ -131,7 +174,6 @@ def read_packets(node: syn.StreamOut, q: queue.Queue, duration: Optional[int] = 
     dropped_packets = 0
     start = time.time()
     print_interval = 1000
-    print(f"Reading packets for duration {duration} seconds" if duration else "Reading packets...")
     while True:
         header, data = node.read()
         if not data:
@@ -160,10 +202,8 @@ def read_packets(node: syn.StreamOut, q: queue.Queue, duration: Optional[int] = 
     print(f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)")
 
 
-def _binary_writer(stop, q, num_ch):
-    filename = f"synapse_data_{time.strftime('%Y%m%d-%H%M%S')}.dat"
-
-    print(f"Writing binary data from {num_ch} channels to {filename}")
+def _binary_writer(stop, q, num_ch, output_filename_base):
+    filename = f"{output_filename_base}.dat"
     if filename:
         fd = open(filename, "wb")
     
@@ -193,8 +233,8 @@ def _binary_writer(stop, q, num_ch):
             continue
                 
 
-def _data_writer(stop, q):
-    filename = f"synapse_data_{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
+def _data_writer(stop, q, output_filename_base):
+    filename = f"{output_filename_base}.jsonl"
     if filename:
         fd = open(filename, "wb")
 
