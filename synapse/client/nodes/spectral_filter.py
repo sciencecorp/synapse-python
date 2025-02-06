@@ -34,7 +34,3 @@ class SpectralFilter(Node):
             proto.low_cutoff_hz,
             proto.high_cutoff_hz,
         )
-
-    @staticmethod
-    def from_proto(proto):
-        return SpectralFilter._from_proto(proto.spectral_filter)

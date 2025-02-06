@@ -56,6 +56,7 @@ class Config(object):
 
         for n in proto.nodes:
             if n.type not in list(NODE_TYPE_OBJECT_MAP.keys()):
+                print(f"Unknown node type: {n.type}")
                 continue
             node = NODE_TYPE_OBJECT_MAP[n.type].from_proto(n)
 

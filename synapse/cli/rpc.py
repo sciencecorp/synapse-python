@@ -99,8 +99,7 @@ def configure(args):
     with open(args.config_file) as config_json:
         config_proto = Parse(config_json.read(), DeviceConfiguration())
         print("Configuring device with the following configuration:")
-        print(config_proto)
+        config = syn.Config.from_proto(config_proto)
+        print(config.to_proto())
 
-        return syn.Device(args.uri, args.verbose).configure(
-            syn.Config.from_proto(config_proto)
-        )
+        return syn.Device(args.uri, args.verbose).configure(config)
