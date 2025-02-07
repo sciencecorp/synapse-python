@@ -7,20 +7,22 @@ if __name__ == "__main__":
     print(info)
 
     stream_out = syn.StreamOut(label="my broadband", multicast_group="239.0.0.1")
-    e_broadband = syn.ElectricalBroadband(
+    broadband = syn.BroadbandSource(
         peripheral_id=2,
-        channels=[syn.Channel(id=c, electrode_id=c * 2, reference_id=c * 2 + 1) for c in range(32)],
-        sample_rate=30000,
+        sample_rate_hz=30000,
         bit_width=12,
         gain=20.0,
-        low_cutoff_hz=500.0,
-        high_cutoff_hz=6000.0,
+        signal=syn.Signal(
+            channels=[syn.Channel(id=c, electrode_id=c * 2, reference_id=c * 2 + 1) for c in range(32)],
+            low_cutoff_hz=500.0,
+            high_cutoff_hz=6000.0,
+        )
     )
 
     config = syn.Config()
     config.add_node(stream_out)
-    config.add_node(e_broadband)
-    config.connect(e_broadband, stream_out)
+    config.add_node(broadband)
+    config.connect(broadband, stream_out)
 
     device.configure(config)
     device.start()

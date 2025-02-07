@@ -8,20 +8,24 @@
       }
     },
     {
-      "type": "kElectricalBroadband",
+      "type": "kBroadbandSource",
       "id": 2,
-      "electrical_broadband": {
+      "broadband_source": {
         "peripheral_id": 1,
-        "sample_rate": 1000,
-        "bit_width": 12,
+        "sample_rate_hz": 32000,
+        "bit_width": 16,
         "gain": 20.0,
-        "channels": [
-          { "id": 0, "electrode_id": 0, "reference_id": 1 },
-          { "id": 1, "electrode_id": 2, "reference_id": 3 },
-          { "id": 2, "electrode_id": 4, "reference_id": 5 },
-          { "id": 3, "electrode_id": 6, "reference_id": 7 },
-          { "id": 4, "electrode_id": 8, "reference_id": 9 }
-        ]
+        "signal": {
+          "electrode": {
+            "channels": [
+              { "id": 0, "electrode_id": 0, "reference_id": 1 },
+              { "id": 1, "electrode_id": 2, "reference_id": 3 },
+              { "id": 2, "electrode_id": 4, "reference_id": 5 },
+              { "id": 3, "electrode_id": 6, "reference_id": 7 },
+              { "id": 4, "electrode_id": 8, "reference_id": 9 }
+            ]
+          }
+        }
       }
     }
   ],

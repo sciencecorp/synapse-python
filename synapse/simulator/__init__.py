@@ -1,18 +1,20 @@
 from synapse.api.node_pb2 import NodeType
 from synapse.server.entrypoint import ENTRY_DEFAULTS, main as server
+from synapse.simulator.nodes.broadband_source import BroadbandSource
+from synapse.simulator.nodes.optical_stimulation import OpticalStimulation
+from synapse.simulator.nodes.spike_source import SpikeSource
 from synapse.server.nodes.spectral_filter import SpectralFilter
 from synapse.server.nodes.spike_detect import SpikeDetect
 from synapse.server.nodes.stream_in import StreamIn
 from synapse.server.nodes.stream_out import StreamOut
-from synapse.simulator.nodes.electrical_broadband import ElectricalBroadband
-from synapse.simulator.nodes.optical_stimulation import OpticalStimulation
 
 SIMULATOR_NODE_OBJECT_MAP = {
-  NodeType.kStreamIn: StreamIn,
-  NodeType.kStreamOut: StreamOut,
+  NodeType.kBroadbandSource: BroadbandSource,
   NodeType.kSpectralFilter: SpectralFilter,
   NodeType.kSpikeDetect: SpikeDetect,
-  NodeType.kElectricalBroadband: ElectricalBroadband,
+  NodeType.kSpikeSource: SpikeSource,
+  NodeType.kStreamIn: StreamIn,
+  NodeType.kStreamOut: StreamOut,
   NodeType.kOpticalStimulation: OpticalStimulation
 }
 
