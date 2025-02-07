@@ -3,6 +3,8 @@ import queue
 import threading
 import time
 import traceback
+import os
+import shutil
 from typing import Optional
 from operator import itemgetter
 import copy
@@ -36,7 +38,13 @@ def add_commands(subparsers):
     a.add_argument("--duration", type=int, help="Duration to read for in seconds")
     a.add_argument("--node_id", type=int, help="ID of the StreamOut node to read from")
     a.add_argument("--plot", action="store_true", help="Plot the data in real-time")
-
+    a.add_argument("--output", type=str, help="Name of the output directory and files")
+    a.add_argument(
+        "--overwrite",
+        action="store_true",
+        default=False,
+        help="Overwrite existing files",
+    )
     a.set_defaults(func=read)
 
 
@@ -52,6 +60,20 @@ def read(args):
     if not args.config and not args.node_id:
         console.print("[bold red]Either `--config` or `--node_id` must be specified.")
         return
+
+    output_base = args.output
+    if not output_base:
+        output_base = f"synapse_data_{time.strftime('%Y%m%d-%H%M%S')}"
+
+    # Check if the output directory exists, we will make the directory later after we know the config
+    if os.path.exists(output_base):
+        if not args.overwrite:
+            console.print(
+                f"[bold red]Output directory {output_base} already exists, please specify a different output directory or use `--overwrite` to overwrite existing files"
+            )
+            return
+        else:
+            console.print(f"[bold yellow]Overwriting existing files in {output_base}")
 
     device = syn.Device(args.uri, args.verbose)
 
@@ -165,33 +187,35 @@ def read(args):
         stream_out = syn.StreamOut.from_proto(node)
         stream_out.device = device
 
-    print("Streaming data... Ctrl+C to stop")
-    q = queue.Queue()
+    # We are ready to start streaming, make the output directory
+    os.makedirs(output_base, exist_ok=True)
 
-    # Setup a queue for plotting if the user wants to plot
-    plot_q = queue.Queue() if args.plot else None
-
-    stop = threading.Event()
-
-    threads = []
-    output_base = f"synapse_data_{time.strftime('%Y%m%d-%H%M%S')}"
-    if args.bin:
-        threads.append(
-            threading.Thread(target=_binary_writer, args=(stop, q, num_ch, output_base))
-        )
+    # Copy our config to the output directory
+    output_config_path = os.path.join(output_base, "config.json")
+    if args.config:
+        shutil.copy(args.config, output_config_path)
     else:
-        threads.append(
-            threading.Thread(target=_data_writer, args=(stop, q, output_base))
-        )
+        with open(output_config_path, "w") as f:
+            f.write(info.configuration.SerializeToString().decode("utf-8"))
 
-    if args.plot:
-        threads.append(
-            threading.Thread(
-                target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)
+    console.print(f"[bold green]Streaming data to {output_base}")
+
+    status_title = (
+        f"Streaming data for {args.duration} seconds"
+        if args.duration
+        else "Streaming data indefinitely"
+    )
+    with console.status(
+        status_title, spinner="bouncingBall", spinner_style="green"
+    ) as status:
+        q = queue.Queue()
+        stop = threading.Event()
+        if args.bin:
+            thread = threading.Thread(
+                target=_binary_writer, args=(stop, q, num_ch, output_base)
             )
-        )
-
-    for thread in threads:
+        else:
+            thread = threading.Thread(target=_data_writer, args=(stop, q, output_base))
         thread.start()
 
     try:
@@ -204,12 +228,20 @@ def read(args):
         for thread in threads:
             thread.join()
 
-    if args.config:
-        print("Stopping device...")
-        if not device.stop():
-            print("Failed to stop device")
-            return
-        print("Stopped")
+        if args.config:
+            console.print("Stopping device...")
+            if not device.stop():
+                console.print("[red]Failed to stop device")
+            console.print("Stopped")
+
+    console.print("[bold green]Streaming complete")
+    console.print("[cyan]================")
+    console.print(f"[cyan]Output directory: {output_base}/")
+    if args.bin:
+        console.print(f"[cyan]{output_base}.dat")
+    else:
+        console.print(f"[cyan]{output_base}.jsonl")
+    console.print("[cyan]================")
 
 
 def read_packets(
@@ -257,27 +289,22 @@ def read_packets(
             print(f"First packet received at {time.time() - start:.2f} seconds")
 
         if packet_count % print_interval == 0:
-            elapsed = time.time() - start
             print(
-                f"Received {packet_count} packets in {elapsed:.2f}s. "
-                f"Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100:.2f}%)."
+                f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)"
             )
-
-        # Check for duration
         if duration and (time.time() - start) > duration:
             break
 
-    total_time = time.time() - start
     print(
-        f"Received {packet_count} packets in {total_time:.2f} seconds. "
-        f"Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100:.2f}%)."
+        f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)"
     )
 
 
-def _binary_writer(stop, q, num_ch, output_filename_base):
-    filename = f"{output_filename_base}.dat"
+def _binary_writer(stop, q, num_ch, output_base):
+    filename = f"{output_base}.dat"
+    full_path = os.path.join(output_base, filename)
     if filename:
-        fd = open(filename, "wb")
+        fd = open(full_path, "wb")
 
     channel_data = []
     while not stop.is_set() or not q.empty():
@@ -308,11 +335,11 @@ def _binary_writer(stop, q, num_ch, output_filename_base):
             traceback.print_exc()
             continue
 
-
-def _data_writer(stop, q, output_filename_base):
-    filename = f"{output_filename_base}.jsonl"
+def _data_writer(stop, q, output_base):
+    filename = f"{output_base}.jsonl"
+    full_path = os.path.join(output_base, filename)
     if filename:
-        fd = open(filename, "wb")
+        fd = open(full_path, "wb")
 
     while not stop.is_set() or not q.empty():
         try:
