@@ -20,6 +20,7 @@ import synapse.cli.synapse_plotter as plotter
 from rich.console import Console
 from rich.pretty import pprint
 
+
 def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device's StreamOut node")
     a.add_argument("uri", type=str, help="IP address of Synapse device")
@@ -28,7 +29,9 @@ def add_commands(subparsers):
         type=str,
         help="Configuration file",
     )
-    a.add_argument("--num_ch", type=int, help="Number of channels to read from, overrides config")
+    a.add_argument(
+        "--num_ch", type=int, help="Number of channels to read from, overrides config"
+    )
     a.add_argument("--bin", type=bool, help="Output binary format instead of JSON")
     a.add_argument("--duration", type=int, help="Duration to read for in seconds")
     a.add_argument("--node_id", type=int, help="ID of the StreamOut node to read from")
@@ -46,24 +49,26 @@ def load_config_from_file(path):
 def read(args):
     console = Console()
     if not args.config and not args.node_id:
-        console.print(f"[bold red]Either `--config` or `--node_id` must be specified.")
+        console.print("[bold red]Either `--config` or `--node_id` must be specified.")
         return
 
     device = syn.Device(args.uri, args.verbose)
 
-    with console.status("Reading from Synapse Device", spinner="bouncingBall", spinner_style="green") as status:
-        status.update(f"Requesting device info")
+    with console.status(
+        "Reading from Synapse Device", spinner="bouncingBall", spinner_style="green"
+    ) as status:
+        status.update("Requesting device info")
         info = device.info()
         if not info:
             console.print(f"[bold red]Failed to get device info from {args.uri}")
             return
-    
+
     console.log(f"Got info from: {info.name}")
     if args.verbose:
         pprint(info)
         console.print("\n")
-    
-    status.update(f"Loading recording configuration")
+
+    status.update("Loading recording configuration")
 
     # Keep track of the sample rate in case we need to plot
     sample_rate_hz = 32000
@@ -76,7 +81,7 @@ def read(args):
             (n for n in config.nodes if n.type == NodeType.kStreamOut), None
         )
         if not stream_out:
-            console.print(f"[bold red]No StreamOut node found in config")
+            console.print("[bold red]No StreamOut node found in config")
             return
         broadband = next(
             (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
@@ -106,19 +111,23 @@ def read(args):
         with console.status("Configuring device", spinner="bouncingBall", spinner_style="green") as status:
             configure_status = device.configure_with_status(config)
             if configure_status is None:
-                console.print(f"[bold red]Failed to configure device. Run with `--verbose` for more information.")
+                console.print(
+                    "[bold red]Failed to configure device. Run with `--verbose` for more information."
+                )
                 return
             if configure_status.code == StatusCode.kInvalidConfiguration:
-                console.print(f"[bold red]Failed to configure device.")
+                console.print("[bold red]Failed to configure device.")
                 console.print(f"[italic red]Why: {configure_status.message}")
-                console.print(f"[yellow]Is there a peripheral connected to the device?")
+                console.print("[yellow]Is there a peripheral connected to the device?")
                 return
             elif configure_status.code == StatusCode.kFailedPrecondition:
-                console.print(f"[bold red]Failed to configure device.")
+                console.print("[bold red]Failed to configure device.")
                 console.print(f"[italic red]Why: {configure_status.message}")
-                console.print(f"[yellow]If the device is already running, run `synapsectl stop {args.uri}` to stop the device and try again.")
+                console.print(
+                    f"[yellow]If the device is already running, run `synapsectl stop {args.uri}` to stop the device and try again."
+                )
                 return
-            console.print(f"[bold green]Device configured successfully")
+            console.print("[bold green]Device configured successfully")
 
         if not device.configure(config):
             raise ValueError("Failed to configure device")
@@ -147,13 +156,15 @@ def read(args):
             None,
         )
         if node is None:
-            console.print(f"[bold red]No StreamOut node found in device configuration; please configure the device with a StreamOut node.")
+            console.print(
+                "[bold red]No StreamOut node found in device configuration; please configure the device with a StreamOut node."
+            )
             return
 
         stream_out = syn.StreamOut.from_proto(node)
         stream_out.device = device
 
-    print(f"Streaming data... Ctrl+C to stop")
+    print("Streaming data... Ctrl+C to stop")
     q = queue.Queue()
 
     # Setup a queue for plotting if the user wants to plot
@@ -162,13 +173,22 @@ def read(args):
     stop = threading.Event()
 
     threads = []
+    output_base = f"synapse_data_{time.strftime('%Y%m%d-%H%M%S')}"
     if args.bin:
-        threads.append(threading.Thread(target=_binary_writer, args=(stop, q, num_ch)))
+        threads.append(
+            threading.Thread(target=_binary_writer, args=(stop, q, num_ch, output_base))
+        )
     else:
-        threads.append(threading.Thread(target=_data_writer, args=(stop, q)))
-    
+        threads.append(
+            threading.Thread(target=_data_writer, args=(stop, q, output_base))
+        )
+
     if args.plot:
-        threads.append(threading.Thread(target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)))
+        threads.append(
+            threading.Thread(
+                target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)
+            )
+        )
 
     for thread in threads:
         thread.start()
@@ -190,6 +210,7 @@ def read(args):
             return
         print("Stopped")
 
+
 def read_packets(
     node: syn.StreamOut,
     q: queue.Queue,
@@ -203,7 +224,11 @@ def read_packets(
     start = time.time()
     print_interval = 1000
 
-    print(f"Reading packets for duration {duration} seconds" if duration else "Reading packets...")
+    print(
+        f"Reading packets for duration {duration} seconds"
+        if duration
+        else "Reading packets..."
+    )
 
     while True:
         header, data = node.read()
@@ -219,7 +244,7 @@ def read_packets(
             expected = (seq_number + 1) % (2**16)
             if header.seq_number != expected:
                 print(f"Seq out of order: got {header.seq_number}, expected {expected}")
-                dropped_packets += (header.seq_number - expected)
+                dropped_packets += header.seq_number - expected
             seq_number = header.seq_number
 
         # Always add the data to the writer queues
@@ -234,7 +259,7 @@ def read_packets(
             elapsed = time.time() - start
             print(
                 f"Received {packet_count} packets in {elapsed:.2f}s. "
-                f"Dropped {dropped_packets} packets ({(dropped_packets / packet_count)*100:.2f}%)."
+                f"Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100:.2f}%)."
             )
 
         # Check for duration
@@ -252,7 +277,7 @@ def _binary_writer(stop, q, num_ch, output_filename_base):
     filename = f"{output_filename_base}.dat"
     if filename:
         fd = open(filename, "wb")
-    
+
     channel_data = []
     while not stop.is_set() or not q.empty():
         try:
@@ -271,13 +296,17 @@ def _binary_writer(stop, q, num_ch, output_filename_base):
 
                     for frame in frames:
                         for sample in frame:
-                            fd.write(int(sample).to_bytes(2, byteorder="little", signed=False))
+                            fd.write(
+                                int(sample).to_bytes(
+                                    2, byteorder="little", signed=False
+                                )
+                            )
 
         except Exception as e:
             print(f"Error processing data: {e}")
             traceback.print_exc()
             continue
-                
+
 
 def _data_writer(stop, q, output_filename_base):
     filename = f"{output_filename_base}.jsonl"
@@ -299,9 +328,10 @@ def _data_writer(stop, q, output_filename_base):
             traceback.print_exc()
             continue
 
-def _plot_data(stop, q, sample_rate_hz, num_channels):
-    import dearpygui.dearpygui as dpg
 
+def _plot_data(stop, q, sample_rate_hz, num_channels):
     # TODO(gilbert): Make these configurable
     window_size_seconds = 3
-    plotter.plot_synapse_data(stop, q, sample_rate_hz, num_channels, window_size_seconds)
+    plotter.plot_synapse_data(
+        stop, q, sample_rate_hz, num_channels, window_size_seconds
+    )
