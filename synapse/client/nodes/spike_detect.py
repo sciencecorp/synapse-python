@@ -47,7 +47,3 @@ class SpikeDetect(Node):
             sort=proto.sort,
             bin_size_ms=proto.bin_size_ms,
         )
-
-    @staticmethod
-    def from_proto(proto):
-        return SpikeDetect._from_proto(proto.spike_detect)
