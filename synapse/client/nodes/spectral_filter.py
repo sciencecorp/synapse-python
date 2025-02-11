@@ -7,10 +7,11 @@ from synapse.client.node import Node
 class SpectralFilter(Node):
     type = NodeType.kSpectralFilter
 
-    def __init__(self, method, low_cutoff_hz=None, high_cutoff_hz=None):
+    def __init__(self, method, low_cutoff_hz=None, high_cutoff_hz=None, sample_rate_hz=None):
         self.method = method
         self.low_cutoff_hz = low_cutoff_hz
         self.high_cutoff_hz = high_cutoff_hz
+        self.sample_rate_hz = sample_rate_hz
 
     def _to_proto(self):
         n = NodeConfig()
@@ -18,6 +19,7 @@ class SpectralFilter(Node):
             method=self.method,
             low_cutoff_hz=self.low_cutoff_hz,
             high_cutoff_hz=self.high_cutoff_hz,
+            sample_rate_hz=self.sample_rate_hz,
         )
         n.spectral_filter.CopyFrom(p)
         return n
@@ -33,4 +35,5 @@ class SpectralFilter(Node):
             proto.method,
             proto.low_cutoff_hz,
             proto.high_cutoff_hz,
+            proto.sample_rate_hz,
         )

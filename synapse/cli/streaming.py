@@ -352,7 +352,7 @@ def _binary_writer(stop, q, num_ch, output_base):
                         for sample in frame:
                             fd.write(
                                 int(sample).to_bytes(
-                                    2, byteorder="little", signed=False
+                                    2, byteorder="little", signed=True
                                 )
                             )
 
