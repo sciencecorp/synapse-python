@@ -75,10 +75,22 @@ def read(args):
         if not stream_out:
             console.print(f"[bold red]No StreamOut node found in config")
             return
-        ephys = next(
-            (n for n in config.nodes if n.type == NodeType.kElectricalBroadband), None
+        broadband = next(
+            (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
         )
-        num_ch = len(ephys.channels)
+        if not broadband:
+            console.print(f"[bold red]No BroadbandSource node found in config")
+            return
+        signal = broadband.signal
+        if not signal:
+            console.print(f"[bold red]No signal configured for BroadbandSource node")
+            return
+
+        if not signal.electrode:
+            console.print(f"[bold red]No electrode signal configured for BroadbandSource node")
+            return
+
+        num_ch = len(signal.electrode.channels)
         if args.num_ch:
             num_ch = args.num_ch
             offset = 0
@@ -86,7 +98,7 @@ def read(args):
             for ch in range(offset, offset + num_ch):
                 channels.append(channel.Channel(ch, 2*ch, 2*ch + 1))
         
-            ephys.channels = channels
+            broadband.signal.electrode.channels = channels
         
         with console.status("Configuring device", spinner="bouncingBall", spinner_style="green") as status:
             configure_status = device.configure_with_status(config)
@@ -125,8 +137,7 @@ def read(args):
             console.print(f"[bold red]No StreamOut node found in device configuration; please configure the device with a StreamOut node.")
             return
 
-        stream_out = syn.StreamOut._from_proto(node.stream_out)
-        stream_out.id = args.node_id
+        stream_out = syn.StreamOut.from_proto(node)
         stream_out.device = device
 
     output_filename_base = f"synapse_data_{time.strftime('%Y%m%d-%H%M%S')}"

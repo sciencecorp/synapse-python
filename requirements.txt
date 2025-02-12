@@ -9,3 +9,5 @@ scipy
 cython
 rich
 pre-commit
+pytest
+pytest-asyncio
