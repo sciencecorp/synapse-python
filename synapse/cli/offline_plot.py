@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtWidgets
+from pyqtgraph.Qt import QtWidgets, QtCore
 import logging
 import signal
 
@@ -114,6 +114,10 @@ def compute_fft(data, sample_rate):
 def plot(args):
     logger = setup_logging()
 
+    app = QtWidgets.QApplication.instance()
+    if not app:
+        app = QtWidgets.QApplication(sys.argv)
+
     # Start with loading the config
     sampling_freq, num_channels, channel_ids = load_config(args.config_json)
     if args.channels:
@@ -126,11 +130,21 @@ def plot(args):
 
     # Setup the window for the plot
     pg.setConfigOption("background", BACKGROUND_COLOR)
-    win = pg.GraphicsLayoutWidget(title=f"Synapse Data Recording - {args.fname}")
-    win.resize(1280, 720)
+
+    # To allow for resizing, we need to add a splitter
+    main_splitter = QtWidgets.QSplitter()
+    main_splitter.setOrientation(QtCore.Qt.Orientation.Horizontal)
+
+    left_splitter = QtWidgets.QSplitter()
+    left_splitter.setOrientation(QtCore.Qt.Orientation.Vertical)
+
+    # Add widgets so we can resize
+    time_plot_widget = pg.GraphicsLayoutWidget()
+    single_channel_plot_widget = pg.GraphicsLayoutWidget()
+    fft_plot_widget = pg.GraphicsLayoutWidget()
 
     # Main plot is all the channels
-    plot = win.addPlot(row=0, col=0, title="Channels")
+    plot = time_plot_widget.addPlot(row=0, col=0, title="Channels")
     plot.setLabel("bottom", "Time (s)")
     plot.setLabel("left", "Amplitude (counts)")
     plot.addLegend()
@@ -203,7 +217,9 @@ def plot(args):
         curves.append(curve)
 
     # Create a single plot for a single channel
-    plot_single = win.addPlot(row=1, col=0, title="Single Channel")
+    plot_single = single_channel_plot_widget.addPlot(
+        row=1, col=0, title="Single Channel"
+    )
     plot_single.setLabel("bottom", "Time (s)")
     plot_single.setLabel("left", "Amplitude (counts)")
     plot_single.showGrid(x=True, y=True)
@@ -220,10 +236,18 @@ def plot(args):
     curves.append(curve_single)
 
     # Create an fft plot of the selected channel
-    fft_plot = win.addPlot(row=0, col=1, rowspan=2, title="FFT of Selected Channel")
+    fft_plot = fft_plot_widget.addPlot(
+        row=0, col=1, rowspan=2, title="FFT of Selected Channel"
+    )
     fft_plot.setLabel("bottom", "Frequency (Hz)")
     fft_plot.setLabel("left", "Amplitude")
     fft_plot.showGrid(x=True, y=True)
+
+    # Splotters for the widgets
+    left_splitter.addWidget(time_plot_widget)
+    left_splitter.addWidget(single_channel_plot_widget)
+    main_splitter.addWidget(left_splitter)
+    main_splitter.addWidget(fft_plot_widget)
 
     # Log scale for frequency axis
     fft_plot.setLogMode(x=True, y=False)
@@ -283,11 +307,16 @@ def plot(args):
     # Create a layout for our plot, fft, and controls
     main_layout = QtWidgets.QVBoxLayout()
     main_layout.addWidget(combo)
-    main_layout.addWidget(win)
+
+    main_layout.addWidget(main_splitter)
 
     # And finally our main widget to show
     main_widget = QtWidgets.QWidget()
     main_widget.setLayout(main_layout)
+    main_widget.setWindowTitle(
+        f"Synapse Data Recording - {args.fname}"
+    )  # Add window title here
+    main_widget.resize(1280, 720)  # Add resize here
     main_widget.show()
 
     # Handle the case of Ctrl+C (the user might be like me and press this instead of the Exit button)
@@ -298,5 +327,4 @@ def plot(args):
 
     signal.signal(signal.SIGINT, signal_handler)
 
-    win.show()
-    QtWidgets.QApplication.instance().exec()
+    app.exec()
