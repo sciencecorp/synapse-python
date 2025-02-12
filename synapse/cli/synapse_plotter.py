@@ -43,16 +43,16 @@ class SynapsePlotter:
 
     def setup_gui(self):
         """Builds the DearPyGui layout."""
-        dpg.create_viewport(title="SciFi Data Viewer", width=1800, height=1300)
+        dpg.create_viewport(title="SciFi Data Viewer", width=1280, height=720)
 
         # -----------------------------
         # Controls Window (left side)
         # -----------------------------
         with dpg.window(
             label="Controls",
-            width=250,
+            width=200,
             no_resize=True,
-            pos=(10, 10),
+            pos=(0, 0),
             tag="control_window",
         ):
             dpg.add_text("Select Channel to Zoom:")
@@ -95,9 +95,9 @@ class SynapsePlotter:
         # -----------------------------
         with dpg.window(
             label="Neural Data",
-            width=1500,
-            height=1300,
-            pos=(270, 10),
+            width=1080,
+            height=700,
+            pos=(200, 0),
             no_close=True,
             tag="main_window",
         ):

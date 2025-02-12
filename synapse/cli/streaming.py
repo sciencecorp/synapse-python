@@ -36,9 +36,6 @@ def add_commands(subparsers):
     a.add_argument("--duration", type=int, help="Duration to read for in seconds")
     a.add_argument("--node_id", type=int, help="ID of the StreamOut node to read from")
     a.add_argument("--plot", action="store_true", help="Plot the data in real-time")
-    a.add_argument(
-        "--simulate", action="store_true", help="Use simulated data for testing"
-    )
 
     a.set_defaults(func=read)
 
@@ -52,44 +49,6 @@ def load_config_from_file(path):
 
 def read(args):
     console = Console()
-    # Handle simulation mode
-    if args.simulate:
-        print("Running in simulation mode...")
-        q = queue.Queue()
-        plot_q = queue.Queue()
-        stop = threading.Event()
-
-        # Default simulation parameters
-        num_ch = args.num_ch if args.num_ch else 32
-        sample_rate_hz = 32000
-
-        threads = []
-        if args.plot:
-            threads.append(
-                threading.Thread(
-                    target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)
-                )
-            )
-            threads.append(
-                threading.Thread(
-                    target=_simulate_data, args=(stop, plot_q, sample_rate_hz, num_ch)
-                )
-            )
-
-        for thread in threads:
-            thread.start()
-
-        try:
-            input("Press Enter to stop simulation...")
-        except KeyboardInterrupt:
-            pass
-        finally:
-            print("Stopping simulation...")
-            stop.set()
-            for thread in threads:
-                thread.join()
-        return
-
     if not args.config and not args.node_id:
         console.print("[bold red]Either `--config` or `--node_id` must be specified.")
         return
@@ -251,46 +210,6 @@ def read(args):
             print("Failed to stop device")
             return
         print("Stopped")
-
-
-def _simulate_data(stop, q, sample_rate_hz, num_channels):
-    import numpy as np
-
-    # Parameters for simulation
-    chunk_size = 1000  # samples per chunk
-    t = 0
-    frequencies = np.linspace(
-        1, 10, num_channels
-    )  # different frequency for each channel
-
-    while not stop.is_set():
-        # Generate time points for this chunk
-        t_chunk = np.linspace(
-            t, t + chunk_size / sample_rate_hz, chunk_size, endpoint=False
-        )
-
-        # Generate simulated data for each channel
-        channel_data = []
-        for ch_idx, freq in enumerate(frequencies):
-            # Generate sine wave with some noise
-            samples = np.sin(2 * np.pi * freq * t_chunk) * 1000  # Scale for visibility
-            samples += np.random.normal(0, 100, chunk_size)  # Add noise
-            samples = samples.astype(np.int16)
-            channel_data.append([ch_idx, samples.tolist()])
-
-        # Create a data object similar to ndtp_types.ElectricalBroadbandData
-        class SimulatedData:
-            def __init__(self, samples):
-                self.samples = samples
-
-            def to_list(self):
-                return self.samples
-
-        simulated_data = SimulatedData(channel_data)
-        q.put(simulated_data)
-
-        t += chunk_size / sample_rate_hz
-        time.sleep(chunk_size / sample_rate_hz)  # Simulate real-time data rate
 
 
 def read_packets(
