@@ -13,3 +13,4 @@ pytest
 pytest-asyncio
 dearpygui
 pyqtgraph
+pyqt5
