@@ -1,8 +1,8 @@
 import asyncio
+
+
 class MulticastDiscoveryProtocol:
-    def __init__(
-        self, server_name, serial, rpc_port=647
-    ):
+    def __init__(self, server_name, serial, rpc_port=647):
         self.server_name = server_name
         self.serial = serial
         self.rpc_port = rpc_port
@@ -14,9 +14,7 @@ class MulticastDiscoveryProtocol:
         command = data.decode("ascii")
 
         if command == "DISCOVER":
-            print(
-                "Received DISCOVER command from {!r}".format(addr)
-            )
+            print("Received DISCOVER command from {!r}".format(addr))
 
             print("  -- Replying")
             self.transport.sendto(
