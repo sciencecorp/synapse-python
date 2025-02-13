@@ -100,7 +100,7 @@ class Device(object):
 
     def _handle_status_response(self, status):
         if status.code != StatusCode.kOk:
-            self.logger.debug("Error %d: %s", status.code, status.message)
+            self.logger.error("Error %d: %s", status.code, status.message)
             return False
         else:
             self.sockets = status.sockets
