@@ -28,6 +28,8 @@ Includes `synapsectl` command line utility:
         wifi-select         Configure a USB connected Synapse device to use a known WiFi network
         wifi-config         Configure a USB connected Synapse device for a new WiFi network
         read                Read from a device's StreamOut node
+        plot                Plot recorded synapse data
+
 
 As well as the base for a device implementation (`synapse/server`),
 
@@ -174,4 +176,11 @@ pre-commit install
 
 # To run manually
 pre-commit run
+```
+
+## Plotting Offline
+After recording data to a file, you can generate plots to visualize your data. Using the CLI, you can run:
+
+```
+synapsectl plot <path to data.bin> <path to config>
 ```
