@@ -4,12 +4,11 @@ import threading
 import time
 import traceback
 import os
-import shutil
 from typing import Optional
 from operator import itemgetter
 import copy
 
-from google.protobuf.json_format import Parse
+from google.protobuf.json_format import Parse, MessageToJson
 
 from synapse.api.node_pb2 import NodeType
 from synapse.api.status_pb2 import DeviceState, StatusCode
@@ -62,8 +61,11 @@ def read(args):
         return
 
     output_base = args.output
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
     if not output_base:
-        output_base = f"synapse_data_{time.strftime('%Y%m%d-%H%M%S')}"
+        output_base = f"synapse_data_{timestamp}"
+    else:
+        output_base = f"{output_base}_{timestamp}"
 
     # Check if the output directory exists, we will make the directory later after we know the config
     if os.path.exists(output_base):
@@ -110,15 +112,17 @@ def read(args):
             (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
         )
         if not broadband:
-            console.print(f"[bold red]No BroadbandSource node found in config")
+            console.print("[bold red]No BroadbandSource node found in config")
             return
         signal = broadband.signal
         if not signal:
-            console.print(f"[bold red]No signal configured for BroadbandSource node")
+            console.print("[bold red]No signal configured for BroadbandSource node")
             return
 
         if not signal.electrode:
-            console.print(f"[bold red]No electrode signal configured for BroadbandSource node")
+            console.print(
+                "[bold red]No electrode signal configured for BroadbandSource node"
+            )
             return
 
         num_ch = len(signal.electrode.channels)
@@ -127,11 +131,13 @@ def read(args):
             offset = 0
             channels = []
             for ch in range(offset, offset + num_ch):
-                channels.append(channel.Channel(ch, 2*ch, 2*ch + 1))
-        
+                channels.append(channel.Channel(ch, 2 * ch, 2 * ch + 1))
+
             broadband.signal.electrode.channels = channels
-        
-        with console.status("Configuring device", spinner="bouncingBall", spinner_style="green") as status:
+
+        with console.status(
+            "Configuring device", spinner="bouncingBall", spinner_style="green"
+        ) as status:
             configure_status = device.configure_with_status(config)
             if configure_status is None:
                 console.print(
@@ -190,13 +196,16 @@ def read(args):
     # We are ready to start streaming, make the output directory
     os.makedirs(output_base, exist_ok=True)
 
-    # Copy our config to the output directory
-    output_config_path = os.path.join(output_base, "config.json")
-    if args.config:
-        shutil.copy(args.config, output_config_path)
-    else:
-        with open(output_config_path, "w") as f:
-            f.write(info.configuration.SerializeToString().decode("utf-8"))
+    # Copy our config that was taken from the device to the output directory
+    device_info_after_config = device.info()
+    if not device_info_after_config:
+        console.print(f"[bold red]Failed to get device info from {args.uri}")
+        return
+    runtime_config = device_info_after_config.configuration
+    runtime_config_json = MessageToJson(runtime_config)
+    output_config_path = os.path.join(output_base, "runtime_config.json")
+    with open(output_config_path, "w") as f:
+        f.write(runtime_config_json)
 
     console.print(f"[bold green]Streaming data to {output_base}")
 
@@ -209,30 +218,45 @@ def read(args):
         status_title, spinner="bouncingBall", spinner_style="green"
     ) as status:
         q = queue.Queue()
+        plot_q = queue.Queue() if args.plot else None
+
+        threads = []
         stop = threading.Event()
         if args.bin:
-            thread = threading.Thread(
-                target=_binary_writer, args=(stop, q, num_ch, output_base)
+            threads.append(
+                threading.Thread(
+                    target=_binary_writer, args=(stop, q, num_ch, output_base)
+                )
             )
         else:
-            thread = threading.Thread(target=_data_writer, args=(stop, q, output_base))
-        thread.start()
+            threads.append(
+                threading.Thread(target=_data_writer, args=(stop, q, output_base))
+            )
 
-    try:
-        read_packets(stream_out, q, plot_q, args.duration)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        print("Stopping read...")
-        stop.set()
+        if args.plot:
+            threads.append(
+                threading.Thread(
+                    target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)
+                )
+            )
         for thread in threads:
-            thread.join()
+            thread.start()
 
-        if args.config:
-            console.print("Stopping device...")
-            if not device.stop():
-                console.print("[red]Failed to stop device")
-            console.print("Stopped")
+        try:
+            read_packets(stream_out, q, plot_q, args.duration)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            print("Stopping read...")
+            stop.set()
+            for thread in threads:
+                thread.join()
+
+            if args.config:
+                console.print("Stopping device...")
+                if not device.stop():
+                    console.print("[red]Failed to stop device")
+                console.print("Stopped")
 
     console.print("[bold green]Streaming complete")
     console.print("[cyan]================")
@@ -334,6 +358,7 @@ def _binary_writer(stop, q, num_ch, output_base):
             print(f"Error processing data: {e}")
             traceback.print_exc()
             continue
+
 
 def _data_writer(stop, q, output_base):
     filename = f"{output_base}.jsonl"
