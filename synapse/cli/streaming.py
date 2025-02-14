@@ -169,10 +169,10 @@ def read(args):
         # Get the sample rate from the device
         # We need to look at the node configuration with type kElectricalBroadband for the sample rate
         broadband = next(
-            (n for n in config.nodes if n.type == NodeType.kElectricalBroadband), None
+            (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
         )
         assert broadband is not None, "No ElectricalBroadband node found in config"
-        sample_rate_hz = broadband.sample_rate
+        sample_rate_hz = broadband.sample_rate_hz
 
     else:
         # TODO(gilbert): Get rid of this giant if-else block
