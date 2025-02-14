@@ -202,7 +202,9 @@ def read(args):
         console.print(f"[bold red]Failed to get device info from {args.uri}")
         return
     runtime_config = device_info_after_config.configuration
-    runtime_config_json = MessageToJson(runtime_config)
+    runtime_config_json = MessageToJson(
+        runtime_config, including_default_value_fields=True
+    )
     output_config_path = os.path.join(output_base, "runtime_config.json")
     with open(output_config_path, "w") as f:
         f.write(runtime_config_json)
