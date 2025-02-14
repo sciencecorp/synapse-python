@@ -11,3 +11,4 @@ rich
 pre-commit
 pytest
 pytest-asyncio
+dearpygui
