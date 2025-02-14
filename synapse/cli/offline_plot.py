@@ -72,11 +72,13 @@ def load_config(json_path):
 
     nodes = config["nodes"]
     for node in nodes:
-        if node["type"] == "kElectricalBroadband":
-            recording_config = node["electrical_broadband"]
-            sampling_freq = recording_config["sample_rate"]
-            num_channels = len(recording_config["channels"])
-            channel_ids = [channel["id"] for channel in recording_config["channels"]]
+        if node["type"] == "kBroadbandSource":
+            recording_config = node["broadbandSource"]
+            sampling_freq = recording_config["sampleRateHz"]
+
+            electrode_config = recording_config["signal"]["electrode"]
+            num_channels = len(electrode_config["channels"])
+            channel_ids = [channel["id"] for channel in electrode_config["channels"]]
             return sampling_freq, num_channels, channel_ids
 
     raise ValueError("Invalid JSON: No 'kElectricalBroadband' node found")
