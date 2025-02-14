@@ -3,11 +3,12 @@ import queue
 import threading
 import time
 import traceback
+import os
 from typing import Optional
 from operator import itemgetter
 import copy
 
-from google.protobuf.json_format import Parse
+from google.protobuf.json_format import Parse, MessageToJson
 
 from synapse.api.node_pb2 import NodeType
 from synapse.api.status_pb2 import DeviceState, StatusCode
@@ -36,7 +37,13 @@ def add_commands(subparsers):
     a.add_argument("--duration", type=int, help="Duration to read for in seconds")
     a.add_argument("--node_id", type=int, help="ID of the StreamOut node to read from")
     a.add_argument("--plot", action="store_true", help="Plot the data in real-time")
-
+    a.add_argument("--output", type=str, help="Name of the output directory and files")
+    a.add_argument(
+        "--overwrite",
+        action="store_true",
+        default=False,
+        help="Overwrite existing files",
+    )
     a.set_defaults(func=read)
 
 
@@ -52,6 +59,23 @@ def read(args):
     if not args.config and not args.node_id:
         console.print("[bold red]Either `--config` or `--node_id` must be specified.")
         return
+
+    output_base = args.output
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    if not output_base:
+        output_base = f"synapse_data_{timestamp}"
+    else:
+        output_base = f"{output_base}_{timestamp}"
+
+    # Check if the output directory exists, we will make the directory later after we know the config
+    if os.path.exists(output_base):
+        if not args.overwrite:
+            console.print(
+                f"[bold red]Output directory {output_base} already exists, please specify a different output directory or use `--overwrite` to overwrite existing files"
+            )
+            return
+        else:
+            console.print(f"[bold yellow]Overwriting existing files in {output_base}")
 
     device = syn.Device(args.uri, args.verbose)
 
@@ -88,15 +112,17 @@ def read(args):
             (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
         )
         if not broadband:
-            console.print(f"[bold red]No BroadbandSource node found in config")
+            console.print("[bold red]No BroadbandSource node found in config")
             return
         signal = broadband.signal
         if not signal:
-            console.print(f"[bold red]No signal configured for BroadbandSource node")
+            console.print("[bold red]No signal configured for BroadbandSource node")
             return
 
         if not signal.electrode:
-            console.print(f"[bold red]No electrode signal configured for BroadbandSource node")
+            console.print(
+                "[bold red]No electrode signal configured for BroadbandSource node"
+            )
             return
 
         num_ch = len(signal.electrode.channels)
@@ -105,11 +131,13 @@ def read(args):
             offset = 0
             channels = []
             for ch in range(offset, offset + num_ch):
-                channels.append(channel.Channel(ch, 2*ch, 2*ch + 1))
-        
+                channels.append(channel.Channel(ch, 2 * ch, 2 * ch + 1))
+
             broadband.signal.electrode.channels = channels
-        
-        with console.status("Configuring device", spinner="bouncingBall", spinner_style="green") as status:
+
+        with console.status(
+            "Configuring device", spinner="bouncingBall", spinner_style="green"
+        ) as status:
             configure_status = device.configure_with_status(config)
             if configure_status is None:
                 console.print(
@@ -141,10 +169,10 @@ def read(args):
         # Get the sample rate from the device
         # We need to look at the node configuration with type kElectricalBroadband for the sample rate
         broadband = next(
-            (n for n in config.nodes if n.type == NodeType.kElectricalBroadband), None
+            (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
         )
         assert broadband is not None, "No ElectricalBroadband node found in config"
-        sample_rate_hz = broadband.sample_rate
+        sample_rate_hz = broadband.sample_rate_hz
 
     else:
         # TODO(gilbert): Get rid of this giant if-else block
@@ -165,51 +193,81 @@ def read(args):
         stream_out = syn.StreamOut.from_proto(node)
         stream_out.device = device
 
-    print("Streaming data... Ctrl+C to stop")
-    q = queue.Queue()
+    # We are ready to start streaming, make the output directory
+    os.makedirs(output_base, exist_ok=True)
 
-    # Setup a queue for plotting if the user wants to plot
-    plot_q = queue.Queue() if args.plot else None
+    # Copy our config that was taken from the device to the output directory
+    device_info_after_config = device.info()
+    if not device_info_after_config:
+        console.print(f"[bold red]Failed to get device info from {args.uri}")
+        return
+    runtime_config = device_info_after_config.configuration
+    runtime_config_json = MessageToJson(
+        runtime_config, including_default_value_fields=True
+    )
+    output_config_path = os.path.join(output_base, "runtime_config.json")
+    with open(output_config_path, "w") as f:
+        f.write(runtime_config_json)
 
-    stop = threading.Event()
+    console.print(f"[bold green]Streaming data to {output_base}")
 
-    threads = []
-    output_base = f"synapse_data_{time.strftime('%Y%m%d-%H%M%S')}"
-    if args.bin:
-        threads.append(
-            threading.Thread(target=_binary_writer, args=(stop, q, num_ch, output_base))
-        )
-    else:
-        threads.append(
-            threading.Thread(target=_data_writer, args=(stop, q, output_base))
-        )
+    status_title = (
+        f"Streaming data for {args.duration} seconds"
+        if args.duration
+        else "Streaming data indefinitely"
+    )
+    with console.status(
+        status_title, spinner="bouncingBall", spinner_style="green"
+    ) as status:
+        q = queue.Queue()
+        plot_q = queue.Queue() if args.plot else None
 
-    if args.plot:
-        threads.append(
-            threading.Thread(
-                target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)
+        threads = []
+        stop = threading.Event()
+        if args.bin:
+            threads.append(
+                threading.Thread(
+                    target=_binary_writer, args=(stop, q, num_ch, output_base)
+                )
             )
-        )
+        else:
+            threads.append(
+                threading.Thread(target=_data_writer, args=(stop, q, output_base))
+            )
 
-    for thread in threads:
-        thread.start()
-
-    try:
-        read_packets(stream_out, q, plot_q, args.duration)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        print("Stopping read...")
-        stop.set()
+        if args.plot:
+            threads.append(
+                threading.Thread(
+                    target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)
+                )
+            )
         for thread in threads:
-            thread.join()
+            thread.start()
 
-    if args.config:
-        print("Stopping device...")
-        if not device.stop():
-            print("Failed to stop device")
-            return
-        print("Stopped")
+        try:
+            read_packets(stream_out, q, plot_q, args.duration)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            print("Stopping read...")
+            stop.set()
+            for thread in threads:
+                thread.join()
+
+            if args.config:
+                console.print("Stopping device...")
+                if not device.stop():
+                    console.print("[red]Failed to stop device")
+                console.print("Stopped")
+
+    console.print("[bold green]Streaming complete")
+    console.print("[cyan]================")
+    console.print(f"[cyan]Output directory: {output_base}/")
+    if args.bin:
+        console.print(f"[cyan]{output_base}.dat")
+    else:
+        console.print(f"[cyan]{output_base}.jsonl")
+    console.print("[cyan]================")
 
 
 def read_packets(
@@ -257,27 +315,22 @@ def read_packets(
             print(f"First packet received at {time.time() - start:.2f} seconds")
 
         if packet_count % print_interval == 0:
-            elapsed = time.time() - start
             print(
-                f"Received {packet_count} packets in {elapsed:.2f}s. "
-                f"Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100:.2f}%)."
+                f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)"
             )
-
-        # Check for duration
         if duration and (time.time() - start) > duration:
             break
 
-    total_time = time.time() - start
     print(
-        f"Received {packet_count} packets in {total_time:.2f} seconds. "
-        f"Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100:.2f}%)."
+        f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)"
     )
 
 
-def _binary_writer(stop, q, num_ch, output_filename_base):
-    filename = f"{output_filename_base}.dat"
+def _binary_writer(stop, q, num_ch, output_base):
+    filename = f"{output_base}.dat"
+    full_path = os.path.join(output_base, filename)
     if filename:
-        fd = open(filename, "wb")
+        fd = open(full_path, "wb")
 
     channel_data = []
     while not stop.is_set() or not q.empty():
@@ -309,10 +362,11 @@ def _binary_writer(stop, q, num_ch, output_filename_base):
             continue
 
 
-def _data_writer(stop, q, output_filename_base):
-    filename = f"{output_filename_base}.jsonl"
+def _data_writer(stop, q, output_base):
+    filename = f"{output_base}.jsonl"
+    full_path = os.path.join(output_base, filename)
     if filename:
-        fd = open(filename, "wb")
+        fd = open(full_path, "wb")
 
     while not stop.is_set() or not q.empty():
         try:
