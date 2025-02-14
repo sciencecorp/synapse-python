@@ -167,11 +167,11 @@ def read(args):
                 raise ValueError("Failed to start device")
 
         # Get the sample rate from the device
-        # We need to look at the node configuration with type kElectricalBroadband for the sample rate
+        # We need to look at the node configuration with type kBroadbandSource for the sample rate
         broadband = next(
             (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
         )
-        assert broadband is not None, "No ElectricalBroadband node found in config"
+        assert broadband is not None, "No BroadbandSource node found in config"
         sample_rate_hz = broadband.sample_rate_hz
 
     else:
