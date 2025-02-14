@@ -182,5 +182,5 @@ pre-commit run
 After recording data to a file, you can generate plots to visualize your data. Using the CLI, you can run:
 
 ```
-synapsectl plot <path to data.bin> <path to config>
+synapsectl plot --dir <path to directory containing .dat and .json>
 ```
