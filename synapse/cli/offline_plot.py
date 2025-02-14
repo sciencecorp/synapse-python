@@ -13,9 +13,9 @@ BACKGROUND_COLOR = "#253252250"
 
 def add_commands(subparsers):
     a = subparsers.add_parser("plot", help="Plot recorded synapse data")
-    a.add_argument("fname", type=str, help="Path to the binary data file")
+    a.add_argument("--data", type=str, help="Path to the binary data file")
     a.add_argument(
-        "config_json",
+        "--config",
         type=str,
         help="Path to the configuration JSON file used for the recording",
     )
@@ -32,6 +32,9 @@ def add_commands(subparsers):
         help='Channels to plot, comma separated (e.g. "1,2,3")',
         required=False,
         default=None,
+    )
+    a.add_argument(
+        "--dir", type=str, help="Directory containing the data and config files"
     )
     a.set_defaults(func=plot)
 
@@ -120,14 +123,29 @@ def plot(args):
     if not app:
         app = QtWidgets.QApplication(sys.argv)
 
+    data_file = None
+    config_file = None
+    if args.dir:
+        # We expect there to be a .dat file and a .json file in the directory
+        for file in os.listdir(args.dir):
+            if file.endswith(".dat") or file.endswith(".bin"):
+                data_file = os.path.join(args.dir, file)
+            elif file.endswith(".json"):
+                config_file = os.path.join(args.dir, file)
+
+    if args.data:
+        data_file = args.data
+    if args.config:
+        config_file = args.config
+
     # Start with loading the config
-    sampling_freq, num_channels, channel_ids = load_config(args.config_json)
+    sampling_freq, num_channels, channel_ids = load_config(config_file)
     if args.channels:
         channel_ids = [int(ch) for ch in args.channels.split(",")]
     logger.info(f"Loaded config with {num_channels} channels")
 
     # Load the data
-    data = process_data(args.fname, num_channels)
+    data = process_data(data_file, num_channels)
     logger.info(f"Loaded data with {data.shape[1]} channels")
 
     # Setup the window for the plot
@@ -316,7 +334,7 @@ def plot(args):
     main_widget = QtWidgets.QWidget()
     main_widget.setLayout(main_layout)
     main_widget.setWindowTitle(
-        f"Synapse Data Recording - {args.fname}"
+        f"Synapse Data Recording - {data_file}"
     )  # Add window title here
     main_widget.resize(1280, 720)  # Add resize here
     main_widget.show()
