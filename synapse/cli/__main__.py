@@ -2,7 +2,7 @@
 import argparse
 import logging
 from importlib import metadata
-from synapse.cli import discover, rpc, scifi_wifi_config, streaming
+from synapse.cli import discover, rpc, scifi_wifi_config, streaming, offline_plot
 
 
 def main():
@@ -19,7 +19,11 @@ def main():
         version="synapsectl %s" % metadata.version("science-synapse"),
     )
     parser.add_argument(
-        "--verbose", "-v", action="store_true", default=False, help="Enable verbose output"
+        "--verbose",
+        "-v",
+        action="store_true",
+        default=False,
+        help="Enable verbose output",
     )
     parser.add_argument(
         "--uri", metavar="-u", type=str, default=None, help="Device control plane URI"
@@ -31,7 +35,7 @@ def main():
     rpc.add_commands(subparsers)
     scifi_wifi_config.add_commands(subparsers)
     streaming.add_commands(subparsers)
-
+    offline_plot.add_commands(subparsers)
     args = parser.parse_args()
 
     if hasattr(args, "func"):
