@@ -14,3 +14,4 @@ pytest-asyncio
 dearpygui
 pyqtgraph
 pyqt5
+pandas
