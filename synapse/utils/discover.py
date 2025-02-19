@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 import time
 import socket
+import sys
 
 
 BROADCAST_PORT = 6470
-DISCOVERY_TIMEOUT = 10
-
+DISCOVERY_TIMEOUT_SEC = 3
 
 @dataclass
 class DeviceInfo:
@@ -15,10 +15,11 @@ class DeviceInfo:
     name: str
     serial: str
 
-
-def discover_iter(socket_timeout_sec=1, discovery_timeout_sec=DISCOVERY_TIMEOUT):
+def discover_iter(socket_timeout_sec=1, discovery_timeout_sec=DISCOVERY_TIMEOUT_SEC):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if sys.platform != 'win32':
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     sock.settimeout(socket_timeout_sec)
     sock.bind(("", BROADCAST_PORT))
 
@@ -28,7 +29,7 @@ def discover_iter(socket_timeout_sec=1, discovery_timeout_sec=DISCOVERY_TIMEOUT)
 
         while True:
             now = time.time()
-            if now - start_time > DISCOVERY_TIMEOUT:
+            if now - start_time > discovery_timeout_sec:
                 break
             try:
                 data, server = sock.recvfrom(1024)
@@ -50,5 +51,5 @@ def discover_iter(socket_timeout_sec=1, discovery_timeout_sec=DISCOVERY_TIMEOUT)
         sock.close()
 
 
-def discover(timeout_sec=DISCOVERY_TIMEOUT):
+def discover(timeout_sec=DISCOVERY_TIMEOUT_SEC):
     return list(discover_iter(timeout_sec))
