@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 import time
 import socket
+import sys
 
 BROADCAST_PORT = 6470
-DISCOVERY_TIMEOUT = 2
+DISCOVERY_TIMEOUT = 0.2
 
 @dataclass
 class DeviceInfo:
@@ -13,8 +14,11 @@ class DeviceInfo:
     name: str
     serial: str
 
-def discover(timeout_sec = 0.2):
+def discover(timeout_sec = DISCOVERY_TIMEOUT):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if sys.platform != 'win32':
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     sock.settimeout(timeout_sec)
     sock.bind(("", BROADCAST_PORT))
 

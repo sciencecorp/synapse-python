@@ -22,7 +22,7 @@ class Status(object):
 
     @staticmethod
     def log(code: StatusCode, message: str):
-        logging.warn(f"({code}): {message}")
+        logging.warning(f"({code}): {message}")
         return Status(code, message)
 
     def to_proto(self):
