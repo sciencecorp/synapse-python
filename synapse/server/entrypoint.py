@@ -65,6 +65,7 @@ def main(
     # verify that network interface is real
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((args.iface_ip, 8000))
         logging.info(f"Binding to {s.getsockname()[0]}...")
     except Exception as e:
