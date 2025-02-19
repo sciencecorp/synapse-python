@@ -5,6 +5,7 @@ import socket
 BROADCAST_PORT = 6470
 DISCOVERY_TIMEOUT = 2
 
+
 @dataclass
 class DeviceInfo:
     host: str
@@ -13,10 +14,11 @@ class DeviceInfo:
     name: str
     serial: str
 
-def discover(timeout_sec = 0.2):
+
+def discover(timeout_sec=0.2):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(timeout_sec)
-    sock.bind(("", BROADCAST_PORT))
+    sock.bind(("0.0.0.0", BROADCAST_PORT))
 
     devices = []
     try:
@@ -36,7 +38,9 @@ def discover(timeout_sec = 0.2):
                     if len(data) != 5:
                         continue
                     _, serial, capability, port, name = data
-                    dev_info = DeviceInfo(server[0], int(port), capability, name, serial)
+                    dev_info = DeviceInfo(
+                        server[0], int(port), capability, name, serial
+                    )
                     if dev_info not in devices:
                         devices.append(dev_info)
     finally:
