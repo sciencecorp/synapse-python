@@ -24,11 +24,21 @@ def chunk_channel_data(bit_width: int, ch_data: List[float], max_payload_size_by
         yield ch_data[start_idx:end_idx]
 
 class ElectricalBroadbandData:
+    """Electrical broadband data from neural recordings.
+
+    Attributes:
+        t0 (int): Start timestamp in nanoseconds
+        is_signed (bool): Whether the data is represented using signed integers
+        bit_width (int): Number of bits used to represent each sample
+        samples (Tuple[int, List[float]]): Tuple of (channel_id, data_samples)
+        sample_rate (float): Sample rate in Hz
+    """
     __slots__ = ["data_type", "t0", "is_signed", "bit_width", "samples", "sample_rate"]
 
     def __init__(self, t0, bit_width, samples: Tuple[int, List[float]], sample_rate, is_signed=True):
         self.data_type = DataType.kBroadband
-        self.t0 = t0
+
+        self.t0 = t0 # ns
         self.is_signed = is_signed
         self.bit_width = bit_width
         self.samples = samples
@@ -104,13 +114,19 @@ class ElectricalBroadbandData:
             ],
         ]
 
-
 class SpiketrainData:
+    """Binned spike train data from neural recordings.
+
+    Attributes:
+        t0 (int): Start timestamp in nanoseconds
+        bin_size_ms (float): Size of each time bin in milliseconds
+        spike_counts (List[int]): Number of spikes in each time bin
+    """
     __slots__ = ["data_type", "t0", "bin_size_ms", "spike_counts"]
 
     def __init__(self, t0, bin_size_ms, spike_counts):
         self.data_type = DataType.kSpiketrain
-        self.t0 = t0
+        self.t0 = t0 # ns
         self.bin_size_ms = bin_size_ms
         self.spike_counts = spike_counts
 
