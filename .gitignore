@@ -182,3 +182,5 @@ config/
 
 output_*.json
 *.jsonl
+
+synapse_data*
