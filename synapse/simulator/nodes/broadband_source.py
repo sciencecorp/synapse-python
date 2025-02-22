@@ -53,24 +53,23 @@ class BroadbandSource(BaseNode):
         bit_width = c.bit_width if c.bit_width else 4
         sample_rate_hz = c.sample_rate_hz if c.sample_rate_hz else 16000
 
-        t0 = time.time_ns()
+        t_last_ns = time.time_ns()
         while self.running:
+            await asyncio.sleep(0.01)
+            
             now = time.time_ns()
-            elapsed_ns = now - t0
+            elapsed_ns = now - t_last_ns
             n_samples = int(sample_rate_hz * elapsed_ns / 1e9)
+            
             samples = [[ch.id, [r_sample(bit_width) for _ in range(n_samples)]] for ch in channels]
 
             data = ElectricalBroadbandData(
                 bit_width=bit_width,
                 is_signed=False,
                 sample_rate=sample_rate_hz,
-                t0=t0,
+                t0=t_last_ns,
                 samples=samples
             )
 
-            self.logger.debug(f"[{t0}] sending {n_samples} samples")
             await self.emit_data(data)
-
-            t0 = now
-
-            await asyncio.sleep(0.100)
+            t_last_ns = now
