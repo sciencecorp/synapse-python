@@ -25,7 +25,7 @@ extensions = [
 
 setup(
     name="science-synapse",
-    version="0.9.2",
+    version="0.10.0",
     description="Client library and CLI for the Synapse API",
     author="Science Team",
     author_email="team@science.xyz",
@@ -44,6 +44,12 @@ setup(
         "pyserial",
         "scipy",
         "crcmod",
+        "rich",
+        "pyqtgraph",
+        "pyqt5",
+        "pandas",
+        "dearpygui",
+        "pyzmq"
     ],
     entry_points={
         "console_scripts": [
