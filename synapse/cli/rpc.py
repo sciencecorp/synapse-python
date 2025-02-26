@@ -73,9 +73,17 @@ def query(args):
                             f"{measurement.electrode_id},{measurement.magnitude},{measurement.phase},1\n"
                         )
 
-
 def start(args):
-    return syn.Device(args.uri, args.verbose).start()
+    console = Console()
+    with console.status("Starting device...", spinner="bouncingBall"):
+        stop_ret = syn.Device(args.uri, args.verbose).start_with_status()
+        if not stop_ret:
+            console.print("[bold red]Internal error starting device")
+            return
+        if stop_ret.code != StatusCode.kOk:
+            console.print(f"[bold red]Error starting\n{stop_ret.message}")
+            return
+    console.print("[green]Device Started")
 
 
 def stop(args):
@@ -97,9 +105,17 @@ def configure(args):
         return False
 
     with open(args.config_file) as config_json:
+        console = Console()
         config_proto = Parse(config_json.read(), DeviceConfiguration())
-        print("Configuring device with the following configuration:")
+        console.print("Configuring device with the following configuration:")
         config = syn.Config.from_proto(config_proto)
-        print(config.to_proto())
+        console.print(config.to_proto())
 
-        return syn.Device(args.uri, args.verbose).configure(config)
+        config_ret = syn.Device(args.uri, args.verbose).configure_with_status(config)
+        if not config_ret:
+            console.print("[bold red]Internal error configuring device")
+            return
+        if config_ret.code != StatusCode.kOk:
+            console.print(f"[bold red]Error configuring\n{config_ret.message}")
+            return
+        console.print("[green]Device Configured")
