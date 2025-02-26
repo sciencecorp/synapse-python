@@ -2,8 +2,10 @@ from dataclasses import dataclass
 import time
 import socket
 
+
 BROADCAST_PORT = 6470
-DISCOVERY_TIMEOUT = 2
+DISCOVERY_TIMEOUT = 10
+
 
 @dataclass
 class DeviceInfo:
@@ -13,13 +15,14 @@ class DeviceInfo:
     name: str
     serial: str
 
-def discover(timeout_sec = 0.2):
+
+def discover_iter(socket_timeout_sec=1, discovery_timeout_sec=DISCOVERY_TIMEOUT):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.settimeout(timeout_sec)
+    sock.settimeout(socket_timeout_sec)
     sock.bind(("", BROADCAST_PORT))
 
-    devices = []
+    devices = []  # Keep track of what we've seen to avoid duplicates
     try:
         start_time = time.time()
 
@@ -37,10 +40,15 @@ def discover(timeout_sec = 0.2):
                     if len(data) != 5:
                         continue
                     _, serial, capability, port, name = data
-                    dev_info = DeviceInfo(server[0], int(port), capability, name, serial)
+                    dev_info = DeviceInfo(
+                        server[0], int(port), capability, name, serial
+                    )
                     if dev_info not in devices:
                         devices.append(dev_info)
+                        yield dev_info
     finally:
         sock.close()
 
-    return devices
+
+def discover(timeout_sec=DISCOVERY_TIMEOUT):
+    return list(discover_iter(timeout_sec))
