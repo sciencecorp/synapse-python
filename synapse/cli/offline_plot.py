@@ -51,7 +51,7 @@ def setup_logging():
 
 
 # Function to load binary data produced by the stream recording
-def process_data(file_path, num_channels):
+def process_data(file_path, num_channels,logger):
     _, file_extension = os.path.splitext(file_path)
 
     if file_extension in [".bin", ".dat"]:
@@ -79,7 +79,7 @@ def process_data(file_path, num_channels):
                         channel_data[ch_id].extend(samples)
 
                 except (json.JSONDecodeError, ValueError, IndexError) as e:
-                    print(f"Warning: Skipping malformed JSON line in {file_path} - {e}")
+                    logger.error(f"Warning: Skipping malformed JSON line in {file_path} - {e}")
 
         #sort dict by key
         channel_data = dict(sorted(channel_data.items()))
@@ -173,7 +173,7 @@ def plot(args):
     logger.info(f"Loaded config with {num_channels} channels")
 
     # Load the data
-    data = process_data(data_file, num_channels)
+    data = process_data(data_file, num_channels,logger)
     logger.info(f"Loaded data with {data.shape[1]} channels")
 
     # Setup the window for the plot
