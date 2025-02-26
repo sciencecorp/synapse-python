@@ -10,6 +10,7 @@ else:  # macOS and Linux
     extra_compile_args = [
         "-Wno-unreachable-code",
         "-Wno-unreachable-code-fallthrough",
+        "-O3",
     ]
 
 this_directory = Path(__file__).parent
