@@ -72,6 +72,7 @@ def query(args):
                         f.write(
                             f"{measurement.electrode_id},{measurement.magnitude},{measurement.phase},1\n"
                         )
+
 def start(args):
     console = Console()
     with console.status("Starting device...", spinner="bouncingBall"):
