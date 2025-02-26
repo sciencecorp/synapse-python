@@ -5,7 +5,7 @@ import sys
 
 
 BROADCAST_PORT = 6470
-DISCOVERY_TIMEOUT_SEC = 3
+DISCOVERY_TIMEOUT_SEC = 10
 
 @dataclass
 class DeviceInfo:
