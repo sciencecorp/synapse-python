@@ -56,9 +56,9 @@ class SpikeSource(BaseNode):
         min_spikes = max(0, int(1 * window_s))
         max_spikes = min(15, int(200 * window_s))
 
-        t0 = time.time_ns() // 1000
+        t0 = time.time_ns()
         while self.running:
-            now = time.time_ns() // 1000       
+            now = time.time_ns()
 
             spike_counts = [random.randint(min_spikes, max_spikes) for _ in channels]
             data = SpiketrainData(
@@ -67,7 +67,6 @@ class SpikeSource(BaseNode):
                 spike_counts=spike_counts
             )
             
-
             await self.emit_data(data)
 
             t0 = now
