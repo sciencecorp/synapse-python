@@ -6,7 +6,7 @@ if __name__ == "__main__":
     assert info is not None, "Couldn't get device info"
     print(info)
 
-    stream_out = syn.StreamOut(label="my broadband", multicast_group="239.0.0.1")
+    stream_out = syn.StreamOut(label="my broadband", multicast_group="224.0.0.1")
     broadband = syn.BroadbandSource(
         peripheral_id=2,
         sample_rate_hz=30000,

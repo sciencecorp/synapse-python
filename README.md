@@ -30,7 +30,6 @@ Includes `synapsectl` command line utility:
         read                Read from a device's StreamOut node
         plot                Plot recorded synapse data
 
-
 As well as the base for a device implementation (`synapse/server`),
 
 And a toy device `synapse-sim` for local development,
@@ -117,7 +116,7 @@ info = device.info()
 
 print("Device info: ", device.info())
 
-stream_out = syn.StreamOut(label="my broadband", multicast_group="239.0.0.1")
+stream_out = syn.StreamOut(label="my broadband", multicast_group="224.0.0.1")
 broadband = syn.BroadbandSource(
     peripheral_id=2,
     sample_rate_hz=30000,
@@ -179,6 +178,7 @@ pre-commit run
 ```
 
 ## Plotting Offline
+
 After recording data to a file, you can generate plots to visualize your data. Using the CLI, you can run:
 
 ```
