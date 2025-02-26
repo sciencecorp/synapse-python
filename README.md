@@ -165,7 +165,7 @@ To build and install a wheel:
     python -m build
 
     # and optionally install
-    pip install dist/synapse-*-py3-none-any.whl
+    pip install dist/science_synapse-*.whl
 
 ## Development
 
