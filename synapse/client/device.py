@@ -39,7 +39,7 @@ class Device(object):
             response = self.rpc.Start(Empty())
             return response
         except grpc.RpcError as e:
-            self.logger.debug("Error: %s", e.details())
+            self.logger.error("Error: %s", e.details())
         return None
 
     def stop(self):
@@ -48,14 +48,14 @@ class Device(object):
             if self._handle_status_response(response):
                 return response
         except grpc.RpcError as e:
-            self.logger.debug("Error: %s", e.details())
+            self.logger.error("Error: %s", e.details())
         return False
 
     def stop_with_status(self) -> Status:
         try:
             return self.rpc.Stop(Empty())
         except grpc.RpcError as e:
-            self.logger.debug("Error: %s", e.details())
+            self.logger.error("Error: %s", e.details())
             return None
 
     def info(self):
@@ -64,7 +64,7 @@ class Device(object):
             self._handle_status_response(response.status)
             return response
         except grpc.RpcError as e:
-            self.logger.debug("Error: %s", e.details())
+            self.logger.error("Error: %s", e.details())
             return None
 
     def query(self, query):
@@ -72,7 +72,7 @@ class Device(object):
             response = self.rpc.Query(query)
             return response
         except grpc.RpcError as e:
-            self.logger.debug("Error: %s", e.details())
+            self.logger.error("Error: %s", e.details())
             return None
 
     def configure(self, config: Config):
@@ -84,7 +84,7 @@ class Device(object):
             if self._handle_status_response(response):
                 return response
         except grpc.RpcError as e:
-            self.logger.debug("Error: %s", e.details())
+            self.logger.error("Error: %s", e.details())
         return False
     
     def configure_with_status(self, config: Config) -> Status:
@@ -95,7 +95,7 @@ class Device(object):
             response = self.rpc.Configure(config.to_proto())
             return response
         except grpc.RpcError as e:
-            self.logger.debug("Error: %s", e.details())
+            self.logger.error("Error: %s", e.details())
             return None
 
     def _handle_status_response(self, status):
