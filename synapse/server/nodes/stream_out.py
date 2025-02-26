@@ -80,8 +80,6 @@ class StreamOut(BaseNode):
             data = await self.data_queue.get()
             packets = self._pack(data)
 
-            self.logger.debug(f"sending {len(packets)} packets")
-
             for packet in packets:
                 await loop.run_in_executor(
                     None,
