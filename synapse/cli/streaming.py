@@ -203,7 +203,7 @@ def read(args):
         return
     runtime_config = device_info_after_config.configuration
     runtime_config_json = MessageToJson(
-        runtime_config, including_default_value_fields=True
+        runtime_config, always_print_fields_with_no_presence=True
     )
     output_config_path = os.path.join(output_base, "runtime_config.json")
     with open(output_config_path, "w") as f:
@@ -351,9 +351,7 @@ def _binary_writer(stop, q, num_ch, output_base):
                     for frame in frames:
                         for sample in frame:
                             fd.write(
-                                int(sample).to_bytes(
-                                    2, byteorder="little", signed=True
-                                )
+                                int(sample).to_bytes(2, byteorder="little", signed=True)
                             )
 
         except Exception as e:
