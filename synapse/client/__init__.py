@@ -5,4 +5,8 @@ from synapse.client.device import Device
 from synapse.client.nodes.stream_in import StreamIn
 from synapse.client.nodes.stream_out import StreamOut
 from synapse.client.nodes.optical_stimulation import OpticalStimulation
+from synapse.client.nodes.electrical_stimulation import ElectricalStimulation
 from synapse.client.nodes.broadband_source import BroadbandSource
+from synapse.client.nodes.spike_source import SpikeSource
+from synapse.client.nodes.spike_detect import SpikeDetect
+from synapse.client.nodes.spectral_filter import SpectralFilter
