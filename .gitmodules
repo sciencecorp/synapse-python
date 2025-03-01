@@ -1,3 +1,6 @@
 [submodule "synapse-api"]
 	path = synapse-api
 	url = git@github.com:sciencecorp/synapse-api.git
+[submodule "science-device-api"]
+	path = science-device-api
+	url = git@github.com:sciencecorp/science-device-api.git

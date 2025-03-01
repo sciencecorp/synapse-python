@@ -2,6 +2,7 @@
 *.dat
 # Generated protobuf code
 synapse/api/
+synapse/api-science-device/
 bin/
 proto/*
 *_pb2.py
