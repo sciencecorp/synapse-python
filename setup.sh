@@ -5,17 +5,12 @@ PROTOC="python -m grpc_tools.protoc"
 PROTO_DIR_SYNAPSE_API="./synapse-api"
 PROTO_OUT_SYNAPSE_API="./synapse"
 
-find_protos() {
-    local input_proto_dir="$1"
-    find "${input_proto_dir}" -name "*.proto" | sed "s|${input_proto_dir}/||"
-}
-
 clean() {
     echo "Cleaning up..."
     rm -rf bin "${PROTO_OUT_SYNAPSE_API}/api"*
 }
 
-generate() {
+generate_protos() {
     local input_proto_dir="$1"
     local output_proto_dir="$2"
     local service_proto="$3"
@@ -59,6 +54,10 @@ generate() {
     protol --create-package --in-place --python-out "${output_proto_dir}" raw bin/descriptors.binpb
 }
 
+generate() {
+    generate_protos "${PROTO_DIR_SYNAPSE_API}" "${PROTO_OUT_SYNAPSE_API}" "api/synapse.proto"
+}
+
 run_tests() {
     echo "Running tests..."
     pytest -v
@@ -70,14 +69,14 @@ case "$1" in
         clean
         ;;
     "generate")
-        generate "${PROTO_DIR_SYNAPSE_API}" "${PROTO_OUT_SYNAPSE_API}" "api/synapse.proto"
+        generate
         ;;
     "test")
         run_tests
         ;;
     "all")
         clean
-        generate "${PROTO_DIR_SYNAPSE_API}" "${PROTO_OUT_SYNAPSE_API}" "api/synapse.proto"
+        generate
         ;;
     *)
         echo "Usage: $0 {clean|generate|test|all}"
