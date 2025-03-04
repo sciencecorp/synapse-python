@@ -25,9 +25,7 @@ async def serve(
 ) -> None:
     server = grpc.aio.server()
     add_SynapseDeviceServicer_to_server(
-        SynapseServicer(
-            server_name, device_serial, iface_ip, node_object_map, peripherals
-        ),
+        SynapseServicer(server_name, device_serial, node_object_map, peripherals),
         server,
     )
 
@@ -46,10 +44,9 @@ class SynapseServicer(SynapseDeviceServicer):
     connections = []
     nodes = []
 
-    def __init__(self, name, serial, iface_ip, node_object_map, peripherals):
+    def __init__(self, name, serial, node_object_map, peripherals):
         self.name = name
         self.serial = serial
-        self.iface_ip = iface_ip
         self.node_object_map = node_object_map
         self.peripherals = peripherals
         self.logger = logging.getLogger("server")
@@ -288,7 +285,7 @@ class SynapseServicer(SynapseDeviceServicer):
                 "Creating %s node(%d)" % (NodeType.Name(node.type), node.id)
             )
             node = self.node_object_map[node.type](node.id)
-            if node.type in [NodeType.kStreamOut, NodeType.kStreamIn]:
+            if node.type in [NodeType.kStreamIn]:
                 node.configure_iface_ip(self.iface_ip)
 
             status = node.configure(config)
