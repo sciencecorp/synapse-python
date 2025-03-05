@@ -100,29 +100,43 @@ class PacketMonitor:
     def print_stats(self):
         # Use carriage return to update on the same line
         sys.stdout.write("\r")
+        try:
+            terminal_width = os.get_terminal_size().columns
+        except (AttributeError, OSError):
+            # Fallback if not available
+            terminal_width = 80
+
+        sys.stdout.write(" " * terminal_width)
+        sys.stdout.write("\r")
+
+        now = time.time()
+        stats = f"Runtime {now - self.start_time:.1f}s | "
 
         # Drop calculation
         drop_percent = (self.dropped_packets / max(1, self.packet_count)) * 100.0
-        sys.stdout.write(
-            f"Dropped: {self.dropped_packets}/{self.packet_count} ({drop_percent:.1f}%) | "
-        )
+        stats += f"Dropped: {self.dropped_packets}/{self.packet_count} ({drop_percent:.1f}%) | "
 
         # Bandwidth calcs
-        now = time.time()
+
         dt_sec = now - self.last_bandwidth_time
         if dt_sec > 0:
             bytes_per_second = self.bytes_received_in_interval / dt_sec
             megabits_per_second = (bytes_per_second * 8) / 1_000_000
-            sys.stdout.write(f"Mbit/sec: {megabits_per_second:.1f} | ")
+            stats += f"Mbit/sec: {megabits_per_second:.1f} | "
 
         # Jitter (in milliseconds)
         jitter_ms = self.avg_jitter * 1000  # Convert to ms
-        sys.stdout.write(f"Jitter: {jitter_ms:.2f} ms | ")
+        stats += f"Jitter: {jitter_ms:.2f} ms | "
 
         # Out of order
-        sys.stdout.write(f"Out of Order: {self.out_of_order_packets}")
+        stats += f"Out of Order: {self.out_of_order_packets}"
 
         # Flush the output to ensure it's displayed
+        if len(stats) > terminal_width - 1:
+            stats = stats[: terminal_width - 4] + "..."
+
+        # Write the stats and flush
+        sys.stdout.write(stats)
         sys.stdout.flush()
 
         # Reset for the next run
