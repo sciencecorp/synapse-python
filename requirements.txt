@@ -2,6 +2,7 @@ coolname
 grpcio
 grpcio-tools
 protoletariat
+paramiko>=3.5.1
 pyserial
 pyzmq
 build
