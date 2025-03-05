@@ -7,7 +7,7 @@ import os
 from typing import Optional
 from operator import itemgetter
 import copy
-import math
+import sys
 
 from google.protobuf.json_format import Parse, MessageToJson
 
@@ -24,20 +24,7 @@ from rich.pretty import pprint
 
 
 class PacketMonitor:
-    """
-    A class to monitor and analyze packet streaming statistics including:
-    - Effective receive bandwidth (Mbps)
-    - Jitter (variation in packet arrival intervals)
-    - Total packets received
-    - Packet loss detection
-    - Out-of-order packet detection
-    """
-
-    def __init__(self, print_interval=100, history_size=1000):
-        # Configuration
-        self.print_interval = print_interval
-        self.history_size = history_size
-
+    def __init__(self):
         # Packet tracking
         self.packet_count = 0
         self.seq_number = None
@@ -46,11 +33,11 @@ class PacketMonitor:
 
         # Timing metrics
         self.start_time = None
-        self.last_stats_time = None
         self.first_packet_time = None
 
         # Bandwidth tracking
         self.bytes_received = 0
+        self.bytes_received_in_interval = 0
         self.bandwidth_samples = []
         self.last_bandwidth_time = None
         self.last_bytes_received = 0
@@ -59,286 +46,74 @@ class PacketMonitor:
         self.packet_arrival_times = []
         self.packet_intervals = []
 
-        # Stats dictionary
-        self.stats = {
-            "total_packets": 0,
-            "dropped_packets": 0,
-            "out_of_order_packets": 0,
-            "drop_rate": 0.0,
-            "bandwidth_mbps": 0.0,
-            "jitter_ms": 0.0,
-            "run_time_seconds": 0.0,
-        }
-
     def start_monitoring(self):
         """Initialize monitoring timers"""
         self.start_time = time.time()
         self.last_stats_time = self.start_time
         self.last_bandwidth_time = self.start_time
 
-    def process_packet(self, header, data):
-        """
-        Process a single packet and update statistics
-
-        Args:
-            header: Packet header containing sequence number
-            data: Packet data
-
-        Returns:
-            bool: True if packet was processed, False otherwise
-        """
+    def process_packet(self, header, data, bytes_read):
         if not data:
             return False
-
         packet_received_time = time.time()
-
         # Record first packet time
         if self.packet_count == 0:
             self.first_packet_time = packet_received_time
             print(
-                f"First packet received at {packet_received_time - self.start_time:.3f} seconds"
+                f"First packet received after {packet_received_time - self.start_time:.3f} seconds"
             )
-
-        # Track packet arrival for jitter calculation
-        self.packet_arrival_times.append(packet_received_time)
-
-        # Calculate packet intervals for jitter
-        if len(self.packet_arrival_times) > 1:
-            interval = (
-                self.packet_arrival_times[-1] - self.packet_arrival_times[-2]
-            ) * 1000.0  # Convert to ms
-            self.packet_intervals.append(interval)
-
-        # Update byte count for bandwidth calculation
-        # Calculate exact size based on the NDTP message structure
-
-        # Header size from NDTPHeader.STRUCT.size (1 + 1 + 8 + 2 = 12 bytes)
-        # >BBQH: > (big-endian), B (unsigned char, 1 byte), B (unsigned char, 1 byte),
-        # Q (unsigned long long, 8 bytes), H (unsigned short, 2 bytes)
-        header_size = 12  # We know this from the struct format
-
-        # Payload size calculation based on ElectricalBroadbandData
-        payload_size = 0
-
-        if hasattr(data, "samples"):
-            # Add bytes for each channel's samples
-            for ch_id, samples in data.samples:
-                # Calculate sample size from bit_width
-                if hasattr(data, "bit_width"):
-                    bytes_per_sample = math.ceil(data.bit_width / 8)
-                else:
-                    bytes_per_sample = 4  # Default to 4 bytes if bit_width unknown
-
-                # Calculate this channel's data size
-                channel_data_size = len(samples) * bytes_per_sample
-
-                # Add overhead for channel metadata (ID, length indicator, etc.)
-                # This is an estimate; adjust based on actual protocol
-                channel_overhead = 8  # Typically a few bytes for channel ID and length
-
-                payload_size += channel_data_size + channel_overhead
-
-            # Add general payload overhead (type indicators, length fields, etc.)
-            # This is an estimate; adjust based on actual protocol
-            payload_size += 16  # General payload metadata
-        else:
-            # Fallback if we can't determine the payload structure
-            payload_size = 1024  # Assume 1KB payload
-
-        packet_size = header_size + payload_size
-        self.bytes_received += packet_size
-
+        # We got a new packet
         self.packet_count += 1
-
+        self.bytes_received += bytes_read
+        self.bytes_received_in_interval += bytes_read
         # Sequence number checking for packet loss/ordering
         if self.seq_number is None:
             self.seq_number = header.seq_number
         else:
             expected = (self.seq_number + 1) % (2**16)
             if header.seq_number != expected:
+                # Lost some packets
                 if header.seq_number > expected:
-                    # Packet loss scenario
                     lost = (header.seq_number - expected) % (2**16)
                     self.dropped_packets += lost
-                    print(
-                        f"Packet loss detected: expected {expected}, got {header.seq_number}, lost {lost} packets"
-                    )
                 else:
-                    # Out of order scenario
                     self.out_of_order_packets += 1
-                    print(
-                        f"Out of order packet: expected {expected}, got {header.seq_number}"
-                    )
-
             self.seq_number = header.seq_number
-
-        # Limit history sizes to prevent memory growth
-        if len(self.packet_arrival_times) > self.history_size:
-            self.packet_arrival_times = self.packet_arrival_times[-self.history_size :]
-        if len(self.packet_intervals) > self.history_size:
-            self.packet_intervals = self.packet_intervals[-self.history_size :]
 
         return True
 
-    def calculate_bandwidth(self):
-        """Calculate current bandwidth in Mbps"""
-        current_time = time.time()
-        time_delta = current_time - self.last_bandwidth_time
+    def print_stats(self):
+        # Use carriage return to update on the same line
+        sys.stdout.write("\r")
 
-        # Only calculate bandwidth if enough time has passed (avoid division by small numbers)
-        if time_delta >= 0.5:  # Calculate bandwidth every 500ms minimum
-            bytes_delta = self.bytes_received - self.last_bytes_received
-
-            # Calculate bandwidth in Mbps (megabits per second)
-            # bytes_delta * 8 converts bytes to bits, / 1_000_000 converts to megabits
-            bandwidth_mbps = (bytes_delta * 8) / (time_delta * 1_000_000)
-
-            self.bandwidth_samples.append(bandwidth_mbps)
-            # Limit bandwidth history
-            if len(self.bandwidth_samples) > self.history_size:
-                self.bandwidth_samples = self.bandwidth_samples[-self.history_size :]
-
-            self.last_bandwidth_time = current_time
-            self.last_bytes_received = self.bytes_received
-
-            return bandwidth_mbps
-
-        # If not enough time has passed, return the last calculated bandwidth or 0
-        return self.bandwidth_samples[-1] if self.bandwidth_samples else 0
-
-    def calculate_jitter(self):
-        """Calculate jitter in milliseconds"""
-        if len(self.packet_intervals) < 2:
-            return 0
-
-        # Jitter is the mean deviation in packet interval times
-        # RFC 3550 defines jitter as the mean deviation of the packet spacing
-        jitter = 0
-
-        # Calculate mean deviation
-        for i in range(1, len(self.packet_intervals)):
-            jitter += abs(self.packet_intervals[i] - self.packet_intervals[i - 1])
-
-        return jitter / (len(self.packet_intervals) - 1)
-
-    def print_periodic_stats(self, force=False):
-        """
-        Print periodic statistics if interval has elapsed or if forced
-
-        Args:
-            force: Force printing stats regardless of interval
-
-        Returns:
-            bool: True if stats were printed, False otherwise
-        """
-        current_time = time.time()
-        stats_interval = current_time - self.last_stats_time
-
-        if (
-            not force
-            and self.packet_count % self.print_interval != 0
-            and stats_interval < 5.0
-        ):
-            return False
-
-        # Calculate summary statistics
-        run_time = current_time - self.start_time
-
-        # Calculate bandwidth
-        bandwidth_mbps = self.calculate_bandwidth()
-
-        # Calculate jitter
-        jitter_ms = self.calculate_jitter()
-
-        # Update stats dictionary
-        self.stats["total_packets"] = self.packet_count
-        self.stats["dropped_packets"] = self.dropped_packets
-        self.stats["out_of_order_packets"] = self.out_of_order_packets
-        self.stats["drop_rate"] = (
-            (self.dropped_packets / (self.packet_count + self.dropped_packets)) * 100
-            if self.packet_count + self.dropped_packets > 0
-            else 0
+        # Drop calculation
+        drop_percent = (self.dropped_packets / max(1, self.packet_count)) * 100.0
+        sys.stdout.write(
+            f"Dropped: {self.dropped_packets}/{self.packet_count} ({drop_percent:.1f}%) | "
         )
-        self.stats["bandwidth_mbps"] = bandwidth_mbps
-        self.stats["jitter_ms"] = jitter_ms
-        self.stats["run_time_seconds"] = run_time
 
-        # Pretty print stats
-        print("\n--- Packet Statistics ---")
-        print(f"Run time: {run_time:.2f} seconds")
-        print(f"Total packets: {self.packet_count}")
-        print(f"Effective bandwidth: {bandwidth_mbps:.2f} Mbps")
-        print(
-            f"Dropped packets: {self.dropped_packets} ({self.stats['drop_rate']:.2f}%)"
-        )
-        print(f"Out-of-order packets: {self.out_of_order_packets}")
-        print(f"Jitter: {jitter_ms:.3f} ms")
+        # Bandwidth calcs
+        now = time.time()
+        dt_sec = now - self.last_bandwidth_time
+        if dt_sec > 0:
+            bytes_per_second = self.bytes_received_in_interval / dt_sec
+            megabits_per_second = (bytes_per_second * 8) / 1_000_000
+            sys.stdout.write(f"Mbit/sec: {megabits_per_second:.1f} | ")
 
-        throughput_packets = self.packet_count / run_time if run_time > 0 else 0
-        print(f"Packet throughput: {throughput_packets:.2f} packets/second")
+        # Out of order
+        sys.stdout.write(f"Out of Order: {self.out_of_order_packets}")
 
-        print("-----------------------\n")
+        # Flush the output to ensure it's displayed
+        sys.stdout.flush()
 
-        # Reset for next interval
-        self.last_stats_time = current_time
+        # Reset for the next run
+        self.bytes_received_in_interval = 0
+        self.last_bandwidth_time = now
+
         return True
 
     def print_final_stats(self):
-        """Print final comprehensive statistics"""
-        end_time = time.time()
-        total_runtime = end_time - self.start_time
-
-        # Calculate final bandwidth using total bytes received
-        avg_bandwidth_mbps = (self.bytes_received * 8) / (total_runtime * 1_000_000)
-
-        print("\n=== Final Statistics ===")
-        print(f"Total runtime: {total_runtime:.2f} seconds")
-        print(f"Total packets received: {self.packet_count}")
-        print(f"Total bytes received: {self.bytes_received:,} bytes")
-        print(f"Average bandwidth: {avg_bandwidth_mbps:.2f} Mbps")
-        print(
-            f"Packet throughput: {self.packet_count / total_runtime:.2f} packets/second"
-        )
-        print(
-            f"Dropped packets: {self.dropped_packets} ({(self.dropped_packets / (self.packet_count + self.dropped_packets)) * 100:.2f}% loss)"
-        )
-        print(f"Out-of-order packets: {self.out_of_order_packets}")
-
-        if self.packet_intervals:
-            avg_jitter = self.calculate_jitter()
-            print(f"Average jitter: {avg_jitter:.3f} ms")
-
-        # Print max bandwidth observed
-        if self.bandwidth_samples:
-            max_bandwidth = max(self.bandwidth_samples)
-            print(f"Peak bandwidth: {max_bandwidth:.2f} Mbps")
-
-        print("=====================")
-
-    def get_stats_dict(self):
-        """Return a dictionary with all current statistics"""
-        # Update with latest values before returning
-        self.calculate_bandwidth()
-
-        stats = self.stats.copy()
-
-        # Add additional derived statistics
-        stats["peak_bandwidth_mbps"] = (
-            max(self.bandwidth_samples) if self.bandwidth_samples else 0
-        )
-        stats["avg_bandwidth_mbps"] = (
-            sum(self.bandwidth_samples) / len(self.bandwidth_samples)
-            if self.bandwidth_samples
-            else 0
-        )
-        stats["total_bytes_received"] = self.bytes_received
-        stats["packet_throughput"] = (
-            self.packet_count / self.stats["run_time_seconds"]
-            if self.stats["run_time_seconds"] > 0
-            else 0
-        )
-
-        return stats
+        print("final")
 
 
 def add_commands(subparsers):
@@ -477,9 +252,6 @@ def read(args):
                 return
             console.print("[bold green]Device configured successfully")
 
-        if not device.configure(config):
-            raise ValueError("Failed to configure device")
-
         if info.status.state != DeviceState.kRunning:
             print("Starting device...")
             if not device.start():
@@ -593,11 +365,8 @@ def read_packets(
     duration: Optional[int] = None,
     num_ch: int = 32,
 ):
-    packet_count = 0
-    seq_number = None
-    dropped_packets = 0
     start = time.time()
-    # print_interval = 1000
+    last_print_time = start
 
     print(
         f"Reading packets for duration {duration} seconds"
@@ -605,48 +374,31 @@ def read_packets(
         else "Reading packets..."
     )
 
+    # Keep track of our statistics
     monitor = PacketMonitor()
     monitor.start_monitoring()
-
     while True:
-        header, data = node.read()
-        if not data:
+        synapse_data, bytes_read = node.read()
+        if synapse_data is None or bytes_read == 0:
+            print("Could not read data from node")
             continue
-        monitor.process_packet(header, data)
-
-        packet_count += 1
-
-        # Detect dropped packets via seq_number
-        if seq_number is None:
-            seq_number = header.seq_number
-        else:
-            expected = (seq_number + 1) % (2**16)
-            if header.seq_number != expected:
-                dropped_packets += header.seq_number - expected
-            seq_number = header.seq_number
+        header, data = synapse_data
+        monitor.process_packet(header, data, bytes_read)
 
         # Always add the data to the writer queues
         q.put(data)
         if plot_q:
             plot_q.put(copy.deepcopy(data))
 
-        monitor.print_periodic_stats()
+        # Print every second our current statistics
+        if time.time() - last_print_time > 1.0:
+            monitor.print_stats()
+            last_print_time = time.time()
 
-        # if packet_count == 1:
-        #     print(f"First packet received at {time.time() - start:.2f} seconds")
-
-        # if packet_count % print_interval == 0:
-        #     print(
-        #         f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)"
-        #     )
         if duration and (time.time() - start) > duration:
             break
 
     monitor.print_final_stats()
-
-    # print(
-    #     f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)"
-    # )
 
 
 def _binary_writer(stop, q, num_ch, output_base):
