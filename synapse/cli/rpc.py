@@ -1,5 +1,7 @@
 from pathlib import Path
-import time
+from datetime import datetime
+from typing import Optional
+
 import synapse as syn
 from synapse.api.synapse_pb2 import DeviceConfiguration
 from synapse.api.query_pb2 import QueryRequest, QueryResponse
@@ -10,6 +12,8 @@ from google.protobuf.json_format import Parse
 
 from rich.console import Console
 from rich.pretty import pprint
+
+from synapse.utils.logging import log_entry_to_str
 
 
 def add_commands(subparsers):
@@ -34,6 +38,48 @@ def add_commands(subparsers):
     e.add_argument("uri", type=str)
     e.add_argument("config_file", type=str)
     e.set_defaults(func=configure)
+
+    f = subparsers.add_parser("logs", help="Get logs from the device")
+    f.add_argument("uri", type=str)
+    f.add_argument("--output", "-o", type=str, help="Optional file to write logs to")
+    f.add_argument(
+        "--log-level",
+        "-l",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Log level to filter by",
+    )
+    f.add_argument(
+        "--since",
+        type=int,
+        help="Get logs from the last N milliseconds",
+        metavar="N",
+    )
+    f.add_argument(
+        "--start-time",
+        type=str,
+        help="Start time in ISO format (e.g., '2024-03-14T15:30:00')",
+    )
+    f.add_argument(
+        "--end-time",
+        type=str,
+        help="End time in ISO format (e.g., '2024-03-14T15:30:00')",
+    )
+    f.set_defaults(func=get_logs)
+
+    g = subparsers.add_parser("tail", help="Tail logs from the device")
+    g.add_argument("uri", type=str)
+    g.add_argument("--output", "-o", type=str, help="Optional file to write logs to")
+    g.add_argument(
+        "--log-level",
+        "-l",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Log level to filter by",
+    )
+    g.set_defaults(func=tail_logs)
 
 
 def info(args):
@@ -119,3 +165,66 @@ def configure(args):
             console.print(f"[bold red]Error configuring\n{config_ret.message}")
             return
         console.print("[green]Device Configured")
+
+
+def get_logs(args):
+    def parse_datetime(time_str: Optional[str]) -> Optional[datetime]:
+        """Parse an ISO format datetime string."""
+        if not time_str:
+            return None
+        try:
+            return datetime.fromisoformat(time_str)
+        except ValueError:
+            return None
+
+    console = Console()
+    output_file = open(args.output, "w") if args.output else None
+
+    start_time = parse_datetime(args.start_time)
+    if args.start_time and not start_time:
+        console.print("[bold red]Invalid start time format. Use ISO format (e.g., '2024-03-14T15:30:00')")
+        return
+
+    end_time = parse_datetime(args.end_time)
+    if args.end_time and not end_time:
+        console.print("[bold red]Invalid end time format. Use ISO format (e.g., '2024-03-14T15:30:00')")
+        return
+
+    try:
+        with console.status("Getting logs...", spinner="bouncingBall"):
+            res = syn.Device(args.uri, args.verbose).get_logs_with_status(
+                log_level=args.log_level,
+                since_ms=args.since,
+                start_time=start_time,
+                end_time=end_time
+            )
+
+            if not res or not res.entries:
+                console.print("[yellow]No logs found for the specified criteria")
+                return
+
+            for log in res.entries:
+                line = log_entry_to_str(log)
+                if output_file:
+                    output_file.write(line + "\n")
+                print(line)
+    finally:
+        if output_file:
+            output_file.close()
+
+def tail_logs(args):
+    console = Console()
+    output_file = open(args.output, "w") if args.output else None
+
+    try:
+        with console.status("Tailing logs...", spinner="bouncingBall"):
+            device = syn.Device(args.uri, args.verbose)
+
+            for log in device.tail_logs(args.log_level):
+                line = log_entry_to_str(log)
+                if output_file:
+                    output_file.write(line + "\n")
+                print(line)
+    finally:
+        if output_file:
+            output_file.close()

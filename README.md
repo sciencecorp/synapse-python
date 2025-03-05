@@ -17,13 +17,15 @@ Includes `synapsectl` command line utility:
     --uri -u              Device control plane URI
 
     Commands:
-    {discover,info,query,start,stop,configure,list-dev,wifi-select,wifi-config,read}
+    {discover,info,query,start,stop,configure,logs,tail,list-dev,wifi-select,wifi-config,read,plot}
         discover            Discover Synapse devices on the network
         info                Get device information
         query               Execute a query on the device
         start               Start the device
         stop                Stop the device
         configure           Write a configuration to the device
+        logs                Get logs from the device
+        tail                Tail logs from the device
         list-dev            List Synapse devices plugged in via USB
         wifi-select         Configure a USB connected Synapse device to use a known WiFi network
         wifi-config         Configure a USB connected Synapse device for a new WiFi network
