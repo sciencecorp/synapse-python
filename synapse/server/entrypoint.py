@@ -1,13 +1,12 @@
+import logging
 import signal
-import struct
 import socket
 import sys
 import asyncio
-import logging
 import argparse
 from coolname import generate_slug
 
-logging.basicConfig(level=logging.INFO)
+from synapse.utils.logging import init_logging
 
 from synapse.server.rpc import serve
 from synapse.server.autodiscovery import BroadcastDiscoveryProtocol
@@ -62,6 +61,9 @@ def main(
         "-v", "--verbose", action="store_true", help="Enable verbose output"
     )
     args = parser.parse_args()
+
+    init_logging(level=logging.DEBUG if args.verbose else logging.INFO)
+
     # verify that network interface is real
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -72,9 +74,6 @@ def main(
         parser.error("Invalid --iface-ip given, could not bind to interface")
     finally:
         s.close()
-
-    if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
 
     asyncio.run(async_main(args, node_object_map, peripherals))
 

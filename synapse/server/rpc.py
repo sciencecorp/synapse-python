@@ -1,8 +1,13 @@
 import logging
+from pathlib import Path
+import time
+from typing import Callable, List
+import asyncio
 
 import grpc
 
 from synapse.api.node_pb2 import NodeConnection, NodeType
+from synapse.api.logging_pb2 import LogLevel, LogQueryResponse
 from synapse.api.query_pb2 import QueryResponse
 from synapse.api.status_pb2 import DeviceState, Status, StatusCode
 from synapse.api.synapse_pb2 import DeviceConfiguration, DeviceInfo
@@ -10,10 +15,13 @@ from synapse.api.synapse_pb2_grpc import (
     SynapseDeviceServicer,
     add_SynapseDeviceServicer_to_server,
 )
+from synapse.utils.logging import init_file_handler, str_to_log_entry
 
+
+LOG_FILEPATH = str(Path.home() / ".science" / "synapse" / "logs" / "server.log")
 
 async def serve(
-    server_name, device_serial, rpc_port, iface_ip, node_object_map, peripherals
+    server_name, device_serial, rpc_port, iface_ip, node_object_map, peripherals, services: List[Callable[[str, grpc.aio.Server], None]] = []
 ) -> None:
     server = grpc.aio.server()
     add_SynapseDeviceServicer_to_server(
@@ -22,15 +30,18 @@ async def serve(
         ),
         server,
     )
+
+    for service in services:
+        service(device_serial, server)
+
     server.add_insecure_port("[::]:%d" % rpc_port)
     await server.start()
     await server.wait_for_termination()
 
-
 class SynapseServicer(SynapseDeviceServicer):
     """Provides methods that implement functionality of a Synapse device server."""
 
-    state = DeviceState.kInitializing
+    state = DeviceState.kStopped
     configuration = None
     connections = []
     nodes = []
@@ -42,6 +53,7 @@ class SynapseServicer(SynapseDeviceServicer):
         self.node_object_map = node_object_map
         self.peripherals = peripherals
         self.logger = logging.getLogger("server")
+        init_file_handler(self.logger, LOG_FILEPATH)
 
     async def Info(self, request, context):
         self.logger.info("Info()")
@@ -140,6 +152,101 @@ class SynapseServicer(SynapseDeviceServicer):
                 state=self.state,
             ),
         )
+
+    async def GetLogs(self, request, context):
+        self.logger.info("GetLogs()")
+        try:
+            min_level = request.min_level if request.min_level else LogLevel.LOG_LEVEL_INFO
+            entries = []
+
+            if request.since_ms:
+                current_time_ns = time.time_ns()
+                start_time_ns = current_time_ns - (request.since_ms * 1_000_000)
+                end_time_ns = current_time_ns
+            else:
+                start_time_ns = request.start_time_ns if request.start_time_ns else 0
+                end_time_ns = request.end_time_ns if request.end_time_ns else time.time_ns()
+
+
+            if not Path(LOG_FILEPATH).exists():
+                self.logger.warning(f"Log file not found at {LOG_FILEPATH}")
+                await context.abort(grpc.StatusCode.NOT_FOUND, f"no log file found")
+
+            try:
+                with open(LOG_FILEPATH, 'r') as f:
+                    for line in f:
+                        try:
+                            entry = str_to_log_entry(line)
+                            if not entry:
+                                continue
+                            if start_time_ns and entry.timestamp_ns < start_time_ns:
+                                continue
+                            if end_time_ns and entry.timestamp_ns >= end_time_ns:
+                                continue
+                            if entry.level < min_level:
+                                continue
+                            entries.append(entry)
+                        except Exception as e:
+                            self.logger.warning(f"failed to parse log line: {line} - skipping")
+                            continue
+
+            except FileNotFoundError:
+                self.logger.warning(f"Log file not found at {LOG_FILEPATH}")
+                await context.abort(grpc.StatusCode.UNKNOWN, f"failed to open log file")
+
+            return LogQueryResponse(entries=entries)
+
+        except Exception as e:
+            self.logger.error(f"Error getting logs: {str(e)}")
+            return LogQueryResponse(entries=[])
+
+    async def TailLogs(self, request, context):
+        self.logger.info("TailLogs()")
+        try:
+            min_level = request.min_level if request.min_level else LogLevel.LOG_LEVEL_INFO
+
+            if not Path(LOG_FILEPATH).exists():
+                self.logger.warning(f"Log file not found at {LOG_FILEPATH}")
+                await context.abort(grpc.StatusCode.NOT_FOUND, f"no log file found")
+                return
+
+            # Get the current file size to start reading from the end
+            file_size = Path(LOG_FILEPATH).stat().st_size
+
+            while True:
+                try:
+                    with open(LOG_FILEPATH, 'r') as f:
+                        f.seek(file_size)
+
+                        while True:
+                            line = f.readline()
+                            if not line:
+                                await asyncio.sleep(0.1)
+                                continue
+
+                            try:
+                                entry = str_to_log_entry(line)
+                                if not entry:
+                                    continue
+                                if entry.level < min_level:
+                                    continue
+
+                                await context.write(entry)
+
+                            except Exception as e:
+                                continue
+
+                            file_size = f.tell()
+
+                except FileNotFoundError:
+                    self.logger.warning(f"Log file not found at {LOG_FILEPATH}")
+                    await context.abort(grpc.StatusCode.UNKNOWN, f"failed to open log file")
+                    return
+
+        except Exception as e:
+            self.logger.error(f"Error tailing logs: {str(e)}")
+            await context.abort(grpc.StatusCode.UNKNOWN, f"failed to tail logs: {str(e)}")
+            return
 
     def _reconfigure(self, configuration):
         self.state = DeviceState.kInitializing
