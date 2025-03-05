@@ -43,8 +43,9 @@ class PacketMonitor:
         self.last_bytes_received = 0
 
         # Jitter tracking
-        self.packet_arrival_times = []
-        self.packet_intervals = []
+        self.last_packet_time = None
+        self.last_jitter = 0
+        self.avg_jitter = 0
 
     def start_monitoring(self):
         """Initialize monitoring timers"""
@@ -59,9 +60,23 @@ class PacketMonitor:
         # Record first packet time
         if self.packet_count == 0:
             self.first_packet_time = packet_received_time
+            self.last_packet_time = packet_received_time
             print(
-                f"First packet received after {packet_received_time - self.start_time:.3f} seconds"
+                f"First packet received after {packet_received_time - self.start_time:.3f} seconds\n\n"
             )
+        else:
+            # Calculate jitter
+            interval = packet_received_time - self.last_packet_time
+            # Update jitter using RFC 3550 algorithm (smoother than just max-min)
+            # https://datatracker.ietf.org/doc/html/rfc3550#appendix-A.8
+            if self.packet_count > 1:
+                jitter_diff = abs(interval - self.last_jitter)
+                self.avg_jitter += (jitter_diff - self.avg_jitter) / 16
+
+            # Save current values for next calculation
+            self.last_jitter = interval
+            self.last_packet_time = packet_received_time
+
         # We got a new packet
         self.packet_count += 1
         self.bytes_received += bytes_read
@@ -99,6 +114,10 @@ class PacketMonitor:
             bytes_per_second = self.bytes_received_in_interval / dt_sec
             megabits_per_second = (bytes_per_second * 8) / 1_000_000
             sys.stdout.write(f"Mbit/sec: {megabits_per_second:.1f} | ")
+
+        # Jitter (in milliseconds)
+        jitter_ms = self.avg_jitter * 1000  # Convert to ms
+        sys.stdout.write(f"Jitter: {jitter_ms:.2f} ms | ")
 
         # Out of order
         sys.stdout.write(f"Out of Order: {self.out_of_order_packets}")
