@@ -38,8 +38,17 @@ class StreamOut(Node):
     def __init__(self, label=None, destination_address=None, destination_port=None):
         self.__socket = None
         self.__label = label
-        self.__destination_address = destination_address
-        self.__destination_port = destination_port
+
+        # If we have been passed a None for destination address, try to resolve it
+        if not destination_address:
+            self.__destination_address = get_client_ip()
+        else:
+            self.__destination_address = destination_address
+
+        if not destination_port:
+            self.__destination_port = DEFAULT_STREAM_OUT_PORT
+        else:
+            self.__destination_port = destination_port
 
     def read(self) -> Tuple[Optional[SynapseData], int]:
         if self.__socket is None:
@@ -90,9 +99,21 @@ class StreamOut(Node):
         n = NodeConfig()
 
         o = StreamOutConfig()
-        o.label = self.__label
-        o.udp_unicast.destination_address = self.__destination_address
-        o.udp_unicast.destination_port = self.__destination_port
+
+        print("Calling _to_proto")
+        print(f"Dest address: {self.__destination_address}")
+        if self.__label:
+            o.label = self.__label
+        else:
+            o.label = "Stream Out"
+
+        print("Checking for destination address")
+
+        if self.__destination_address:
+            o.udp_unicast.destination_address = self.__destination_address
+
+        if self.__destination_port:
+            o.udp_unicast.destination_port = self.__destination_port
 
         n.stream_out.CopyFrom(o)
         return n
@@ -117,6 +138,7 @@ class StreamOut(Node):
 
     @staticmethod
     def _from_proto(proto: Optional[StreamOutConfig]):
+        print(f"Got a {proto} for _from_proto")
         if proto is None:
             return StreamOut()
 
