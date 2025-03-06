@@ -29,14 +29,14 @@ def connect_sftp(hostname, username, password=None, key_filename=None, port=22):
             key_filename=key_filename,
             timeout=5
         )
+        sftp = ssh.open_sftp()
     except TimeoutError as e:
         logging.error(f"Connection to {hostname} timed out")
         return None, None
-    except paramiko.ssh_exception.SSHException as e:
+    except Exception as e:
         logging.error(f"Failed to connect to {hostname}: {e}")
         return None, None
     
-    sftp = ssh.open_sftp()
     return ssh, sftp
 
 def close_sftp(ssh, sftp):
