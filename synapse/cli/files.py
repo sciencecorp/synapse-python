@@ -61,7 +61,11 @@ def ls(args):
         console.print(f"[bold red]Failed to connect to {args.uri}[/bold red]")
         return
     console.print(f"\n[bold blue]Listing directory:[/bold blue] [yellow]{args.path}[/yellow]\n")
-    file_attr = sftp_conn.listdir_attr(args.path)
+
+    try:
+        file_attr = sftp_conn.listdir_attr(args.path)
+    except Exception as e:
+        console.print(f"[bold red]Failed to list directory:[/bold red] {e}")
     print_file_list(file_attr, console)
 
     sftp.close_sftp(ssh, sftp_conn)
