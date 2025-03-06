@@ -96,7 +96,6 @@ def print_file_list(files: list[paramiko.SFTPAttributes], console: Console):
     # Sort files: directories first, then by name
     files.sort(key=lambda f: (0 if hasattr(f, 'st_mode') and f.st_mode & 0o40000 else 1, f.filename))
     
-    # Create a table
     table = Table(show_header=True)
     table.add_column("Permissions", style="cyan")
     table.add_column("Size", justify="right", style="magenta")
@@ -105,16 +104,12 @@ def print_file_list(files: list[paramiko.SFTPAttributes], console: Console):
     for file_attr in files:
         # Get file mode and format it
         mode = format_mode(file_attr.st_mode if hasattr(file_attr, 'st_mode') else None)
-        
-        # Get owner and group (might not be available on all SFTP servers)
-        owner = file_attr.st_uid if hasattr(file_attr, 'st_uid') else ''
-        group = file_attr.st_gid if hasattr(file_attr, 'st_gid') else ''
-        
-        # Size formatting (human-readable using Rich's filesize)
+         
+        # Filesize
         size = file_attr.st_size if hasattr(file_attr, 'st_size') else 0
         size_str = filesize_binary(size)
         
-        # Time formatting
+        # Time modified
         mtime = file_attr.st_mtime if hasattr(file_attr, 'st_mtime') else None
         time_str = format_time(mtime)
         
@@ -133,10 +128,8 @@ def print_file_list(files: list[paramiko.SFTPAttributes], console: Console):
         else:
             filename_styled = filename
         
-        # Add row to table
         table.add_row(mode, size_str, time_str, filename_styled)
     
-    # Print the table
     console.print(table)
 
 def get_dir(sftp_conn: paramiko.SFTPClient, remote_path: str, output_path: str, console: Console): 
