@@ -2,6 +2,7 @@ import os
 import paramiko
 import argparse
 import stat
+import paramiko.ssh_exception
 from rich.console import Console
 from rich.table import Table
 from rich import progress
@@ -31,23 +32,24 @@ def add_user_arguments(parser: argparse.ArgumentParser):
 def add_commands(subparsers: argparse._SubParsersAction):
     file_parser = subparsers.add_parser("file", help="File commands")
     file_subparsers = file_parser.add_subparsers(title="File Commands")
-    a = file_subparsers.add_parser("ls", help="List files on device")
+    a: argparse.ArgumentParser = file_subparsers.add_parser("ls", help="List files on device")
     a.add_argument("uri", type=str)
-    a.add_argument("path", type=str, nargs="?", default="/")
+    a.add_argument("path", type=str, nargs="?", default="/", help="Path to list files from")
     add_user_arguments(a)
     a.set_defaults(func=ls)
 
     b: argparse.ArgumentParser = file_subparsers.add_parser("get", help="Get a file from device")
     b.add_argument("uri", type=str)
-    b.add_argument("remote_path", type=str)
-    b.add_argument("--output_path", "-o", type=str, default=os.getcwd(), required=False)
+    b.add_argument("remote_path", type=str, help="Remote path of file to download")
+    b.add_argument("--output_path", "-o", type=str, default=os.getcwd(), help="Output path for downloaded file(s)")
     b.add_argument("--recursive", "-r", action="store_true", help="Download directories recursively")
     add_user_arguments(b)
     b.set_defaults(func=get)
 
-    c = file_subparsers.add_parser("rm", help="Remove a file from device")
+    c: argparse.ArgumentParser= file_subparsers.add_parser("rm", help="Remove a file from device")
     c.add_argument("uri", type=str)
-    c.add_argument("path", type=str)
+    c.add_argument("path", type=str, help="Path to file to remove")
+    c.add_argument("--recursive", "-r", action="store_true", help="Remove directories recursively")
     add_user_arguments(c)
     c.set_defaults(func=rm)
 
@@ -55,7 +57,6 @@ def ls(args):
     console = Console()
     with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
         ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, args.password)
-    
     if ssh is None or sftp_conn is None:
         console.print(f"[bold red]Failed to connect to {args.uri}[/bold red]")
         return
@@ -67,10 +68,8 @@ def ls(args):
 
 def get(args):
     console = Console()
-    # validate_output_path(args.output_path, console)
     with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
         ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, args.password)
-    
     if ssh is None or sftp_conn is None:
         console.print(f"[bold red]Failed to connect to {args.uri}[/bold red]")
         return
@@ -79,9 +78,19 @@ def get(args):
         get_dir(sftp_conn, args.remote_path, args.output_path, console)
     else:  
         get_file(sftp_conn, args.remote_path, args.output_path, console)
+    
+    sftp.close_sftp(ssh, sftp_conn)
 
 def rm(args):
-    print(f"Removing file from {args.uri}")
+    console = Console()
+    with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
+        ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, args.password) 
+    if ssh is None or sftp_conn is None:
+        console.print(f"[bold red]Failed to connect to {args.uri}[/bold red]")
+        return
+    
+    remove_file(sftp_conn, args.path, args.recursive, console)
+    sftp.close_sftp(ssh, sftp_conn)
 
 def print_file_list(files: list[paramiko.SFTPAttributes], console: Console):
     # Sort files: directories first, then by name
@@ -130,13 +139,6 @@ def print_file_list(files: list[paramiko.SFTPAttributes], console: Console):
     # Print the table
     console.print(table)
 
-def validate_output_path(output_path: str, console: Console):
-    output_abs_path = os.path.abspath(output_path)
-    output_dir = os.path.dirname(output_abs_path)
-    if not os.path.exists(output_dir):
-        console.print(f"[bold red]Output directory does not exist:[/bold red] [bold blue]{output_dir}")
-        return
-
 def get_dir(sftp_conn: paramiko.SFTPClient, remote_path: str, output_path: str, console: Console): 
     try:
         dir_attrs = sftp_conn.stat(remote_path)
@@ -170,7 +172,7 @@ def get_file(sftp_conn: paramiko.SFTPClient, remote_path: str, output_path: str,
     try:
         is_dir = stat.S_ISDIR(sftp_conn.stat(remote_path).st_mode)
     except FileNotFoundError:
-        console.print(f"[bold red]File not found:[/bold red] [bold blue]{remote_path}")
+        console.print(f"[bold red]File not found:[/bold red] [blue]{remote_path}")
         return
     
     if is_dir:
@@ -210,3 +212,29 @@ def get_file(sftp_conn: paramiko.SFTPClient, remote_path: str, output_path: str,
         console.print(f"[bold red]Failed to download file:[/bold red] {e}")
         return
     
+def remove_file(sftp_conn: paramiko.SFTPClient, remote_path: str, recursive: bool,  console: Console):
+    try:
+        is_dir = stat.S_ISDIR(sftp_conn.stat(remote_path).st_mode)
+    except FileNotFoundError:
+        console.print(f"[bold red]File not found:[/bold red] [blue]{remote_path}")
+        return
+    
+    if is_dir and not recursive:
+        console.print(f"[bold yellow]Requested path: [/bold yellow][blue]{remote_path}[/blue][bold yellow] is a directory. Use the --recursive flag to remove directories.")
+        return
+
+    try:
+        if is_dir:
+            file_list = sftp_conn.listdir(remote_path)
+            for file in file_list:
+                remote_file = os.path.join(remote_path, file)
+                remove_file(sftp_conn, remote_file, recursive, console)
+            sftp_conn.rmdir(remote_path)
+        else:
+            with console.status(f"Removing file: {remote_path}", spinner="bouncingBall"):
+                sftp_conn.remove(remote_path)
+    except Exception as e:
+        console.print(f"[bold red]Failed to remove file:[/bold red] {e}")
+        return
+
+    console.print(f"[bold green]File removed:[/bold green] [blue]{remote_path}")
