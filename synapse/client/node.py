@@ -29,7 +29,6 @@ class Node(object):
         oneof = proto.WhichOneof("config")
         if oneof and hasattr(proto, oneof):
             config = getattr(proto, oneof)
-
         node = cls._from_proto(config)
         node.id = proto.id
         return node
