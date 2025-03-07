@@ -11,7 +11,7 @@ import synapse.client.sftp as sftp
 from synapse.utils.file import * 
 
 SCIFI_DEFAULT_SFTP_USER = "scifi-sftp"
-SCIFI_DEFAULT_SFTP_PASS = "axon"
+SCIFI_DEFAULT_SFTP_PASS = "fluffy"
 
 def add_user_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
