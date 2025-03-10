@@ -76,6 +76,10 @@ if __name__ == "__main__":
                     f"{total_bytes_read} bytes in {time.time() - start_time:.2f} sec"
                 )
                 last_update_time = current_time
+
+            if current_time - start_time > 5:
+                should_run = False
+
         except KeyboardInterrupt:
             print("Keyboard interrupt detected, stopping")
             should_run = False
