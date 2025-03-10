@@ -7,6 +7,7 @@ import os
 from typing import Optional
 from operator import itemgetter
 import copy
+import sys
 
 from google.protobuf.json_format import Parse, MessageToJson
 
@@ -20,6 +21,129 @@ import synapse.cli.synapse_plotter as plotter
 
 from rich.console import Console
 from rich.pretty import pprint
+
+
+class PacketMonitor:
+    def __init__(self):
+        # Packet tracking
+        self.packet_count = 0
+        self.seq_number = None
+        self.dropped_packets = 0
+        self.out_of_order_packets = 0
+
+        # Timing metrics
+        self.start_time = None
+        self.first_packet_time = None
+
+        # Bandwidth tracking
+        self.bytes_received = 0
+        self.bytes_received_in_interval = 0
+        self.bandwidth_samples = []
+        self.last_bandwidth_time = None
+        self.last_bytes_received = 0
+
+        # Jitter tracking
+        self.last_packet_time = None
+        self.last_jitter = 0
+        self.avg_jitter = 0
+
+    def start_monitoring(self):
+        """Initialize monitoring timers"""
+        self.start_time = time.time()
+        self.last_stats_time = self.start_time
+        self.last_bandwidth_time = self.start_time
+
+    def process_packet(self, header, data, bytes_read):
+        if not data:
+            return False
+        packet_received_time = time.time()
+        # Record first packet time
+        if self.packet_count == 0:
+            self.first_packet_time = packet_received_time
+            self.last_packet_time = packet_received_time
+            print(
+                f"First packet received after {packet_received_time - self.start_time:.3f} seconds\n\n"
+            )
+        else:
+            # Calculate jitter
+            interval = packet_received_time - self.last_packet_time
+            # Update jitter using RFC 3550 algorithm (smoother than just max-min)
+            # https://datatracker.ietf.org/doc/html/rfc3550#appendix-A.8
+            if self.packet_count > 1:
+                jitter_diff = abs(interval - self.last_jitter)
+                self.avg_jitter += (jitter_diff - self.avg_jitter) / 16
+
+            # Save current values for next calculation
+            self.last_jitter = interval
+            self.last_packet_time = packet_received_time
+
+        # We got a new packet
+        self.packet_count += 1
+        self.bytes_received += bytes_read
+        self.bytes_received_in_interval += bytes_read
+        # Sequence number checking for packet loss/ordering
+        if self.seq_number is None:
+            self.seq_number = header.seq_number
+        else:
+            expected = (self.seq_number + 1) % (2**16)
+            if header.seq_number != expected:
+                # Lost some packets
+                if header.seq_number > expected:
+                    lost = (header.seq_number - expected) % (2**16)
+                    self.dropped_packets += lost
+                else:
+                    self.out_of_order_packets += 1
+            self.seq_number = header.seq_number
+
+        return True
+
+    def print_stats(self):
+        # Use carriage return to update on the same line
+        sys.stdout.write("\r")
+        try:
+            terminal_width = os.get_terminal_size().columns
+        except (AttributeError, OSError):
+            # Fallback if not available
+            terminal_width = 80
+
+        sys.stdout.write(" " * terminal_width)
+        sys.stdout.write("\r")
+
+        now = time.time()
+        stats = f"Runtime {now - self.start_time:.1f}s | "
+
+        # Drop calculation
+        drop_percent = (self.dropped_packets / max(1, self.packet_count)) * 100.0
+        stats += f"Dropped: {self.dropped_packets}/{self.packet_count} ({drop_percent:.1f}%) | "
+
+        # Bandwidth calcs
+
+        dt_sec = now - self.last_bandwidth_time
+        if dt_sec > 0:
+            bytes_per_second = self.bytes_received_in_interval / dt_sec
+            megabits_per_second = (bytes_per_second * 8) / 1_000_000
+            stats += f"Mbit/sec: {megabits_per_second:.1f} | "
+
+        # Jitter (in milliseconds)
+        jitter_ms = self.avg_jitter * 1000  # Convert to ms
+        stats += f"Jitter: {jitter_ms:.2f} ms | "
+
+        # Out of order
+        stats += f"Out of Order: {self.out_of_order_packets}"
+
+        # Flush the output to ensure it's displayed
+        if len(stats) > terminal_width - 1:
+            stats = stats[: terminal_width - 4] + "..."
+
+        # Write the stats and flush
+        sys.stdout.write(stats)
+        sys.stdout.flush()
+
+        # Reset for the next run
+        self.bytes_received_in_interval = 0
+        self.last_bandwidth_time = now
+
+        return True
 
 
 def add_commands(subparsers):
@@ -76,9 +200,7 @@ def read(args):
             return
         else:
             console.print(f"[bold yellow]Overwriting existing files in {output_base}")
-
     device = syn.Device(args.uri, args.verbose)
-
     with console.status(
         "Reading from Synapse Device", spinner="bouncingBall", spinner_style="green"
     ) as status:
@@ -158,9 +280,6 @@ def read(args):
                 return
             console.print("[bold green]Device configured successfully")
 
-        if not device.configure(config):
-            raise ValueError("Failed to configure device")
-
         if info.status.state != DeviceState.kRunning:
             print("Starting device...")
             if not device.start():
@@ -216,49 +335,46 @@ def read(args):
         if args.duration
         else "Streaming data indefinitely"
     )
-    with console.status(
-        status_title, spinner="bouncingBall", spinner_style="green"
-    ) as status:
-        q = queue.Queue()
-        plot_q = queue.Queue() if args.plot else None
+    console.print(status_title)
 
-        threads = []
-        stop = threading.Event()
-        if args.bin:
-            threads.append(
-                threading.Thread(
-                    target=_binary_writer, args=(stop, q, num_ch, output_base)
-                )
-            )
-        else:
-            threads.append(
-                threading.Thread(target=_data_writer, args=(stop, q, output_base))
-            )
+    q = queue.Queue()
+    plot_q = queue.Queue() if args.plot else None
 
-        if args.plot:
-            threads.append(
-                threading.Thread(
-                    target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)
-                )
+    threads = []
+    stop = threading.Event()
+    if args.bin:
+        threads.append(
+            threading.Thread(target=_binary_writer, args=(stop, q, num_ch, output_base))
+        )
+    else:
+        threads.append(
+            threading.Thread(target=_data_writer, args=(stop, q, output_base))
+        )
+
+    if args.plot:
+        threads.append(
+            threading.Thread(
+                target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)
             )
+        )
+    for thread in threads:
+        thread.start()
+
+    try:
+        read_packets(stream_out, q, plot_q, args.duration)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        print("Stopping read...")
+        stop.set()
         for thread in threads:
-            thread.start()
+            thread.join()
 
-        try:
-            read_packets(stream_out, q, plot_q, args.duration)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            print("Stopping read...")
-            stop.set()
-            for thread in threads:
-                thread.join()
-
-            if args.config:
-                console.print("Stopping device...")
-                if not device.stop():
-                    console.print("[red]Failed to stop device")
-                console.print("Stopped")
+        if args.config:
+            console.print("Stopping device...")
+            if not device.stop():
+                console.print("[red]Failed to stop device")
+            console.print("Stopped")
 
     console.print("[bold green]Streaming complete")
     console.print("[cyan]================")
@@ -277,11 +393,8 @@ def read_packets(
     duration: Optional[int] = None,
     num_ch: int = 32,
 ):
-    packet_count = 0
-    seq_number = None
-    dropped_packets = 0
     start = time.time()
-    print_interval = 1000
+    last_print_time = start
 
     print(
         f"Reading packets for duration {duration} seconds"
@@ -289,41 +402,29 @@ def read_packets(
         else "Reading packets..."
     )
 
+    # Keep track of our statistics
+    monitor = PacketMonitor()
+    monitor.start_monitoring()
     while True:
-        header, data = node.read()
-        if not data:
+        synapse_data, bytes_read = node.read()
+        if synapse_data is None or bytes_read == 0:
+            print("Could not read data from node")
             continue
-
-        packet_count += 1
-
-        # Detect dropped packets via seq_number
-        if seq_number is None:
-            seq_number = header.seq_number
-        else:
-            expected = (seq_number + 1) % (2**16)
-            if header.seq_number != expected:
-                print(f"Seq out of order: got {header.seq_number}, expected {expected}")
-                dropped_packets += header.seq_number - expected
-            seq_number = header.seq_number
+        header, data = synapse_data
+        monitor.process_packet(header, data, bytes_read)
 
         # Always add the data to the writer queues
         q.put(data)
         if plot_q:
             plot_q.put(copy.deepcopy(data))
 
-        if packet_count == 1:
-            print(f"First packet received at {time.time() - start:.2f} seconds")
+        # Print every second our current statistics
+        if time.time() - last_print_time > 1.0:
+            monitor.print_stats()
+            last_print_time = time.time()
 
-        if packet_count % print_interval == 0:
-            print(
-                f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)"
-            )
         if duration and (time.time() - start) > duration:
             break
-
-    print(
-        f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)"
-    )
 
 
 def _binary_writer(stop, q, num_ch, output_base):
