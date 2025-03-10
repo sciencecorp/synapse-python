@@ -1,18 +1,15 @@
 import signal
-import struct
 import socket
 import sys
 import asyncio
 import logging
 import argparse
 from coolname import generate_slug
-
-logging.basicConfig(level=logging.INFO)
-
 from synapse.server.rpc import serve
 from synapse.server.autodiscovery import BroadcastDiscoveryProtocol
 from synapse.server.nodes import SERVER_NODE_OBJECT_MAP
 
+logging.basicConfig(level=logging.INFO)
 
 ENTRY_DEFAULTS = {
     "iface_ip": None,
@@ -33,11 +30,6 @@ def main(
         formatter_class=lambda prog: argparse.HelpFormatter(prog, width=124),
     )
     parser.add_argument(
-        "--iface-ip",
-        help="IP of the network interface to use for multicast traffic",
-        required=True,
-    )
-    parser.add_argument(
         "--rpc-port",
         help="Port to listen for RPC requests",
         type=int,
@@ -51,7 +43,7 @@ def main(
     )
     parser.add_argument(
         "--discovery-addr",
-        help="Multicast address to listen for discovery requests",
+        help="UDP address to listen for discovery requests",
         default=defaults["discovery_addr"],
     )
     parser.add_argument("--name", help="Device name", default=defaults["server_name"])
@@ -62,16 +54,6 @@ def main(
         "-v", "--verbose", action="store_true", help="Enable verbose output"
     )
     args = parser.parse_args()
-    # verify that network interface is real
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind((args.iface_ip, 8000))
-        logging.info(f"Binding to {s.getsockname()[0]}...")
-    except Exception as e:
-        parser.error("Invalid --iface-ip given, could not bind to interface")
-    finally:
-        s.close()
 
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
@@ -101,7 +83,6 @@ async def async_main(args, node_object_map, peripherals):
             args.name,
             args.serial,
             args.rpc_port,
-            args.iface_ip,
             node_object_map,
             peripherals,
         )

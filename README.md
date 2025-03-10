@@ -48,7 +48,7 @@ And a toy device `synapse-sim` for local development,
     --discovery-port DISCOVERY_PORT
                             Port to listen for discovery requests
     --discovery-addr DISCOVERY_ADDR
-                            Multicast address to listen for discovery requests
+                            UDP address to listen for discovery requests
     --name NAME           Device name
     --serial SERIAL       Device serial number
     -v, --verbose         Enable verbose output
