@@ -200,9 +200,7 @@ def read(args):
             return
         else:
             console.print(f"[bold yellow]Overwriting existing files in {output_base}")
-    print("Before a device")
     device = syn.Device(args.uri, args.verbose)
-    print("After a device")
     with console.status(
         "Reading from Synapse Device", spinner="bouncingBall", spinner_style="green"
     ) as status:
@@ -218,17 +216,14 @@ def read(args):
         console.print("\n")
 
     status.update("Loading recording configuration")
-    print("Loading our config")
 
     # Keep track of the sample rate in case we need to plot
     sample_rate_hz = 32000
     if args.config:
-        print("Loading config  from file")
         config = load_config_from_file(args.config)
         if not config:
             console.print(f"[bold red]Failed to load config from {args.config}")
             return
-        print("Before finding a streamout")
         stream_out = next(
             (n for n in config.nodes if n.type == NodeType.kStreamOut), None
         )
@@ -265,7 +260,6 @@ def read(args):
         with console.status(
             "Configuring device", spinner="bouncingBall", spinner_style="green"
         ) as status:
-            print("Before configure with status")
             configure_status = device.configure_with_status(config)
             if configure_status is None:
                 console.print(

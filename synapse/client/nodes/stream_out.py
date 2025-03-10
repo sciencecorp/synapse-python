@@ -99,15 +99,10 @@ class StreamOut(Node):
         n = NodeConfig()
 
         o = StreamOutConfig()
-
-        print("Calling _to_proto")
-        print(f"Dest address: {self.__destination_address}")
         if self.__label:
             o.label = self.__label
         else:
             o.label = "Stream Out"
-
-        print("Checking for destination address")
 
         if self.__destination_address:
             o.udp_unicast.destination_address = self.__destination_address
@@ -138,7 +133,6 @@ class StreamOut(Node):
 
     @staticmethod
     def _from_proto(proto: Optional[StreamOutConfig]):
-        print(f"Got a {proto} for _from_proto")
         if proto is None:
             return StreamOut()
 
