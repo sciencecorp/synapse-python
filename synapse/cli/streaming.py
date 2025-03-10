@@ -102,6 +102,8 @@ def read(args):
         if not config:
             console.print(f"[bold red]Failed to load config from {args.config}")
             return
+        
+        # Check for expected nodes
         stream_out = next(
             (n for n in config.nodes if n.type == NodeType.kStreamOut), None
         )
@@ -111,29 +113,42 @@ def read(args):
         broadband = next(
             (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
         )
-        if not broadband:
-            console.print("[bold red]No BroadbandSource node found in config")
-            return
-        signal = broadband.signal
-        if not signal:
-            console.print("[bold red]No signal configured for BroadbandSource node")
-            return
-
-        if not signal.electrode:
-            console.print(
-                "[bold red]No electrode signal configured for BroadbandSource node"
-            )
+        spike_source = next(
+            (n for n in config.nodes if n.type == NodeType.kSpikeSource), None
+        )
+        if not broadband and not spike_source:
+            console.print("[bold red]No BroadbandSource or SpikeSource node found in config")
             return
 
-        num_ch = len(signal.electrode.channels)
-        if args.num_ch:
-            num_ch = args.num_ch
-            offset = 0
-            channels = []
-            for ch in range(offset, offset + num_ch):
-                channels.append(channel.Channel(ch, 2 * ch, 2 * ch + 1))
+        if broadband:
+            signal = broadband.signal
+            if not signal:
+                console.print("[bold red]No signal configured for BroadbandSource node")
+                return
 
-            broadband.signal.electrode.channels = channels
+            if not signal.electrode:
+                console.print(
+                    "[bold red]No electrode signal configured for BroadbandSource node"
+                )
+                return
+
+            num_ch = len(signal.electrode.channels)
+            if args.num_ch:
+                num_ch = args.num_ch
+                offset = 0
+                channels = []
+                for ch in range(offset, offset + num_ch):
+                    channels.append(channel.Channel(ch, 2 * ch, 2 * ch + 1))
+
+                broadband.signal.electrode.channels = channels
+        elif spike_source:
+            if not spike_source.electrodes:
+                console.print("[bold red]No electrodes configured for SpikeSource node")
+                return
+
+            num_ch = len(spike_source.electrodes.channels)
+            if args.num_ch:
+                num_ch = args.num_ch
 
         with console.status(
             "Configuring device", spinner="bouncingBall", spinner_style="green"
@@ -165,14 +180,6 @@ def read(args):
             print("Starting device...")
             if not device.start():
                 raise ValueError("Failed to start device")
-
-        # Get the sample rate from the device
-        # We need to look at the node configuration with type kBroadbandSource for the sample rate
-        broadband = next(
-            (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
-        )
-        assert broadband is not None, "No BroadbandSource node found in config"
-        sample_rate_hz = broadband.sample_rate_hz
 
     else:
         # TODO(gilbert): Get rid of this giant if-else block
@@ -227,15 +234,22 @@ def read(args):
         if args.bin:
             threads.append(
                 threading.Thread(
-                    target=_binary_writer, args=(stop, q, num_ch, output_base)
+                    target=_writer_binary, args=(stop, q, num_ch, output_base)
                 )
             )
         else:
             threads.append(
-                threading.Thread(target=_data_writer, args=(stop, q, output_base))
+                threading.Thread(target=_writer_jsonl, args=(stop, q, output_base))
             )
 
         if args.plot:
+            if not broadband:
+                console.print("[bold red]A BroadbandSource node is required to plot data")
+                return
+            
+            # Get the sample rate from the device
+            # We need to look at the node configuration with type kBroadbandSource for the sample rate
+            sample_rate_hz = broadband.sample_rate_hz
             threads.append(
                 threading.Thread(
                     target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)
@@ -275,7 +289,6 @@ def read_packets(
     q: queue.Queue,
     plot_q: queue.Queue,
     duration: Optional[int] = None,
-    num_ch: int = 32,
 ):
     packet_count = 0
     seq_number = None
@@ -326,7 +339,7 @@ def read_packets(
     )
 
 
-def _binary_writer(stop, q, num_ch, output_base):
+def _writer_binary(stop, q, num_ch, output_base):
     filename = f"{output_base}.dat"
     full_path = os.path.join(output_base, filename)
     if filename:
@@ -337,6 +350,9 @@ def _binary_writer(stop, q, num_ch, output_base):
         try:
             data: ndtp_types.ElectricalBroadbandData = q.get(True, 1)
         except queue.Empty:
+            continue
+
+        if data.data_type == ndtp_types.DataType.kBroadband:
             continue
 
         try:
@@ -360,7 +376,7 @@ def _binary_writer(stop, q, num_ch, output_base):
             continue
 
 
-def _data_writer(stop, q, output_base):
+def _writer_jsonl(stop, q, output_base):
     filename = f"{output_base}.jsonl"
     full_path = os.path.join(output_base, filename)
     if filename:

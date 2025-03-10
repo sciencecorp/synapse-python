@@ -163,3 +163,5 @@ class SpiketrainData:
 
 
 SynapseData = Union[SpiketrainData, ElectricalBroadbandData]
+
+__all__ = ['SynapseData', 'SpiketrainData', 'ElectricalBroadbandData', 'DataType']
