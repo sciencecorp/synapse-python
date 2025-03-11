@@ -7,11 +7,12 @@ from rich.console import Console
 from rich.table import Table
 from rich import progress
 
+from synapse import Device
 import synapse.client.sftp as sftp
 from synapse.utils.file import * 
 
 SCIFI_DEFAULT_SFTP_USER = "scifi-sftp"
-SCIFI_DEFAULT_SFTP_PASS = "fluffy"
+DEFAULT_ENV_FILE = ".scienv"
 
 def add_user_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
@@ -25,8 +26,20 @@ def add_user_arguments(parser: argparse.ArgumentParser):
         "--password",
         "-p",
         type=str,
-        default=SCIFI_DEFAULT_SFTP_PASS,
         help="Password for SFTP connection",
+    )
+    parser.add_argument(
+        "--env-file",
+        "-e",
+        type=str,
+        default=DEFAULT_ENV_FILE,
+        help="Path to environment file containing passwords",
+    )
+    parser.add_argument(
+        "--forget-password",
+        "-f",
+        action="store_true",
+        help="Dont store an input password locally for future use"
     )
 
 def add_commands(subparsers: argparse._SubParsersAction):
@@ -55,8 +68,12 @@ def add_commands(subparsers: argparse._SubParsersAction):
 
 def ls(args):
     console = Console()
+    password = find_password(args)
+    if password is None:
+        console.print(f"[bold red]Didnt find any password for {args.uri}[/bold red]")
+        return
     with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
-        ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, args.password)
+        ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, password)
     if ssh is None or sftp_conn is None:
         console.print(f"[bold red]Failed to connect to {args.uri}[/bold red]")
         return
@@ -235,3 +252,42 @@ def remove_file(sftp_conn: paramiko.SFTPClient, remote_path: str, recursive: boo
         return
 
     console.print(f"[bold green]File removed:[/bold green] [blue]{remote_path}")
+
+def find_password(args):
+    password = None
+    if args.password is not None:
+        password = args.password
+        if args.env_file is not None and not args.forget_password:
+            info = Device(args.uri).info()
+            dev_name = info.name if info else None
+            if dev_name is None:
+                return password
+            if load_pass_from_env_file(args.env_file, dev_name) is None:
+                store_pass_to_env_file(args.env_file, dev_name, password)
+            return password
+    elif args.env_file is not None:
+        info = Device(args.uri).info()
+        dev_name = info.name if info else None
+        if dev_name is None:
+            return None
+        password = load_pass_from_env_file(args.env_file, dev_name)
+        return password
+            
+def load_pass_from_env_file(env_file: str, device_name: str) -> str:
+    try:
+        with open(env_file, "r") as f:
+            lines = f.readlines()
+        for line in lines:
+            if line.startswith(f"{device_name}="):
+                return line.split("=")[1].strip()
+    except Exception as e:
+        print(f"Couldnt read env file at: {env_file}. {e}")
+    print(f"Couldnt find password for {device_name} in env file")
+    return None
+
+def store_pass_to_env_file(env_file: str, device_name: str, password: str):
+    try:
+        with open(env_file, "a") as f:
+            f.write(f"{device_name}={password}\n")
+    except Exception as e:
+        print(f"Couldnt read env file at: {env_file}. {e}")
