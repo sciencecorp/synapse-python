@@ -54,5 +54,7 @@ def close_sftp(ssh, sftp):
         ssh: SSHClient object
         sftp: SFTPClient object
     """
-    sftp.close()
-    ssh.close()
+    if sftp is not None:
+        sftp.close()
+    if ssh is not None:
+        ssh.close()

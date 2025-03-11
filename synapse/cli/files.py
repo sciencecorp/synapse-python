@@ -81,9 +81,9 @@ def ls(args):
 
     try:
         file_attr = sftp_conn.listdir_attr(args.path)
+        print_file_list(file_attr, console)
     except Exception as e:
         console.print(f"[bold red]Failed to list directory:[/bold red] {e}")
-    print_file_list(file_attr, console)
 
     sftp.close_sftp(ssh, sftp_conn)
 
