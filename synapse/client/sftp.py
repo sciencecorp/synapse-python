@@ -2,7 +2,7 @@ import logging
 import paramiko
 import paramiko.ssh_exception
 
-def connect_sftp(hostname, username, password=None, key_filename=None, port=22):
+def connect_sftp(hostname, username, password=None, pass_filename=None, key_filename=None, port=22):
     """
     Connect to SFTP server and return SFTP client object
     
@@ -19,7 +19,14 @@ def connect_sftp(hostname, username, password=None, key_filename=None, port=22):
     logging.getLogger("paramiko").setLevel(logging.WARNING)
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    
+
+    if pass_filename is not None:
+        try:
+            with open(pass_filename, "r") as f:
+                password = f.read().strip()
+        except Exception as e:
+            logging.error(f"Failed to read password file: {e}")
+            return None, None
     try: 
         ssh.connect(
             hostname=hostname,
