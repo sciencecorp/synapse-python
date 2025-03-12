@@ -89,8 +89,12 @@ def ls(args):
 
 def get(args):
     console = Console()
+    password = find_password(args)
+    if password is None:
+        console.print(f"[bold red]Didnt find any password for {args.uri}[/bold red]")
+        return
     with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
-        ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, args.password)
+        ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, password)
     if ssh is None or sftp_conn is None:
         console.print(f"[bold red]Failed to connect to {args.uri}[/bold red]")
         return
@@ -104,8 +108,12 @@ def get(args):
 
 def rm(args):
     console = Console()
+    password = find_password(args)
+    if password is None:
+        console.print(f"[bold red]Didnt find any password for {args.uri}[/bold red]")
+        return
     with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
-        ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, args.password) 
+        ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, password) 
     if ssh is None or sftp_conn is None:
         console.print(f"[bold red]Failed to connect to {args.uri}[/bold red]")
         return
