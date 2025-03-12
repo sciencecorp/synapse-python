@@ -1,5 +1,4 @@
 import time
-from rich.live import Live
 from rich.table import Table
 
 
@@ -28,17 +27,11 @@ class PacketMonitor:
         self.last_jitter = 0
         self.avg_jitter = 0
 
-        self.live = None
-        self.last_display_update = time.time()
-
     def start_monitoring(self):
         """Initialize monitoring timers"""
         self.start_time = time.time()
         self.last_stats_time = self.start_time
         self.last_bandwidth_time = self.start_time
-
-        self.live = Live(self.generate_stat_table(), refresh_per_second=1)
-        self.live.start()
 
     def process_packet(self, header, data, bytes_read):
         if not data:
@@ -48,9 +41,6 @@ class PacketMonitor:
         if self.packet_count == 0:
             self.first_packet_time = packet_received_time
             self.last_packet_time = packet_received_time
-            print(
-                f"First packet received after {packet_received_time - self.start_time:.3f} seconds\n\n"
-            )
         else:
             # Calculate jitter
             interval = packet_received_time - self.last_packet_time
@@ -71,12 +61,6 @@ class PacketMonitor:
 
         self.handle_sequence_number(header.seq_number)
 
-        # Decide if we want to update our display
-        now = time.time()
-        display_dt = now - self.last_display_update
-        if display_dt >= 1:
-            self.live.update(self.generate_stat_table())
-            self.last_display_update = time.time()
         return True
 
     def sequence_distance(self, first, second):

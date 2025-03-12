@@ -20,6 +20,7 @@ import synapse.cli.synapse_plotter as plotter
 from synapse.utils.packet_monitor import PacketMonitor
 
 from rich.console import Console
+from rich.live import Live
 from rich.pretty import pprint
 
 
@@ -238,11 +239,11 @@ def read(args):
         thread.start()
 
     try:
-        read_packets(stream_out, q, plot_q, args.duration)
+        read_packets(stream_out, q, plot_q, stop, args.duration)
     except KeyboardInterrupt:
         pass
     finally:
-        print("Stopping read...")
+        console.print("Stopping read...")
         stop.set()
         for thread in threads:
             thread.join()
@@ -267,40 +268,38 @@ def read_packets(
     node: syn.StreamOut,
     q: queue.Queue,
     plot_q: queue.Queue,
+    stop,
     duration: Optional[int] = None,
     num_ch: int = 32,
 ):
     start = time.time()
 
-    print(
-        f"Reading packets for duration {duration} seconds"
-        if duration
-        else "Reading packets..."
-    )
-
     # Keep track of our statistics
     monitor = PacketMonitor()
     monitor.start_monitoring()
-    while True:
-        read_ret = node.read()
-        if read_ret is None:
-            print("Could not get a valid read from the node")
-            continue
 
-        synapse_data, bytes_read = read_ret
-        if synapse_data is None or bytes_read == 0:
-            print("Could not read data from node")
-            continue
-        header, data = synapse_data
-        monitor.process_packet(header, data, bytes_read)
+    with Live(monitor.generate_stat_table(), refresh_per_second=4) as live:
+        while not stop.is_set():
+            read_ret = node.read()
+            if read_ret is None:
+                print("Could not get a valid read from the node")
+                continue
 
-        # Always add the data to the writer queues
-        q.put(data)
-        if plot_q:
-            plot_q.put(copy.deepcopy(data))
+            synapse_data, bytes_read = read_ret
+            if synapse_data is None or bytes_read == 0:
+                print("Could not read data from node")
+                continue
+            header, data = synapse_data
+            monitor.process_packet(header, data, bytes_read)
+            live.update(monitor.generate_stat_table())
 
-        if duration and (time.time() - start) > duration:
-            break
+            # Always add the data to the writer queues
+            q.put(data)
+            if plot_q:
+                plot_q.put(copy.deepcopy(data))
+
+            if duration and (time.time() - start) > duration:
+                break
 
 
 def _binary_writer(stop, q, num_ch, output_base):

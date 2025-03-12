@@ -28,7 +28,6 @@ class Device(object):
     def start(self):
         try:
             response = self.rpc.Start(Empty())
-            print(response)
             if self._handle_status_response(response):
                 return response
         except grpc.RpcError as e:
@@ -100,7 +99,6 @@ class Device(object):
             return None
 
     def _handle_status_response(self, status):
-        print(f"Got status: {status}")
         if status.code != StatusCode.kOk:
             self.logger.error("Error %d: %s", status.code, status.message)
             return False
