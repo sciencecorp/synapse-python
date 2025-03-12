@@ -56,7 +56,7 @@ jobs:
           make
           pip install -e .
 
-          synapse-sim --rpc-port 50051 &
+          synapse-sim --iface-ip 127.0.0.1 --rpc-port 50051 &
 
           sleep 2
 

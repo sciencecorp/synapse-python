@@ -12,6 +12,7 @@ from synapse.utils.ndtp_types import (
     ElectricalBroadbandData,
     SpiketrainData,
     SynapseData,
+    NDTPHeader,
 )
 
 DEFAULT_STREAM_OUT_PORT = 50038
@@ -50,7 +51,7 @@ class StreamOut(Node):
         else:
             self.__destination_port = destination_port
 
-    def read(self) -> Tuple[Optional[SynapseData], int]:
+    def read(self) -> Tuple[Optional[Tuple[NDTPHeader, SynapseData]], int]:
         if self.__socket is None:
             if self.open_socket() is None:
                 return None
@@ -113,7 +114,7 @@ class StreamOut(Node):
         n.stream_out.CopyFrom(o)
         return n
 
-    def _unpack(self, data: bytes) -> SynapseData:
+    def _unpack(self, data: bytes) -> Tuple[NDTPHeader, SynapseData]:
         u = None
         try:
             u = NDTPMessage.unpack(data)

@@ -30,6 +30,11 @@ def main(
         formatter_class=lambda prog: argparse.HelpFormatter(prog, width=124),
     )
     parser.add_argument(
+        "--iface-ip",
+        help="IP of the network interface to use for streaming data",
+        required=True,
+    )
+    parser.add_argument(
         "--rpc-port",
         help="Port to listen for RPC requests",
         type=int,
@@ -54,6 +59,17 @@ def main(
         "-v", "--verbose", action="store_true", help="Enable verbose output"
     )
     args = parser.parse_args()
+
+    # verify that network interface is real
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((args.iface_ip, 8000))
+        logging.info(f"Binding to {s.getsockname()[0]}...")
+    except Exception:
+        parser.error("Invalid --iface-ip given, could not bind to interface")
+    finally:
+        s.close()
 
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)

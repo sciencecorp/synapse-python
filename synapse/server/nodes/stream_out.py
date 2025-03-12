@@ -44,8 +44,6 @@ class StreamOut(BaseNode):
 
         dest_address = self.__config.udp_unicast.destination_address
         dest_port = self.__config.udp_unicast.destination_port
-
-        self.__socket.bind((dest_address, dest_port))
         self.socket_endpoint = (dest_address, dest_port)
         self.logger.info(f"created stream out socket on {self.__socket}")
 
