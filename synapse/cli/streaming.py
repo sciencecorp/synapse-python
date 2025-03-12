@@ -7,7 +7,6 @@ import os
 from typing import Optional
 from operator import itemgetter
 import copy
-import sys
 
 from google.protobuf.json_format import Parse, MessageToJson
 
@@ -18,132 +17,10 @@ import synapse as syn
 import synapse.client.channel as channel
 import synapse.utils.ndtp_types as ndtp_types
 import synapse.cli.synapse_plotter as plotter
+from synapse.utils.packet_monitor import PacketMonitor
 
 from rich.console import Console
 from rich.pretty import pprint
-
-
-class PacketMonitor:
-    def __init__(self):
-        # Packet tracking
-        self.packet_count = 0
-        self.seq_number = None
-        self.dropped_packets = 0
-        self.out_of_order_packets = 0
-
-        # Timing metrics
-        self.start_time = None
-        self.first_packet_time = None
-
-        # Bandwidth tracking
-        self.bytes_received = 0
-        self.bytes_received_in_interval = 0
-        self.bandwidth_samples = []
-        self.last_bandwidth_time = None
-        self.last_bytes_received = 0
-
-        # Jitter tracking
-        self.last_packet_time = None
-        self.last_jitter = 0
-        self.avg_jitter = 0
-
-    def start_monitoring(self):
-        """Initialize monitoring timers"""
-        self.start_time = time.time()
-        self.last_stats_time = self.start_time
-        self.last_bandwidth_time = self.start_time
-
-    def process_packet(self, header, data, bytes_read):
-        if not data:
-            return False
-        packet_received_time = time.time()
-        # Record first packet time
-        if self.packet_count == 0:
-            self.first_packet_time = packet_received_time
-            self.last_packet_time = packet_received_time
-            print(
-                f"First packet received after {packet_received_time - self.start_time:.3f} seconds\n\n"
-            )
-        else:
-            # Calculate jitter
-            interval = packet_received_time - self.last_packet_time
-            # Update jitter using RFC 3550 algorithm (smoother than just max-min)
-            # https://datatracker.ietf.org/doc/html/rfc3550#appendix-A.8
-            if self.packet_count > 1:
-                jitter_diff = abs(interval - self.last_jitter)
-                self.avg_jitter += (jitter_diff - self.avg_jitter) / 16
-
-            # Save current values for next calculation
-            self.last_jitter = interval
-            self.last_packet_time = packet_received_time
-
-        # We got a new packet
-        self.packet_count += 1
-        self.bytes_received += bytes_read
-        self.bytes_received_in_interval += bytes_read
-        # Sequence number checking for packet loss/ordering
-        if self.seq_number is None:
-            self.seq_number = header.seq_number
-        else:
-            expected = (self.seq_number + 1) % (2**16)
-            if header.seq_number != expected:
-                # Lost some packets
-                if header.seq_number > expected:
-                    lost = (header.seq_number - expected) % (2**16)
-                    self.dropped_packets += lost
-                else:
-                    self.out_of_order_packets += 1
-            self.seq_number = header.seq_number
-
-        return True
-
-    def print_stats(self):
-        # Use carriage return to update on the same line
-        sys.stdout.write("\r")
-        try:
-            terminal_width = os.get_terminal_size().columns
-        except (AttributeError, OSError):
-            # Fallback if not available
-            terminal_width = 80
-
-        sys.stdout.write(" " * terminal_width)
-        sys.stdout.write("\r")
-
-        now = time.time()
-        stats = f"Runtime {now - self.start_time:.1f}s | "
-
-        # Drop calculation
-        drop_percent = (self.dropped_packets / max(1, self.packet_count)) * 100.0
-        stats += f"Dropped: {self.dropped_packets}/{self.packet_count} ({drop_percent:.1f}%) | "
-
-        # Bandwidth calcs
-
-        dt_sec = now - self.last_bandwidth_time
-        if dt_sec > 0:
-            bytes_per_second = self.bytes_received_in_interval / dt_sec
-            megabits_per_second = (bytes_per_second * 8) / 1_000_000
-            stats += f"Mbit/sec: {megabits_per_second:.1f} | "
-
-        # Jitter (in milliseconds)
-        jitter_ms = self.avg_jitter * 1000  # Convert to ms
-        stats += f"Jitter: {jitter_ms:.2f} ms | "
-
-        # Out of order
-        stats += f"Out of Order: {self.out_of_order_packets}"
-
-        # Flush the output to ensure it's displayed
-        if len(stats) > terminal_width - 1:
-            stats = stats[: terminal_width - 4] + "..."
-
-        # Write the stats and flush
-        sys.stdout.write(stats)
-        sys.stdout.flush()
-
-        # Reset for the next run
-        self.bytes_received_in_interval = 0
-        self.last_bandwidth_time = now
-
-        return True
 
 
 def add_commands(subparsers):
@@ -394,7 +271,6 @@ def read_packets(
     num_ch: int = 32,
 ):
     start = time.time()
-    last_print_time = start
 
     print(
         f"Reading packets for duration {duration} seconds"
@@ -417,11 +293,6 @@ def read_packets(
         q.put(data)
         if plot_q:
             plot_q.put(copy.deepcopy(data))
-
-        # Print every second our current statistics
-        if time.time() - last_print_time > 1.0:
-            monitor.print_stats()
-            last_print_time = time.time()
 
         if duration and (time.time() - start) > duration:
             break
