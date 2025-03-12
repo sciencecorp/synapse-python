@@ -86,7 +86,7 @@ class Device(object):
         except grpc.RpcError as e:
             self.logger.error("Error: %s", e.details())
         return False
-    
+
     def configure_with_status(self, config: Config) -> Status:
         assert isinstance(config, Config), "config must be an instance of Config"
 

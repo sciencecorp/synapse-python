@@ -4,7 +4,6 @@
       "type": "kStreamOut",
       "id": 1,
       "stream_out": {
-        "multicast_group": "224.0.0.115"
       }
     },
     {

@@ -3,10 +3,11 @@ import argparse
 import logging
 from importlib import metadata
 from synapse.cli import discover, rpc, scifi_wifi_config, streaming, offline_plot
+from rich.logging import RichHandler
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, handlers=[RichHandler()])
 
     parser = argparse.ArgumentParser(
         description="Synapse Device Manager",

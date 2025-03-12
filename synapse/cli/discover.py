@@ -3,7 +3,32 @@ from synapse.utils.discover import discover_iter as _discover_iter
 import sys
 
 from rich.console import Console
+from rich.live import Live
 from rich.table import Table
+from rich.spinner import Spinner
+
+
+class DeviceTable:
+    def __init__(self):
+        self.devices = []
+        self.table = Table(show_lines=True, min_width=80)
+        self.table.title = Spinner("dots")
+        self.table.add_column("Name", justify="left")
+        self.table.add_column("Host", justify="right")
+
+    def add_device(self, device):
+        self.devices.append(device)
+        self.table.add_row(device.name, device.host)
+
+
+def generate_layout(device_table):
+    device_count = len(device_table.devices)
+    platform_info = "⌘C to stop" if sys.platform == "darwin" else "Ctrl-C to stop"
+    spinner_text = (
+        f"Discovering Synapse devices... Found {device_count} so far ({platform_info})"
+    )
+    device_table.table.title.text = spinner_text
+    return device_table.table
 
 
 def add_commands(subparsers):
@@ -15,33 +40,17 @@ def add_commands(subparsers):
 
 def discover(args):
     console = Console()
-    device_table = Table(
-        title="Synapse Devices", show_lines=True, row_styles=["dim", ""]
-    )
-    device_table.add_column("Name", justify="left")
-    device_table.add_column("Host", justify="right")
+    device_table = DeviceTable()
+    try:
+        with Live(generate_layout(device_table), refresh_per_second=4) as live:
+            for d in _discover_iter():
+                device_table.add_device(d)
+                live.update(generate_layout(device_table))
 
-    devices = []
-    with console.status(
-        "Discovering Synapse devices...", spinner="bouncingBall", spinner_style="yellow"
-    ) as status:
-        for d in _discover_iter():
-            devices.append(d)
-            device_table.add_row(d.name, d.host)
+    except KeyboardInterrupt:
+        pass
 
-            # Clear the previous table and show the updated one
-            console.clear()
-            console.print(device_table)
-
-            if sys.platform == "darwin":
-                status.update(
-                    f"Discovering Synapse devices... Found {len(devices)} so far (press ⌘C to stop)"
-                )
-            else:
-                status.update(
-                    f"Discovering Synapse devices... Found {len(devices)} so far (press Ctrl-C to stop)"
-                )
-
-    if not devices:
+    console = Console()
+    if not device_table.devices:
         console.print("[bold red]No Synapse devices found")
         return
