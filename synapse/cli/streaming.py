@@ -282,7 +282,12 @@ def read_packets(
     monitor = PacketMonitor()
     monitor.start_monitoring()
     while True:
-        synapse_data, bytes_read = node.read()
+        read_ret = node.read()
+        if read_ret is None:
+            print("Could not get a valid read from the node")
+            continue
+
+        synapse_data, bytes_read = read_ret
         if synapse_data is None or bytes_read == 0:
             print("Could not read data from node")
             continue
