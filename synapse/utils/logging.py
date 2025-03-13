@@ -1,9 +1,11 @@
+import asyncio
 from datetime import datetime
 import logging
 import re
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Union
+
+from logging.handlers import RotatingFileHandler
 from synapse.api.logging_pb2 import LogEntry, LogLevel
 
 FORMAT_STRING = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
@@ -96,3 +98,16 @@ def str_to_log_entry(line: str) -> Union[LogEntry, None]:
         message=message
     )
     return entry
+
+class StreamingLogHandler(logging.Handler):
+    def __init__(self, broadcast_func):
+        super().__init__()
+        self.broadcast_func = broadcast_func
+        self.formatter = Formatter(fmt=FORMAT_STRING)
+
+    def emit(self, record):
+        try:
+            formatted_record = self.formatter.format(record)
+            self.broadcast_func(formatted_record)
+        except Exception:
+            pass

@@ -15,7 +15,7 @@ from synapse.api.synapse_pb2_grpc import (
     SynapseDeviceServicer,
     add_SynapseDeviceServicer_to_server,
 )
-from synapse.utils.logging import init_file_handler, str_to_log_entry
+from synapse.utils.logging import StreamingLogHandler, init_file_handler, str_to_log_entry
 
 
 LOG_FILEPATH = str(Path.home() / ".science" / "synapse" / "logs" / "server.log")
@@ -53,6 +53,10 @@ class SynapseServicer(SynapseDeviceServicer):
         self.node_object_map = node_object_map
         self.peripherals = peripherals
         self.logger = logging.getLogger("server")
+
+        self.active_streams = set()
+        self.stream_handler = StreamingLogHandler(self._broadcast_log)
+        logging.getLogger().addHandler(self.stream_handler)
         init_file_handler(self.logger, LOG_FILEPATH)
 
     async def Info(self, request, context):
@@ -204,49 +208,56 @@ class SynapseServicer(SynapseDeviceServicer):
         self.logger.info("TailLogs()")
         try:
             min_level = request.min_level if request.min_level else LogLevel.LOG_LEVEL_INFO
+            
+            log_queue = asyncio.Queue(maxsize=100)
 
-            if not Path(LOG_FILEPATH).exists():
-                self.logger.warning(f"Log file not found at {LOG_FILEPATH}")
-                await context.abort(grpc.StatusCode.NOT_FOUND, f"no log file found")
-                return
-
-            # Get the current file size to start reading from the end
-            file_size = Path(LOG_FILEPATH).stat().st_size
-
-            while True:
+            def handle_log(record: str):
                 try:
-                    with open(LOG_FILEPATH, 'r') as f:
-                        f.seek(file_size)
+                    log_queue.put_nowait(record)
+                except asyncio.QueueFull:
+                    self.logger.warning("Log queue full - dropping log")
+            
+            self.active_streams.add(handle_log)
 
-                        while True:
-                            line = f.readline()
-                            if not line:
-                                await asyncio.sleep(0.1)
+            try:
+                while True:
+                    try:
+                        formatted_record = await log_queue.get()
+                        
+                        try:
+                            entry = str_to_log_entry(formatted_record)
+                            if not entry:
+                                continue
+                            if entry.level < min_level:
                                 continue
 
-                            try:
-                                entry = str_to_log_entry(line)
-                                if not entry:
-                                    continue
-                                if entry.level < min_level:
-                                    continue
+                            yield entry
 
-                                await context.write(entry)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to parse log record: {formatted_record} - {str(e)}")
+                            continue
 
-                            except Exception as e:
-                                continue
+                    except asyncio.CancelledError:
+                        break
 
-                            file_size = f.tell()
-
-                except FileNotFoundError:
-                    self.logger.warning(f"Log file not found at {LOG_FILEPATH}")
-                    await context.abort(grpc.StatusCode.UNKNOWN, f"failed to open log file")
-                    return
+            finally:
+                self.active_streams.remove(handle_log)
 
         except Exception as e:
             self.logger.error(f"Error tailing logs: {str(e)}")
             await context.abort(grpc.StatusCode.UNKNOWN, f"failed to tail logs: {str(e)}")
             return
+
+    def __del__(self):
+        if hasattr(self, 'stream_handler'):
+            logging.getLogger().removeHandler(self.stream_handler)
+
+    def _broadcast_log(self, formatted_record: str) -> None:
+        for stream in self.active_streams.copy():
+            try:
+                stream(formatted_record)
+            except Exception as e:
+                self.logger.warning(f"Failed to send log to client: {e}")
 
     def _reconfigure(self, configuration):
         self.state = DeviceState.kInitializing
