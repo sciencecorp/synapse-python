@@ -13,9 +13,6 @@ else:  # macOS and Linux
         "-O3",
     ]
 
-this_directory = Path(__file__).parent
-long_description = (this_directory / "README.md").read_text()
-
 extensions = [
     Extension(
         "synapse.utils.ndtp",
@@ -25,38 +22,8 @@ extensions = [
 ]
 
 setup(
-    name="science-synapse",
-    version="0.11.0",
-    description="Client library and CLI for the Synapse API",
-    author="Science Team",
-    author_email="team@science.xyz",
-    packages=find_packages(include=["synapse", "synapse.*"]),
-    long_description=long_description,
-    long_description_content_type="text/markdown",
     ext_modules=cythonize(
         extensions,
         compiler_directives={"language_level": "3"},
     ),
-    python_requires=">=3.9",
-    install_requires=[
-        "coolname",
-        "grpcio-tools",
-        "protoletariat",
-        "numpy >=2.0.0",
-        "pyserial",
-        "scipy",
-        "crcmod",
-        "rich",
-        "pyqtgraph",
-        "pyqt5",
-        "pandas >=2.2.0",
-        "dearpygui",
-        "pyzmq"
-    ],
-    entry_points={
-        "console_scripts": [
-            "synapsectl = synapse.cli:main",
-            "synapse-sim = synapse.simulator:main",
-        ],
-    },
 )
