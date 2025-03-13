@@ -43,6 +43,12 @@ def add_commands(subparsers):
     f.add_argument("uri", type=str)
     f.add_argument("--output", "-o", type=str, help="Optional file to write logs to")
     f.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress output to stdout",
+    )
+    f.add_argument(
         "--log-level",
         "-l",
         type=str,
@@ -51,7 +57,13 @@ def add_commands(subparsers):
         help="Log level to filter by",
     )
     f.add_argument(
-        "--since",
+        "--follow",
+        "-f",
+        action="store_true",
+        help="Follow log output",
+    )
+    f.add_argument(
+        "--since", "-S",
         type=int,
         help="Get logs from the last N milliseconds",
         metavar="N",
@@ -67,19 +79,6 @@ def add_commands(subparsers):
         help="End time in ISO format (e.g., '2024-03-14T15:30:00')",
     )
     f.set_defaults(func=get_logs)
-
-    g = subparsers.add_parser("tail", help="Tail logs from the device")
-    g.add_argument("uri", type=str)
-    g.add_argument("--output", "-o", type=str, help="Optional file to write logs to")
-    g.add_argument(
-        "--log-level",
-        "-l",
-        type=str,
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        default="INFO",
-        help="Log level to filter by",
-    )
-    g.set_defaults(func=tail_logs)
 
 
 def info(args):
@@ -180,17 +179,28 @@ def get_logs(args):
     console = Console()
     output_file = open(args.output, "w") if args.output else None
 
-    start_time = parse_datetime(args.start_time)
-    if args.start_time and not start_time:
-        console.print("[bold red]Invalid start time format. Use ISO format (e.g., '2024-03-14T15:30:00')")
-        return
-
-    end_time = parse_datetime(args.end_time)
-    if args.end_time and not end_time:
-        console.print("[bold red]Invalid end time format. Use ISO format (e.g., '2024-03-14T15:30:00')")
-        return
-
     try:
+        if args.follow:
+            with console.status("Tailing logs...", spinner="bouncingBall"):
+                device = syn.Device(args.uri, args.verbose)
+                for log in device.tail_logs(args.log_level):
+                    line = log_entry_to_str(log)
+                    if output_file:
+                        output_file.write(line + "\n")
+                    if not args.quiet:
+                        print(line)
+            return
+
+        start_time = parse_datetime(args.start_time)
+        if args.start_time and not start_time:
+            console.print("[bold red]Invalid start time format. Use ISO format (e.g., '2024-03-14T15:30:00')")
+            return
+
+        end_time = parse_datetime(args.end_time)
+        if args.end_time and not end_time:
+            console.print("[bold red]Invalid end time format. Use ISO format (e.g., '2024-03-14T15:30:00')")
+            return
+
         with console.status("Getting logs...", spinner="bouncingBall"):
             res = syn.Device(args.uri, args.verbose).get_logs_with_status(
                 log_level=args.log_level,
@@ -207,24 +217,8 @@ def get_logs(args):
                 line = log_entry_to_str(log)
                 if output_file:
                     output_file.write(line + "\n")
-                print(line)
-    finally:
-        if output_file:
-            output_file.close()
-
-def tail_logs(args):
-    console = Console()
-    output_file = open(args.output, "w") if args.output else None
-
-    try:
-        with console.status("Tailing logs...", spinner="bouncingBall"):
-            device = syn.Device(args.uri, args.verbose)
-
-            for log in device.tail_logs(args.log_level):
-                line = log_entry_to_str(log)
-                if output_file:
-                    output_file.write(line + "\n")
-                print(line)
+                if not args.quiet:
+                    print(line)
     finally:
         if output_file:
             output_file.close()
