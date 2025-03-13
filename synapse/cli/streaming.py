@@ -158,9 +158,6 @@ def read(args):
                 return
             console.print("[bold green]Device configured successfully")
 
-        if not device.configure(config):
-            raise ValueError("Failed to configure device")
-
         if info.status.state != DeviceState.kRunning:
             print("Starting device...")
             if not device.start():
