@@ -40,9 +40,6 @@ def connect_sftp(hostname, username, password=None, pass_filename=None, key_file
     except TimeoutError as e:
         logging.error(f"Connection to {hostname} timed out")
         return None, None
-    except Exception as e:
-        logging.error(f"Failed to connect to {hostname}: {e}")
-        return None, None
     
     return ssh, sftp
 

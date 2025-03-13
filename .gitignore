@@ -182,5 +182,5 @@ config/
 
 output_*.json
 *.jsonl
-
+.scienv
 synapse_data*
