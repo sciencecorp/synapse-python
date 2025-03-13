@@ -2,6 +2,12 @@ import datetime
 from rich import filesize
 from typing import Optional
 
+__all__ = [
+    "format_mode",
+    "format_time",
+    "filesize_binary",
+]
+
 
 def format_mode(mode):
     """
