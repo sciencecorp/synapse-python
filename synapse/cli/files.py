@@ -285,7 +285,7 @@ def get_file(
 
     if is_dir:
         console.print(
-            f"[bold yellow]Requested path: [/bold yellow][blue]{remote_path}[/blue][bold yellow] is a directory. Use the --recursive flag to download directories."
+            f"[bold yellow]Requested path: [/bold yellow][blue]{remote_path}[/blue][bold yellow] is a directory. Use the --recursive(-r) flag to download directories."
         )
         return
 
@@ -338,7 +338,7 @@ def remove_file(
 
     if is_dir and not recursive:
         console.print(
-            f"[bold yellow]Requested path: [/bold yellow][blue]{remote_path}[/blue][bold yellow] is a directory. Use the --recursive flag to remove directories."
+            f"[bold yellow]Requested path: [/bold yellow][blue]{remote_path}[/blue][bold yellow] is a directory. Use the --recursive(-r) flag to remove directories."
         )
         return
 
