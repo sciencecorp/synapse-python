@@ -1,3 +1,39 @@
+[project]
+name = "science-synapse"
+version = "1.0"
+description = "Client library and CLI for the Synapse API"
+authors = [{name = "Science Team", email = "team@science.xyz"}]
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+dependencies = [
+    "build>=1.2.2.post1",
+    "coolname>=2.2.0",
+    "crcmod>=1.7",
+    "dearpygui>=2.0.0",
+    "grpcio>=1.71.0",
+    "grpcio-tools>=1.71.0",
+    "numpy>=2.0.0",
+    "pandas>=2.2.0",
+    "paramiko >=3.5.1",
+    "pre-commit>=4.1.0",
+    "protobuf>=5.29",
+    "protoletariat>=3.3.9",
+    "pyqt5>=5.15.11",
+    "pyqtgraph>=0.13.7",
+    "pyserial>=3.5",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.25.3",
+    "pyyaml>=6.0",
+    "pyzmq>=26.3.0",
+    "rich>=13.9.4",
+    "scipy>=1.13.1",
+]
+
 [build-system]
 requires = ["setuptools", "wheel", "Cython", "crcmod"]
 build-backend = "setuptools.build_meta"
+
+[project.scripts]
+synapsectl = "synapse.cli:main"
+synapse-sim = "synapse.simulator:main"
