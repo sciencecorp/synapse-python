@@ -2,10 +2,12 @@ import os
 import paramiko
 import argparse
 import stat
+import yaml
 import paramiko.ssh_exception
 from rich.console import Console
 from rich.table import Table
 from rich import progress
+from rich.prompt import Confirm
 
 from synapse import Device
 import synapse.client.sftp as sftp
@@ -68,15 +70,10 @@ def add_commands(subparsers: argparse._SubParsersAction):
 
 def ls(args):
     console = Console()
-    password = find_password(args)
-    if password is None:
-        console.print(f"[bold red]Didnt find any password for {args.uri}[/bold red]")
+    connections = setup_connection(args.uri, args.username, args.password, args.env_file, args.forget_password, console)
+    if connections is None:
         return
-    with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
-        ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, password)
-    if ssh is None or sftp_conn is None:
-        console.print(f"[bold red]Failed to connect to {args.uri}[/bold red]")
-        return
+    ssh, sftp_conn = connections
     console.print(f"\n[bold blue]Listing directory:[/bold blue] [yellow]{args.path}[/yellow]\n")
 
     try:
@@ -89,16 +86,11 @@ def ls(args):
 
 def get(args):
     console = Console()
-    password = find_password(args)
-    if password is None:
-        console.print(f"[bold red]Didnt find any password for {args.uri}[/bold red]")
+    connections = setup_connection(args.uri, args.username, args.password, args.env_file, args.forget_password, console)
+    if connections is None:
         return
-    with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
-        ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, password)
-    if ssh is None or sftp_conn is None:
-        console.print(f"[bold red]Failed to connect to {args.uri}[/bold red]")
-        return
-    
+    ssh, sftp_conn = connections
+
     if args.recursive:
         get_dir(sftp_conn, args.remote_path, args.output_path, console)
     else:  
@@ -108,18 +100,37 @@ def get(args):
 
 def rm(args):
     console = Console()
-    password = find_password(args)
-    if password is None:
-        console.print(f"[bold red]Didnt find any password for {args.uri}[/bold red]")
+    connections = setup_connection(args.uri, args.username, args.password, args.env_file, args.forget_password, console)
+    if connections is None:
         return
-    with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
-        ssh, sftp_conn = sftp.connect_sftp(args.uri, args.username, password) 
-    if ssh is None or sftp_conn is None:
-        console.print(f"[bold red]Failed to connect to {args.uri}[/bold red]")
-        return
+    ssh, sftp_conn = connections
     
     remove_file(sftp_conn, args.path, args.recursive, console)
     sftp.close_sftp(ssh, sftp_conn)
+
+def setup_connection(uri: str, username: str, password: str, env_file: str, forget_password: bool,
+                     console: Console) -> Optional[tuple[paramiko.SSHClient, paramiko.SFTPClient]]:
+    dev_name = Device(uri).get_name()
+    password = find_password(password, dev_name, env_file) # Check if password is provided or stored in env file
+    if password is None:
+        console.print(f"[bold red]Didnt find any password for {uri}[/bold red]")
+        return
+    
+    # Open SFTP connection
+    with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
+        try:
+            ssh, sftp_conn = sftp.connect_sftp(uri, username, password)
+        except paramiko.ssh_exception.AuthenticationException:
+            console.print(f"[bold red]Authentication failed for {uri}[/bold red]")
+            console.print(f"[yellow] Incorrect username or password.")
+            return None
+    if ssh is None or sftp_conn is None:
+        console.print(f"[bold red]Failed to connect to {uri}[/bold red]")
+        return
+    # If the connection is successful, we can prompt the user if they want to save the password
+    if not forget_password and dev_name is not None:
+        save_password(password, env_file, dev_name)
+    return ssh, sftp_conn
 
 def print_file_list(files: list[paramiko.SFTPAttributes], console: Console):
     # Sort files: directories first, then by name
@@ -261,41 +272,55 @@ def remove_file(sftp_conn: paramiko.SFTPClient, remote_path: str, recursive: boo
 
     console.print(f"[bold green]File removed:[/bold green] [blue]{remote_path}")
 
-def find_password(args):
+def find_password(input_password: Optional[str], dev_name: Optional[str], env_file: Optional[str]):
     password = None
-    if args.password is not None:
-        password = args.password
-        if args.env_file is not None and not args.forget_password:
-            info = Device(args.uri).info()
-            dev_name = info.name if info else None
-            if dev_name is None:
-                return password
-            if load_pass_from_env_file(args.env_file, dev_name) is None:
-                store_pass_to_env_file(args.env_file, dev_name, password)
+    if input_password is not None:
+        return input_password
+    elif env_file is not None and dev_name is not None:
+        if os.path.exists(env_file):
+            password = load_pass_from_env_file(env_file, dev_name)
             return password
-    elif args.env_file is not None:
-        info = Device(args.uri).info()
-        dev_name = info.name if info else None
-        if dev_name is None:
-            return None
-        password = load_pass_from_env_file(args.env_file, dev_name)
-        return password
-            
-def load_pass_from_env_file(env_file: str, device_name: str) -> str:
-    try:
-        with open(env_file, "r") as f:
-            lines = f.readlines()
-        for line in lines:
-            if line.startswith(f"{device_name}="):
-                return line.split("=")[1].strip()
-    except Exception as e:
-        print(f"Couldnt read env file at: {env_file}. {e}")
-    print(f"Couldnt find password for {device_name} in env file")
+    
     return None
 
-def store_pass_to_env_file(env_file: str, device_name: str, password: str):
+def save_password(password: str, env_file: str, device_name: str):
+    if env_file is None or device_name is None or password is None:
+        return
+    if os.path.exists(env_file): 
+        if load_pass_from_env_file(env_file, device_name) is not None:
+            return
+    
+    save_pass = Confirm.ask(f"Save password for {device_name} in {env_file}?")
+    if not save_pass:
+        return
+    store_pass_to_env_file(env_file, device_name, password)
+
+def load_pass_from_env_file(env_file: str, device_name: str) -> Optional[str]:
     try:
-        with open(env_file, "a") as f:
-            f.write(f"{device_name}={password}\n")
+        with open(env_file, "r") as f:
+            env_loaded = yaml.safe_load(f)
+            if env_loaded is None:
+                return None
+            if "sftp_passwords" not in env_loaded:
+                return None
+            passwords = env_loaded.get("sftp_passwords", {})
+            if device_name in passwords:
+                return passwords[device_name]
+            else:
+                return None
     except Exception as e:
         print(f"Couldnt read env file at: {env_file}. {e}")
+    return None
+
+# Store password to the .env file in yaml format
+def store_pass_to_env_file(env_file: str, device_name: str, password: str):
+    try: 
+        with open(env_file, "rw", encoding="utf8") as f:
+            prev_env = yaml.safe_load(f)
+            passwords = prev_env.get("sftp_passwords", {})
+            passwords[device_name] = password
+            prev_env["sftp_passwords"] = passwords
+            yaml.dump(prev_env, f, default_flow_style=False)
+    except Exception as e:
+        print(f"Failed to store pass to env file at: {env_file}. {e}")
+
