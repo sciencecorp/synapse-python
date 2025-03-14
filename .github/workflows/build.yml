@@ -29,7 +29,7 @@ on:
         description: 'Runner operating systems'
         required: false
         type: string
-        default: '["ubuntu-latest", "ubuntu-24.04-arm", "windows-latest", "macos-13", "macos-latest"]'
+        default: '["ubuntu-latest", "ubuntu-24.04-arm", "macos-13", "macos-latest"]'
 
 jobs:
   build_wheels:
@@ -48,12 +48,22 @@ jobs:
 
       - name: Update package name in setup.py and cli
         if: ${{ inputs.package-name != 'science-synapse' }}
+        shell: bash
         run: |
-          if [ -f "setup.py" ]; then
-            sed -i "s/science-synapse/${{ inputs.package-name }}/g" setup.py
-          fi
-          if [ -f "synapse/cli/__main__.py" ]; then
-            sed -i "s/science-synapse/${{ inputs.package-name }}/g" synapse/cli/__main__.py
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            if [ -f "setup.py" ]; then
+              sed -i "s/science-synapse/${{ inputs.package-name }}/g" setup.py
+            fi
+            if [ -f "synapse/cli/__main__.py" ]; then
+              sed -i "s/science-synapse/${{ inputs.package-name }}/g" synapse/cli/__main__.py
+            fi
+          else
+            if [ -f "setup.py" ]; then
+              sed -i '' "s/science-synapse/${{ inputs.package-name }}/g" setup.py
+            fi
+            if [ -f "synapse/cli/__main__.py" ]; then
+              sed -i '' "s/science-synapse/${{ inputs.package-name }}/g" synapse/cli/__main__.py
+            fi
           fi
 
       - name: Install cibuildwheel
