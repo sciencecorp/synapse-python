@@ -1,10 +1,35 @@
 name: build
 
 on:
-  pull_request:
-  push:
-    tags:
-      - 'v*'
+  workflow_call:
+    inputs:
+      registry-name:
+        description: 'Name of the registry (e.g., pypi, testpypi)'
+        required: true
+        type: string
+      registry-url:
+        description: 'URL of the registry'
+        required: true
+        type: string
+      package-name:
+        description: 'Name of the package'
+        required: true
+        type: string
+      python-versions:
+        description: 'Python versions to build for'
+        required: false
+        type: string
+        default: |
+          3.9
+          3.10
+          3.11
+          3.12
+          3.13
+      runner-os:
+        description: 'Runner operating systems'
+        required: false
+        type: string
+        default: '["ubuntu-latest", "ubuntu-24.04-arm", "windows-latest", "macos-13", "macos-latest"]'
 
 jobs:
   build_wheels:
@@ -12,12 +37,24 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-13, macos-latest]
+        os: ${{ fromJson(inputs.runner-os) }}
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-versions }}
+
+      - name: Update package name in setup.py and cli
+        if: ${{ inputs.package-name != 'science-synapse' }}
+        run: |
+          if [ -f "setup.py" ]; then
+            sed -i "s/science-synapse/${{ inputs.package-name }}/g" setup.py
+          fi
+          if [ -f "synapse/cli/__main__.py" ]; then
+            sed -i "s/science-synapse/${{ inputs.package-name }}/g" synapse/cli/__main__.py
+          fi
 
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==2.22.0
@@ -27,32 +64,31 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          name: cibw-wheels-${{ inputs.package-name }}-${{ matrix.os }}-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
 
   publish:
-    name: Upload wheels to PyPI
+    name: Upload wheels to ${{ inputs.registry-name }}
     needs: [build_wheels]
     runs-on: ubuntu-latest
     environment:
-      name: testpypi
-      url: https://testpypi.org/p/science-synapse
+      name: ${{ inputs.registry-name }}
+      url: ${{ inputs.registry-url }}/${{ inputs.package-name }}
     permissions:
       id-token: write
-    if: false
     # if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: cibw-wheels-*
+          pattern: cibw-wheels-${{ inputs.package-name }}*
           path: dist
           merge-multiple: true
 
       - name: List wheels
         run: ls -la dist/
 
-      - name: Publish package distributions to PyPI
+      - name: Publish package distributions to ${{ inputs.registry-name }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          repository-url: https://test.pypi.org/legacy/
+          repository-url: ${{ inputs.registry-url }}
