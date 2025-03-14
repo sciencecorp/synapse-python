@@ -41,7 +41,7 @@ setup(
     install_requires=[
         "coolname",
         "grpcio-tools",
-        "protoletariat",
+        "protoletariat", 
         "numpy >=2.0.0",
         "pyserial",
         "scipy",
