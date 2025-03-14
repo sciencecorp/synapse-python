@@ -197,7 +197,9 @@ def read(args):
         return
     runtime_config = device_info_after_config.configuration
     runtime_config_json = MessageToJson(
-        runtime_config, always_print_fields_with_no_presence=True
+        runtime_config,
+        always_print_fields_with_no_presence=True,
+        preserving_proto_field_name=True,
     )
     output_config_path = os.path.join(output_base, "runtime_config.json")
     with open(output_config_path, "w") as f:
