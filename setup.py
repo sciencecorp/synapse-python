@@ -26,7 +26,7 @@ extensions = [
 
 setup(
     name="science-synapse",
-    version="0.11.0",
+    version="0.11.0-rc.0",
     description="Client library and CLI for the Synapse API",
     author="Science Team",
     author_email="team@science.xyz",
@@ -41,7 +41,7 @@ setup(
     install_requires=[
         "coolname",
         "grpcio-tools",
-        "protoletariat",
+        "protoletariat", 
         "numpy >=2.0.0",
         "pyserial",
         "scipy",
