@@ -15,7 +15,6 @@ dependencies = [
     "grpcio-tools>=1.71.0",
     "numpy>=2.0.0",
     "pandas>=2.2.0",
-    "pre-commit>=4.1.0",
     "protobuf>=5.29",
     "protoletariat>=3.3.9",
     "pyqt5>=5.15.11",
@@ -35,6 +34,7 @@ build-backend = "setuptools.build_meta"
 [dependency-groups]
 dev = [
     "ruff>=0.9.10",
+    "pre-commit>=4.1.0",
 ]
 
 [project.scripts]

@@ -972,7 +972,6 @@ dependencies = [
     { name = "numpy", version = "2.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "numpy", version = "2.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "pandas" },
-    { name = "pre-commit" },
     { name = "protobuf" },
     { name = "protoletariat" },
     { name = "pyqt5" },
@@ -988,6 +987,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pre-commit" },
     { name = "ruff" },
 ]
 
@@ -1001,7 +1001,6 @@ requires-dist = [
     { name = "grpcio-tools", specifier = ">=1.71.0" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "pandas", specifier = ">=2.2.0" },
-    { name = "pre-commit", specifier = ">=4.1.0" },
     { name = "protobuf", specifier = ">=5.29" },
     { name = "protoletariat", specifier = ">=3.3.9" },
     { name = "pyqt5", specifier = ">=5.15.11" },
@@ -1015,7 +1014,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.9.10" }]
+dev = [
+    { name = "pre-commit", specifier = ">=4.1.0" },
+    { name = "ruff", specifier = ">=0.9.10" },
+]
 
 [[package]]
 name = "scipy"
