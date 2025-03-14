@@ -95,12 +95,16 @@ class Device(object):
         assert isinstance(config, Config), "config must be an instance of Config"
 
         config.set_device(self)
-        try:
+        try:    
             response = self.rpc.Configure(config.to_proto())
             return response
         except grpc.RpcError as e:
             self.logger.error("Error: %s", e.details())
             return None
+    
+    def get_name(self) -> Optional[str]:
+        info = self.info()
+        return info.name if info else None
 
     def get_logs(
         self,
