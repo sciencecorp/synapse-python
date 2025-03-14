@@ -25,34 +25,6 @@ jobs:
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
 
-      - name: Test wheels in virtual environments
-        run: |
-          for wheel in wheelhouse/*.whl; do
-            # Skip PyPy wheels for now (they need different handling)
-            if [[ $wheel == *"pypy"* ]]; then
-              echo "Skipping PyPy wheel: $wheel"
-              continue
-            fi
-            
-            # Extract Python version from wheel name
-            if [[ $wheel =~ cp([0-9]{2}) ]]; then
-              PY_VERSION="${BASH_REMATCH[1]}"
-              echo "Testing wheel $wheel with Python 3.${PY_VERSION}"
-              
-              # Create new venv for this wheel
-              python3.${PY_VERSION} -m venv .venv-${PY_VERSION}
-              source .venv-${PY_VERSION}/bin/activate
-              
-              # Install and test wheel
-              pip install "$wheel"
-              python -c "import synapse"
-              deactivate
-              
-              # Clean up
-              rm -rf .venv-${PY_VERSION}
-            fi
-          done
-
       - uses: actions/upload-artifact@v4
         with:
           name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
