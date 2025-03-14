@@ -2,7 +2,7 @@
 import argparse
 import logging
 from importlib import metadata
-from synapse.cli import discover, rpc, scifi_wifi_config, streaming, offline_plot
+from synapse.cli import discover, rpc, streaming, offline_plot
 
 
 def main():
@@ -33,7 +33,6 @@ def main():
 
     discover.add_commands(subparsers)
     rpc.add_commands(subparsers)
-    scifi_wifi_config.add_commands(subparsers)
     streaming.add_commands(subparsers)
     offline_plot.add_commands(subparsers)
     args = parser.parse_args()
