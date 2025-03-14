@@ -1,10 +1,14 @@
+from typing import AsyncGenerator, Optional, Union
 import grpc
 from google.protobuf.empty_pb2 import Empty
 import logging
+from datetime import datetime
 
+from synapse.api.logging_pb2 import LogQueryResponse, LogQueryRequest, LogLevel, TailLogsRequest
 from synapse.api.status_pb2 import StatusCode, Status
 from synapse.api.synapse_pb2_grpc import SynapseDeviceStub
 from synapse.client.config import Config
+from synapse.utils.logging import log_level_to_pb
 
 DEFAULT_SYNAPSE_PORT = 647
 
@@ -86,7 +90,7 @@ class Device(object):
         except grpc.RpcError as e:
             self.logger.error("Error: %s", e.details())
         return False
-    
+
     def configure_with_status(self, config: Config) -> Status:
         assert isinstance(config, Config), "config must be an instance of Config"
 
@@ -94,6 +98,64 @@ class Device(object):
         try:
             response = self.rpc.Configure(config.to_proto())
             return response
+        except grpc.RpcError as e:
+            self.logger.error("Error: %s", e.details())
+            return None
+
+    def get_logs(
+        self,
+        log_level: Union[str, LogLevel] = "INFO",
+        since_ms: Optional[int] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
+    ) -> Optional[LogQueryResponse]:
+        try:
+            request = LogQueryRequest()
+            request.min_level = log_level_to_pb(log_level)
+
+            if since_ms is not None:
+                request.since_ms = since_ms
+            else:
+                if start_time:
+                    request.start_time_ns = int(start_time.timestamp() * 1e9)
+                if end_time:
+                    request.end_time_ns = int(end_time.timestamp() * 1e9)
+
+            response = self.rpc.GetLogs(request)
+            return response
+        except grpc.RpcError as e:
+            self.logger.error("Error: %s", e.details())
+            return None
+
+    def get_logs_with_status(
+        self,
+        log_level: Union[str, LogLevel] = LogLevel.LOG_LEVEL_INFO,
+        since_ms: Optional[int] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
+    ) -> Optional[Status]:
+        try:
+            request = LogQueryRequest()
+            request.min_level = log_level_to_pb(log_level)
+
+            if since_ms is not None:
+                request.since_ms = since_ms
+            else:
+                if start_time:
+                    request.start_time_ns = int(start_time.timestamp() * 1e9)
+                if end_time:
+                    request.end_time_ns = int(end_time.timestamp() * 1e9)
+
+            return self.rpc.GetLogs(request)
+        except grpc.RpcError as e:
+            self.logger.error("Error: %s", e.details())
+            return None
+
+    def tail_logs(self, log_level: Union[str, LogLevel] = LogLevel.LOG_LEVEL_INFO) -> AsyncGenerator[LogQueryResponse, None]:
+        try:
+            request = TailLogsRequest()
+            request.min_level = log_level_to_pb(log_level)
+            return self.rpc.TailLogs(request)
         except grpc.RpcError as e:
             self.logger.error("Error: %s", e.details())
             return None
