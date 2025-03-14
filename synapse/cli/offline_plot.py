@@ -109,7 +109,7 @@ def load_config(json_path):
 
             electrode_config = recording_config["signal"]["electrode"]
             num_channels = len(electrode_config["channels"])
-            channel_ids = [channel["id"] for channel in electrode_config["channels"]]
+            channel_ids = [channel.get("id", 0) for channel in electrode_config["channels"]]
             return sampling_freq, num_channels, channel_ids
 
     raise ValueError("Invalid JSON: No 'kElectricalBroadband' node found")
@@ -244,9 +244,7 @@ def plot(args):
 
     # Create a curve for each channel
     for i, channel_id in enumerate(channel_ids):
-        final_data = (
-            data.iloc[:, i].to_numpy() - offset * i
-        )  # Convert Series to NumPy array
+        final_data = data.iloc[:, i].to_numpy().astype(np.float32) - offset * i
 
         if len(time_arr) != len(final_data):
             logger.error(
