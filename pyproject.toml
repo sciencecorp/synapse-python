@@ -32,6 +32,11 @@ dependencies = [
 requires = ["setuptools", "wheel", "Cython", "crcmod"]
 build-backend = "setuptools.build_meta"
 
+[dependency-groups]
+dev = [
+    "ruff>=0.9.10",
+]
+
 [project.scripts]
 synapsectl = "synapse.cli:main"
 synapse-sim = "synapse.simulator:main"
