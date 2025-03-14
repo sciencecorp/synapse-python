@@ -13,4 +13,3 @@ generate:
 .PHONY: test
 test:
 	./setup.sh test
-	
