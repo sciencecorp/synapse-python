@@ -1,6 +1,5 @@
-from setuptools import setup, find_packages, Extension
+from setuptools import setup, Extension
 from Cython.Build import cythonize
-from pathlib import Path
 import os
 
 extra_compile_args = []
