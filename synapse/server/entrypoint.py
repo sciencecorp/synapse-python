@@ -101,6 +101,7 @@ async def async_main(args, node_object_map, peripherals):
             args.name,
             args.serial,
             args.rpc_port,
+            args.iface_ip,
             node_object_map,
             peripherals,
         )
