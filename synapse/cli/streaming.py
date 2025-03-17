@@ -229,6 +229,7 @@ def read(args):
     if args.plot:
         threads.append(
             threading.Thread(target=_plot_data, args=(stop, plot_q, runtime_config))
+        )
 
     for thread in threads:
         thread.start()
