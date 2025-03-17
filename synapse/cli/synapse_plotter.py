@@ -6,11 +6,17 @@ import numpy as np
 
 
 class SynapsePlotter:
-    def __init__(self, num_channels: int, sample_rate: int, window_size: int):
-        self.num_channels = num_channels
+    def __init__(self, sample_rate: int, window_size: int, channel_ids):
+        self.num_channels = len(channel_ids)
         self.sample_rate_hz = sample_rate
         self.window_size_seconds = window_size
         self.buffer_size = self.sample_rate_hz * self.window_size_seconds
+        self.channel_ids = channel_ids
+
+        # Create a mapping from channel ID to buffer index
+        self.channel_to_index = {
+            ch_id: idx for idx, ch_id in enumerate(self.channel_ids)
+        }
 
         # One ring buffer (of length BUFFER_SIZE) per channel
         self.data_buffers = [
@@ -27,7 +33,8 @@ class SynapsePlotter:
         self.buffer_positions = [0] * self.num_channels
 
         # Track which channel to display in the "zoom" (single channel) plot
-        self.selected_channel = 0
+        self.selected_channel_idx = 0
+        self.selected_channel_id = self.channel_ids[0]
 
         # Track start time for display
         self.start_time = None
@@ -57,8 +64,8 @@ class SynapsePlotter:
         ):
             dpg.add_text("Select Channel to Zoom:")
             dpg.add_combo(
-                items=[str(i) for i in range(self.num_channels)],
-                default_value=str(self.selected_channel),
+                items=[str(ch_id) for ch_id in self.channel_ids],
+                default_value=str(self.selected_channel_id),
                 callback=self.channel_selection_callback,
                 tag="channel_combo",
                 width=80,
@@ -121,12 +128,12 @@ class SynapsePlotter:
 
                         # Create line series for each channel
                         self.lines_all = []
-                        for ch in range(self.num_channels):
-                            line_tag = f"all_line_ch{ch}"
+                        for idx, ch_id in enumerate(self.channel_ids):
+                            line_tag = f"all_line_ch{ch_id}"
                             line = dpg.add_line_series(
                                 [],
                                 [],
-                                label=f"Ch {ch}",
+                                label=f"Ch {ch_id}",
                                 parent=self.y_axis_all,
                                 tag=line_tag,
                             )
@@ -152,14 +159,17 @@ class SynapsePlotter:
                         dpg.add_line_series(
                             [],
                             [],
-                            label="Zoomed Channel",
+                            label=f"Channel {self.selected_channel_id}",
                             parent=self.y_axis_zoom,
                             tag="zoomed_line",
                         )
 
     def channel_selection_callback(self, sender, app_data, user_data):
         """Called when user picks a channel from the combo."""
-        self.selected_channel = int(app_data)
+        self.selected_channel_id = int(app_data)
+        self.selected_channel_idx = self.channel_to_index[self.selected_channel_id]
+        # Update the label of the zoomed line
+        dpg.configure_item("zoomed_line", label=f"Channel {self.selected_channel_id}")
 
     def set_zoom_y_min(self, sender, app_data):
         self.zoom_y_min = app_data
@@ -215,11 +225,11 @@ class SynapsePlotter:
         # -----------------------------
         # Update "All Channels" Plot
         # -----------------------------
-        for ch in range(self.num_channels):
-            pos = self.buffer_positions[ch]
+        for idx, ch_id in enumerate(self.channel_ids):
+            pos = self.buffer_positions[idx]
 
             # Roll data so that index -1 corresponds to the newest sample
-            rolled_y = np.roll(self.data_buffers[ch], -pos)
+            rolled_y = np.roll(self.data_buffers[idx], -pos)
             rolled_x = np.roll(self.time_buffer, -pos)
 
             # Downsample
@@ -227,19 +237,19 @@ class SynapsePlotter:
             ds_y = rolled_y[::ds_factor]
 
             # Apply vertical offset for each channel to avoid overlap
-            offset = ch * 1000
+            offset = idx * self.signal_separation
             ds_y_offset = ds_y + offset
 
             # Update the line series for channel ch
-            dpg.set_value(self.lines_all[ch], [ds_x.tolist(), ds_y_offset.tolist()])
+            dpg.set_value(self.lines_all[idx], [ds_x.tolist(), ds_y_offset.tolist()])
 
         # -----------------------------
         # Update Zoomed Channel Plot
         # -----------------------------
-        ch = self.selected_channel
-        pos = self.buffer_positions[ch]
+        idx = self.selected_channel_idx
+        pos = self.buffer_positions[idx]
 
-        rolled_y_ch = np.roll(self.data_buffers[ch], -pos)
+        rolled_y_ch = np.roll(self.data_buffers[idx], -pos)
         rolled_x_ch = np.roll(self.time_buffer, -pos)
 
         ds_x_ch = rolled_x_ch[::ds_factor]
@@ -249,7 +259,6 @@ class SynapsePlotter:
         dpg.set_value("zoomed_line", [ds_x_ch.tolist(), ds_y_ch.tolist()])
 
         # Optionally set the zoomed plot Y-axis range for a closer look
-        # For example, if data in each channel is in [0..4096]:
         dpg.set_axis_limits("y_axis_zoom", self.zoom_y_min, self.zoom_y_max)
 
         # -----------------------------
@@ -264,22 +273,30 @@ class SynapsePlotter:
         data = (channel, samples)
         Write these samples into the ring buffer for that channel.
         """
-        channel, samples = data
+        channel_id, samples = data
+        if channel_id not in self.channel_to_index:
+            print(
+                f"Warning: Received data for channel {channel_id} which is not in the configured channel list."
+            )
+            return
+
+        # Get our channel id mapped to our plotting index
+        idx = self.channel_to_index[channel_id]
         num_samples = len(samples)
-        pos = self.buffer_positions[channel]
+        pos = self.buffer_positions[idx]
 
         end_pos = pos + num_samples
         if end_pos <= self.buffer_size:
             # Simple case: fits without wrap
-            self.data_buffers[channel][pos:end_pos] = samples
+            self.data_buffers[idx][pos:end_pos] = samples
         else:
             # Wrap around case
             first_part = self.buffer_size - pos
             second_part = num_samples - first_part
-            self.data_buffers[channel][pos:] = samples[:first_part]
-            self.data_buffers[channel][:second_part] = samples[first_part:]
+            self.data_buffers[idx][pos:] = samples[:first_part]
+            self.data_buffers[idx][:second_part] = samples[first_part:]
 
-        self.buffer_positions[channel] = (pos + num_samples) % self.buffer_size
+        self.buffer_positions[idx] = (pos + num_samples) % self.buffer_size
 
     def start(self, stop, data_queue):
         """Run the DearPyGui event/render loop."""
@@ -317,8 +334,8 @@ def plot_synapse_data(
     stop: Event,
     data_queue: queue.Queue,
     sample_rate_hz: int,
-    num_channels: int,
     window_size_seconds: int,
+    channel_ids,
 ):
-    plotter = SynapsePlotter(num_channels, sample_rate_hz, window_size_seconds)
+    plotter = SynapsePlotter(sample_rate_hz, window_size_seconds, channel_ids)
     plotter.start(stop, data_queue)
