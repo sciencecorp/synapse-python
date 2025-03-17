@@ -3,6 +3,7 @@ import paramiko
 import argparse
 import stat
 import yaml
+import getpass
 from typing import Optional
 import paramiko.ssh_exception
 from rich.console import Console
@@ -25,12 +26,6 @@ def add_user_arguments(parser: argparse.ArgumentParser):
         type=str,
         default=SCIFI_DEFAULT_SFTP_USER,
         help="Username for SFTP connection",
-    )
-    parser.add_argument(
-        "--password",
-        "-p",
-        type=str,
-        help="Password for SFTP connection",
     )
     parser.add_argument(
         "--env-file",
@@ -98,7 +93,6 @@ def ls(args):
     connections = setup_connection(
         args.uri,
         args.username,
-        args.password,
         args.env_file,
         args.forget_password,
         console,
@@ -124,7 +118,6 @@ def get(args):
     connections = setup_connection(
         args.uri,
         args.username,
-        args.password,
         args.env_file,
         args.forget_password,
         console,
@@ -146,7 +139,6 @@ def rm(args):
     connections = setup_connection(
         args.uri,
         args.username,
-        args.password,
         args.env_file,
         args.forget_password,
         console,
@@ -162,14 +154,13 @@ def rm(args):
 def setup_connection(
     uri: str,
     username: str,
-    password: str,
     env_file: str,
     forget_password: bool,
     console: Console,
 ) -> Optional[tuple[paramiko.SSHClient, paramiko.SFTPClient]]:
     dev_name = Device(uri).get_name()
     password = find_password(
-        password, dev_name, env_file
+        dev_name, env_file
     )  # Check if password is provided or stored in env file
     if password is None:
         console.print(f"[bold red]Didnt find any password for {uri}[/bold red]")
@@ -361,18 +352,15 @@ def remove_file(
     console.print(f"[bold green]File removed:[/bold green] [blue]{remote_path}")
 
 
-def find_password(
-    input_password: Optional[str], dev_name: Optional[str], env_file: Optional[str]
-):
+def find_password(dev_name: Optional[str], env_file: Optional[str]):
     password = None
-    if input_password is not None:
-        return input_password
-    elif env_file is not None and dev_name is not None:
+    if env_file is not None and dev_name is not None:
         if os.path.exists(env_file):
             password = load_pass_from_env_file(env_file, dev_name)
-            return password
-
-    return None
+            if password is not None:
+                return password
+    password = getpass.getpass("Enter password: ")
+    return password
 
 
 def save_password(password: str, env_file: str, device_name: str):
@@ -409,12 +397,14 @@ def load_pass_from_env_file(env_file: str, device_name: str) -> Optional[str]:
 # Store password to the .env file in yaml format
 def store_pass_to_env_file(env_file: str, device_name: str, password: str):
     try:
-        with open(env_file, "w+", encoding="utf8") as f:
-            prev_env = yaml.safe_load(f)
-            prev_env = {} if prev_env is None else prev_env
-            passwords = prev_env.get("sftp_passwords", {})
-            passwords[device_name] = password
-            prev_env["sftp_passwords"] = passwords
+        prev_env = {}
+        if os.path.exists(env_file):
+            with open(env_file, "r") as f:
+                prev_env = yaml.safe_load(f) is not None
+        passwords = prev_env.get("sftp_passwords", {})
+        passwords[device_name] = password
+        prev_env["sftp_passwords"] = passwords
+        with open(env_file, "w", encoding="utf8") as f:
             yaml.dump(prev_env, f, default_flow_style=False)
     except Exception as e:
         print(f"Failed to store pass to env file at: {env_file}. {e}")
