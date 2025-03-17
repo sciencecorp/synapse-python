@@ -375,27 +375,34 @@ def _data_writer(stop, q, output_base):
 
 
 def _plot_data(stop, q, runtime_config):
+    """Plot streaming data from the synapse device."""
     # TODO(gilbert): Make these configurable
     window_size_seconds = 3
+
+    # Find the first broadband source node
+    broadband_nodes = [
+        node for node in runtime_config.nodes if node.type == NodeType.kBroadbandSource
+    ]
 
     # Make sure we have a broadband node
     # TODO(gilbert): We should be able to support binned spikes here too
     #                but will need a refactor
-    broadband_node = [
-        node for node in runtime_config.nodes if node.type == NodeType.kBroadbandSource
-    ]
-    if not broadband_node:
+    if not broadband_nodes:
         print("Could not find broadband source config. Cannot plot")
         return
-    broadband_source = broadband_node[0].broadband_source
+
+    broadband_source = broadband_nodes[0].broadband_source
     electrode_config = broadband_source.signal.electrode
+
     if not electrode_config:
         print(
             "Could not find an electrode configuration for broadband node. Cannot plot"
         )
         return
+
+    # Get configuration parameters
     sample_rate_hz = broadband_source.sample_rate_hz
-    channel_ids = []
-    for ch in electrode_config.channels:
-        channel_ids.append(ch.id)
+    channel_ids = [ch.id for ch in electrode_config.channels]
+
+    # Start the plotter
     plotter.plot_synapse_data(stop, q, sample_rate_hz, window_size_seconds, channel_ids)
