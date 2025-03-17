@@ -51,7 +51,8 @@ setup(
         "pyqt5",
         "pandas >=2.2.0",
         "dearpygui",
-        "pyzmq"
+        "pyzmq",
+        "paramiko >=3.5.1"
     ],
     entry_points={
         "console_scripts": [

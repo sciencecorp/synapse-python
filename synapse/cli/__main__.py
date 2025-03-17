@@ -2,7 +2,7 @@
 import argparse
 import logging
 from importlib import metadata
-from synapse.cli import discover, rpc, streaming, offline_plot
+from synapse.cli import discover, rpc, streaming, offline_plot, files
 
 
 def main():
@@ -35,6 +35,7 @@ def main():
     rpc.add_commands(subparsers)
     streaming.add_commands(subparsers)
     offline_plot.add_commands(subparsers)
+    files.add_commands(subparsers)
     args = parser.parse_args()
 
     if hasattr(args, "func"):
