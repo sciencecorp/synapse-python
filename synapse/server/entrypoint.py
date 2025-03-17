@@ -12,6 +12,7 @@ from synapse.server.rpc import serve
 from synapse.server.autodiscovery import BroadcastDiscoveryProtocol
 from synapse.server.nodes import SERVER_NODE_OBJECT_MAP
 
+logging.basicConfig(level=logging.INFO)
 
 ENTRY_DEFAULTS = {
     "iface_ip": None,
@@ -33,7 +34,7 @@ def main(
     )
     parser.add_argument(
         "--iface-ip",
-        help="IP of the network interface to use for multicast traffic",
+        help="IP of the network interface to use for streaming data",
         required=True,
     )
     parser.add_argument(
@@ -50,7 +51,7 @@ def main(
     )
     parser.add_argument(
         "--discovery-addr",
-        help="Multicast address to listen for discovery requests",
+        help="UDP address to listen for discovery requests",
         default=defaults["discovery_addr"],
     )
     parser.add_argument("--name", help="Device name", default=defaults["server_name"])
@@ -70,7 +71,7 @@ def main(
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((args.iface_ip, 8000))
         logging.info(f"Binding to {s.getsockname()[0]}...")
-    except Exception as e:
+    except Exception:
         parser.error("Invalid --iface-ip given, could not bind to interface")
     finally:
         s.close()

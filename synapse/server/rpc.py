@@ -15,13 +15,24 @@ from synapse.api.synapse_pb2_grpc import (
     SynapseDeviceServicer,
     add_SynapseDeviceServicer_to_server,
 )
-from synapse.utils.logging import StreamingLogHandler, init_file_handler, str_to_log_entry
+from synapse.utils.logging import (
+    StreamingLogHandler,
+    init_file_handler,
+    str_to_log_entry,
+)
 
 
 LOG_FILEPATH = str(Path.home() / ".science" / "synapse" / "logs" / "server.log")
 
+
 async def serve(
-    server_name, device_serial, rpc_port, iface_ip, node_object_map, peripherals, services: List[Callable[[str, grpc.aio.Server], None]] = []
+    server_name,
+    device_serial,
+    rpc_port,
+    iface_ip,
+    node_object_map,
+    peripherals,
+    services: List[Callable[[str, grpc.aio.Server], None]] = [],
 ) -> None:
     server = grpc.aio.server()
     add_SynapseDeviceServicer_to_server(
@@ -38,6 +49,7 @@ async def serve(
     await server.start()
     await server.wait_for_termination()
 
+
 class SynapseServicer(SynapseDeviceServicer):
     """Provides methods that implement functionality of a Synapse device server."""
 
@@ -49,7 +61,6 @@ class SynapseServicer(SynapseDeviceServicer):
     def __init__(self, name, serial, iface_ip, node_object_map, peripherals):
         self.name = name
         self.serial = serial
-        self.iface_ip = iface_ip
         self.node_object_map = node_object_map
         self.peripherals = peripherals
         self.logger = logging.getLogger("server")
@@ -160,7 +171,9 @@ class SynapseServicer(SynapseDeviceServicer):
     async def GetLogs(self, request, context):
         self.logger.info("GetLogs()")
         try:
-            min_level = request.min_level if request.min_level else LogLevel.LOG_LEVEL_INFO
+            min_level = (
+                request.min_level if request.min_level else LogLevel.LOG_LEVEL_INFO
+            )
             entries = []
 
             if request.since_ms:
@@ -169,15 +182,16 @@ class SynapseServicer(SynapseDeviceServicer):
                 end_time_ns = current_time_ns
             else:
                 start_time_ns = request.start_time_ns if request.start_time_ns else 0
-                end_time_ns = request.end_time_ns if request.end_time_ns else time.time_ns()
-
+                end_time_ns = (
+                    request.end_time_ns if request.end_time_ns else time.time_ns()
+                )
 
             if not Path(LOG_FILEPATH).exists():
                 self.logger.warning(f"Log file not found at {LOG_FILEPATH}")
-                await context.abort(grpc.StatusCode.NOT_FOUND, f"no log file found")
+                await context.abort(grpc.StatusCode.NOT_FOUND, "no log file found")
 
             try:
-                with open(LOG_FILEPATH, 'r') as f:
+                with open(LOG_FILEPATH, "r") as f:
                     for line in f:
                         try:
                             entry = str_to_log_entry(line)
@@ -190,13 +204,15 @@ class SynapseServicer(SynapseDeviceServicer):
                             if entry.level < min_level:
                                 continue
                             entries.append(entry)
-                        except Exception as e:
-                            self.logger.warning(f"failed to parse log line: {line} - skipping")
+                        except Exception:
+                            self.logger.warning(
+                                f"failed to parse log line: {line} - skipping"
+                            )
                             continue
 
             except FileNotFoundError:
                 self.logger.warning(f"Log file not found at {LOG_FILEPATH}")
-                await context.abort(grpc.StatusCode.UNKNOWN, f"failed to open log file")
+                await context.abort(grpc.StatusCode.UNKNOWN, "failed to open log file")
 
             return LogQueryResponse(entries=entries)
 
@@ -207,8 +223,10 @@ class SynapseServicer(SynapseDeviceServicer):
     async def TailLogs(self, request, context):
         self.logger.info("TailLogs()")
         try:
-            min_level = request.min_level if request.min_level else LogLevel.LOG_LEVEL_INFO
-            
+            min_level = (
+                request.min_level if request.min_level else LogLevel.LOG_LEVEL_INFO
+            )
+
             log_queue = asyncio.Queue(maxsize=100)
 
             def handle_log(record: str):
@@ -216,14 +234,14 @@ class SynapseServicer(SynapseDeviceServicer):
                     log_queue.put_nowait(record)
                 except asyncio.QueueFull:
                     self.logger.warning("Log queue full - dropping log")
-            
+
             self.active_streams.add(handle_log)
 
             try:
                 while True:
                     try:
                         formatted_record = await log_queue.get()
-                        
+
                         try:
                             entry = str_to_log_entry(formatted_record)
                             if not entry:
@@ -234,7 +252,9 @@ class SynapseServicer(SynapseDeviceServicer):
                             yield entry
 
                         except Exception as e:
-                            self.logger.warning(f"Failed to parse log record: {formatted_record} - {str(e)}")
+                            self.logger.warning(
+                                f"Failed to parse log record: {formatted_record} - {str(e)}"
+                            )
                             continue
 
                     except asyncio.CancelledError:
@@ -245,11 +265,13 @@ class SynapseServicer(SynapseDeviceServicer):
 
         except Exception as e:
             self.logger.error(f"Error tailing logs: {str(e)}")
-            await context.abort(grpc.StatusCode.UNKNOWN, f"failed to tail logs: {str(e)}")
+            await context.abort(
+                grpc.StatusCode.UNKNOWN, f"failed to tail logs: {str(e)}"
+            )
             return
 
     def __del__(self):
-        if hasattr(self, 'stream_handler'):
+        if hasattr(self, "stream_handler"):
             logging.getLogger().removeHandler(self.stream_handler)
 
     def _broadcast_log(self, formatted_record: str) -> None:
@@ -288,7 +310,7 @@ class SynapseServicer(SynapseDeviceServicer):
                 "Creating %s node(%d)" % (NodeType.Name(node.type), node.id)
             )
             node = self.node_object_map[node.type](node.id)
-            if node.type in [NodeType.kStreamOut, NodeType.kStreamIn]:
+            if node.type in [NodeType.kStreamIn]:
                 node.configure_iface_ip(self.iface_ip)
 
             status = node.configure(config)

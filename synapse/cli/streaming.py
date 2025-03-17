@@ -17,8 +17,10 @@ import synapse as syn
 import synapse.client.channel as channel
 import synapse.utils.ndtp_types as ndtp_types
 import synapse.cli.synapse_plotter as plotter
+from synapse.utils.packet_monitor import PacketMonitor
 
 from rich.console import Console
+from rich.live import Live
 from rich.pretty import pprint
 
 
@@ -76,9 +78,7 @@ def read(args):
             return
         else:
             console.print(f"[bold yellow]Overwriting existing files in {output_base}")
-
     device = syn.Device(args.uri, args.verbose)
-
     with console.status(
         "Reading from Synapse Device", spinner="bouncingBall", spinner_style="green"
     ) as status:
@@ -210,55 +210,50 @@ def read(args):
         if args.duration
         else "Streaming data indefinitely"
     )
-    with console.status(
-        status_title, spinner="bouncingBall", spinner_style="green"
-    ) as status:
-        q = queue.Queue()
-        plot_q = queue.Queue() if args.plot else None
+    console.print(status_title)
 
-        threads = []
-        stop = threading.Event()
-        if args.bin:
-            threads.append(
-                threading.Thread(
-                    target=_binary_writer, args=(stop, q, num_ch, output_base)
-                )
-            )
-        else:
-            threads.append(
-                threading.Thread(target=_data_writer, args=(stop, q, output_base))
-            )
+    q = queue.Queue()
+    plot_q = queue.Queue() if args.plot else None
 
-        if args.plot:
-            threads.append(
-                threading.Thread(target=_plot_data, args=(stop, plot_q, runtime_config))
-            )
+    threads = []
+    stop = threading.Event()
+    if args.bin:
+        threads.append(
+            threading.Thread(target=_binary_writer, args=(stop, q, num_ch, output_base))
+        )
+    else:
+        threads.append(
+            threading.Thread(target=_data_writer, args=(stop, q, output_base))
+        )
+
+    if args.plot:
+        threads.append(
+            threading.Thread(target=_plot_data, args=(stop, plot_q, runtime_config))
+        )
+
+    for thread in threads:
+        thread.start()
+
+    try:
+        read_packets(stream_out, q, plot_q, stop, args.duration)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        console.print("Stopping read...")
+        stop.set()
         for thread in threads:
-            thread.start()
+            thread.join()
 
-        try:
-            read_packets(stream_out, q, plot_q, args.duration)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            print("Stopping read...")
-            stop.set()
-            for thread in threads:
-                thread.join()
-
-            if args.config:
-                console.print("Stopping device...")
-                if not device.stop():
-                    console.print("[red]Failed to stop device")
-                console.print("Stopped")
+        if args.config:
+            console.print("Stopping device...")
+            if not device.stop():
+                console.print("[red]Failed to stop device")
+            console.print("Stopped")
 
     console.print("[bold green]Streaming complete")
     console.print("[cyan]================")
     console.print(f"[cyan]Output directory: {output_base}/")
-    if args.bin:
-        console.print(f"[cyan]{output_base}.dat")
-    else:
-        console.print(f"[cyan]{output_base}.jsonl")
+    console.print(f"[cyan]Run `synapsectl plot --dir {output_base}/` to plot the data")
     console.print("[cyan]================")
 
 
@@ -266,56 +261,38 @@ def read_packets(
     node: syn.StreamOut,
     q: queue.Queue,
     plot_q: queue.Queue,
+    stop,
     duration: Optional[int] = None,
     num_ch: int = 32,
 ):
-    packet_count = 0
-    seq_number = None
-    dropped_packets = 0
     start = time.time()
-    print_interval = 1000
 
-    print(
-        f"Reading packets for duration {duration} seconds"
-        if duration
-        else "Reading packets..."
-    )
+    # Keep track of our statistics
+    monitor = PacketMonitor()
+    monitor.start_monitoring()
 
-    while True:
-        header, data = node.read()
-        if not data:
-            continue
+    with Live(monitor.generate_stat_table(), refresh_per_second=4) as live:
+        while not stop.is_set():
+            read_ret = node.read()
+            if read_ret is None:
+                print("Could not get a valid read from the node")
+                continue
 
-        packet_count += 1
+            synapse_data, bytes_read = read_ret
+            if synapse_data is None or bytes_read == 0:
+                print("Could not read data from node")
+                continue
+            header, data = synapse_data
+            monitor.process_packet(header, data, bytes_read)
+            live.update(monitor.generate_stat_table())
 
-        # Detect dropped packets via seq_number
-        if seq_number is None:
-            seq_number = header.seq_number
-        else:
-            expected = (seq_number + 1) % (2**16)
-            if header.seq_number != expected:
-                print(f"Seq out of order: got {header.seq_number}, expected {expected}")
-                dropped_packets += header.seq_number - expected
-            seq_number = header.seq_number
+            # Always add the data to the writer queues
+            q.put(data)
+            if plot_q:
+                plot_q.put(copy.deepcopy(data))
 
-        # Always add the data to the writer queues
-        q.put(data)
-        if plot_q:
-            plot_q.put(copy.deepcopy(data))
-
-        if packet_count == 1:
-            print(f"First packet received at {time.time() - start:.2f} seconds")
-
-        if packet_count % print_interval == 0:
-            print(
-                f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)"
-            )
-        if duration and (time.time() - start) > duration:
-            break
-
-    print(
-        f"Recieved {packet_count} packets in {time.time() - start} seconds. Dropped {dropped_packets} packets ({(dropped_packets / packet_count) * 100}%)"
-    )
+            if duration and (time.time() - start) > duration:
+                break
 
 
 def _binary_writer(stop, q, num_ch, output_base):

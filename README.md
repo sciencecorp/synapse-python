@@ -42,12 +42,12 @@ And a toy device `synapse-sim` for local development,
 
     options:
     -h, --help            show this help message and exit
-    --iface-ip IFACE_IP   IP of the network interface to use for multicast traffic
+    --iface-ip IFACE_IP   IP of the network interface to use for streaming data
     --rpc-port RPC_PORT   Port to listen for RPC requests
     --discovery-port DISCOVERY_PORT
                             Port to listen for discovery requests
     --discovery-addr DISCOVERY_ADDR
-                            Multicast address to listen for discovery requests
+                            UDP address to listen for discovery requests
     --name NAME           Device name
     --serial SERIAL       Device serial number
     -v, --verbose         Enable verbose output
