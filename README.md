@@ -156,15 +156,11 @@ For an example, see the [Blackrock Neurotech CerePlex driver](https://github.com
 
 ## Building
 
-Dependencies:
-
-    git submodule update --init
-    pip install -r requirements.txt
-    make
-
 To build and install in development mode:
 
+    git submodule update --init
     pip install -e .
+    make
 
 To build and install a wheel:
 
@@ -174,6 +170,13 @@ To build and install a wheel:
     pip install dist/science_synapse-*.whl
 
 ## Development
+
+It is highly recommened setting up a [virtual python environment](https://docs.python.org/3/library/venv.html) if you are actively developing this repo:
+```bash
+python -m venv .venv
+
+source .venv/bin/activate
+```
 
 If you want to catch linting errors before pushing, you can install a pre-commit hook.
 
