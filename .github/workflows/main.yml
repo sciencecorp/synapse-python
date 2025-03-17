@@ -35,7 +35,7 @@ jobs:
 
       - name: Run tests with pytest
         run: |
-          pytest -v
+          uv run pytest -v
 
   test-examples:
     runs-on: ubuntu-latest
