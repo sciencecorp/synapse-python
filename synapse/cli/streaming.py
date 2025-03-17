@@ -95,8 +95,6 @@ def read(args):
 
     status.update("Loading recording configuration")
 
-    # Keep track of the sample rate in case we need to plot
-    sample_rate_hz = 32000
     if args.config:
         config = load_config_from_file(args.config)
         if not config:
@@ -169,7 +167,6 @@ def read(args):
             (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
         )
         assert broadband is not None, "No BroadbandSource node found in config"
-        sample_rate_hz = broadband.sample_rate_hz
 
     else:
         # TODO(gilbert): Get rid of this giant if-else block
@@ -234,9 +231,7 @@ def read(args):
 
         if args.plot:
             threads.append(
-                threading.Thread(
-                    target=_plot_data, args=(stop, plot_q, sample_rate_hz, num_ch)
-                )
+                threading.Thread(target=_plot_data, args=(stop, plot_q, runtime_config))
             )
         for thread in threads:
             thread.start()
@@ -379,9 +374,28 @@ def _data_writer(stop, q, output_base):
             continue
 
 
-def _plot_data(stop, q, sample_rate_hz, num_channels):
+def _plot_data(stop, q, runtime_config):
     # TODO(gilbert): Make these configurable
     window_size_seconds = 3
-    plotter.plot_synapse_data(
-        stop, q, sample_rate_hz, num_channels, window_size_seconds
-    )
+
+    # Make sure we have a broadband node
+    # TODO(gilbert): We should be able to support binned spikes here too
+    #                but will need a refactor
+    broadband_node = [
+        node for node in runtime_config.nodes if node.type == NodeType.kBroadbandSource
+    ]
+    if not broadband_node:
+        print("Could not find broadband source config. Cannot plot")
+        return
+    broadband_source = broadband_node[0].broadband_source
+    electrode_config = broadband_source.signal.electrode
+    if not electrode_config:
+        print(
+            "Could not find an electrode configuration for broadband node. Cannot plot"
+        )
+        return
+    sample_rate_hz = broadband_source.sample_rate_hz
+    channel_ids = []
+    for ch in electrode_config.channels:
+        channel_ids.append(ch.id)
+    plotter.plot_synapse_data(stop, q, sample_rate_hz, window_size_seconds, channel_ids)
