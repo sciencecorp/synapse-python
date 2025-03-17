@@ -52,6 +52,7 @@ setup(
         "pandas >=2.2.0",
         "dearpygui",
         "pyzmq",
+        "pyyaml",
         "paramiko >=3.5.1"
     ],
     entry_points={
