@@ -15,6 +15,7 @@ pytest-asyncio
 dearpygui
 pyqtgraph
 pyqt5
+pyyaml
 pandas>=2.2.0
 protobuf>=5.29
 numpy >=2.0.0
