@@ -51,7 +51,7 @@ def setup_logging():
 
 
 # Function to load binary data produced by the stream recording
-def process_data(file_path, num_channels,logger):
+def process_data(file_path, num_channels, logger):
     _, file_extension = os.path.splitext(file_path)
 
     if file_extension in [".bin", ".dat"]:
@@ -64,11 +64,11 @@ def process_data(file_path, num_channels,logger):
         df = df.values.reshape(-1, num_channels)
 
         return pd.DataFrame(df)
-    
+
     if file_extension in [".jsonl"]:
         channel_data = {}
 
-        with open(file_path, 'r') as f:
+        with open(file_path, "r") as f:
             for line in f:
                 try:
                     json_obj = json.loads(line)  # Load JSON object (list)
@@ -79,18 +79,20 @@ def process_data(file_path, num_channels,logger):
                         channel_data[ch_id].extend(samples)
 
                 except (json.JSONDecodeError, ValueError, IndexError) as e:
-                    logger.error(f"Warning: Skipping malformed JSON line in {file_path} - {e}")
+                    logger.error(
+                        f"Warning: Skipping malformed JSON line in {file_path} - {e}"
+                    )
 
-        #sort dict by key
+        # sort dict by key
         channel_data = dict(sorted(channel_data.items()))
-        
+
         # Convert lists to numpy arrays
         min_val = min(len(samples) for samples in channel_data.values())
 
         # Truncate all channels to the length of the shortest channel
         for ch_id, samples in channel_data.items():
             channel_data[ch_id] = np.array(samples[:min_val])
-        
+
         return pd.DataFrame(channel_data)
 
     raise ValueError("Unsupported file format. Expected .bin, .dat, or .jsonl")
@@ -104,12 +106,18 @@ def load_config(json_path):
     nodes = config["nodes"]
     for node in nodes:
         if node["type"] == "kBroadbandSource":
-            recording_config = node["broadbandSource"]
-            sampling_freq = recording_config["sampleRateHz"]
+            recording_config = node.get("broadband_source", None)
+            if recording_config is None:
+                recording_config = node["broadbandSource"]
+            sampling_freq = recording_config.get("sample_rate_hz", None)
+            if sampling_freq is None:
+                sampling_freq = recording_config["sampleRateHz"]
 
             electrode_config = recording_config["signal"]["electrode"]
             num_channels = len(electrode_config["channels"])
-            channel_ids = [channel.get("id", 0) for channel in electrode_config["channels"]]
+            channel_ids = [
+                channel.get("id", 0) for channel in electrode_config["channels"]
+            ]
             return sampling_freq, num_channels, channel_ids
 
     raise ValueError("Invalid JSON: No 'kElectricalBroadband' node found")
@@ -156,7 +164,11 @@ def plot(args):
     if args.dir:
         # We expect there to be a .dat file and a .json file in the directory
         for file in os.listdir(args.dir):
-            if file.endswith(".dat") or file.endswith(".bin") or file.endswith(".jsonl"):
+            if (
+                file.endswith(".dat")
+                or file.endswith(".bin")
+                or file.endswith(".jsonl")
+            ):
                 data_file = os.path.join(args.dir, file)
             elif file.endswith(".json"):
                 config_file = os.path.join(args.dir, file)
@@ -173,7 +185,7 @@ def plot(args):
     logger.info(f"Loaded config with {num_channels} channels")
 
     # Load the data
-    data = process_data(data_file, num_channels,logger)
+    data = process_data(data_file, num_channels, logger)
     logger.info(f"Loaded data with {data.shape[1]} channels")
 
     # Setup the window for the plot
