@@ -21,23 +21,24 @@ dependencies = [
     "pyqt5>=5.15.11",
     "pyqtgraph>=0.13.7",
     "pyserial>=3.5",
-    "pytest>=8.3.5",
-    "pytest-asyncio>=0.25.3",
     "pyyaml>=6.0",
     "pyzmq>=26.3.0",
     "rich>=13.9.4",
     "scipy>=1.13.1",
 ]
 
-[build-system]
-requires = ["setuptools", "wheel", "Cython", "crcmod"]
-build-backend = "setuptools.build_meta"
-
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "ruff>=0.9.10",
     "pre-commit>=4.1.0",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.25.3",
 ]
+
+[build-system]
+requires = ["setuptools", "wheel", "Cython"]
+build-backend = "setuptools.build_meta"
+
 
 [project.scripts]
 synapsectl = "synapse.cli:main"
