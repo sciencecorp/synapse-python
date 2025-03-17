@@ -386,7 +386,14 @@ def load_pass_from_env_file(env_file: str, device_name: str) -> Optional[str]:
                 return None
             passwords = env_loaded.get("sftp_passwords", {})
             if device_name in passwords:
-                return passwords[device_name]
+                try:
+                    stored_pass = passwords[device_name]
+                    return stored_pass
+                except Exception:
+                    print(
+                        f"Couldnt read password for {device_name} from env file. Env file may be improperly formatted."
+                    )
+                    return None
             else:
                 return None
     except Exception as e:
@@ -407,5 +414,9 @@ def store_pass_to_env_file(env_file: str, device_name: str, password: str):
         prev_env["sftp_passwords"] = passwords
         with open(env_file, "w", encoding="utf8") as f:
             yaml.dump(prev_env, f, default_flow_style=False)
+    except TypeError:
+        print(
+            f"Failed to store pass to env file at: {env_file}. Env file may be improperly formatted."
+        )
     except Exception as e:
         print(f"Failed to store pass to env file at: {env_file}. {e}")
