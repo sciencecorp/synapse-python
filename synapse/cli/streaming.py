@@ -253,10 +253,7 @@ def read(args):
     console.print("[bold green]Streaming complete")
     console.print("[cyan]================")
     console.print(f"[cyan]Output directory: {output_base}/")
-    if args.bin:
-        console.print(f"[cyan]{output_base}.dat")
-    else:
-        console.print(f"[cyan]{output_base}.jsonl")
+    console.print(f"[cyan]Run `synapsectl plot --dir {output_base}/` to plot the data")
     console.print("[cyan]================")
 
 
