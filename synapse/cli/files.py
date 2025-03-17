@@ -411,6 +411,7 @@ def store_pass_to_env_file(env_file: str, device_name: str, password: str):
     try:
         with open(env_file, "w+", encoding="utf8") as f:
             prev_env = yaml.safe_load(f)
+            prev_env = {} if prev_env is None else prev_env
             passwords = prev_env.get("sftp_passwords", {})
             passwords[device_name] = password
             prev_env["sftp_passwords"] = passwords
