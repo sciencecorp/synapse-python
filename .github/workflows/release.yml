@@ -61,7 +61,7 @@ jobs:
         run: |
           # Get version from GitHub ref (removes 'refs/tags/v' prefix)
           VERSION=${GITHUB_REF_NAME#v}
-          pip install --index-url https://test.pypi.org/simple/ science-synapse==$VERSION
+          pip install --extra-index-url https://test.pypi.org/simple/ science-synapse==$VERSION
 
       - name: validate
         run: |
