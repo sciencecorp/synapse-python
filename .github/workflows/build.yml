@@ -11,6 +11,10 @@ on:
         description: "URL of the registry"
         required: true
         type: string
+      package-url:
+        description: "URL of the package"
+        required: true
+        type: string
       python-version:
         description: "Python version to build with"
         required: false
@@ -50,10 +54,9 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: ${{ inputs.registry-name }}
-      url: ${{ inputs.registry-url }}
+      url: ${{ inputs.package-url }}
     permissions:
       id-token: write
-
     steps:
       - uses: actions/download-artifact@v4
         with:

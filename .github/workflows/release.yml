@@ -15,10 +15,12 @@ jobs:
     with:
       registry-name: "testpypi"
       registry-url: "https://test.pypi.org/legacy/"
+      package-url: "https://test.pypi.org/project/science-synapse/"
 
   # pypi-release:
   #   uses: ./.github/workflows/build.yml
   #   with:
   #     registry-name: "pypi"
   #     registry-url: "https://pypi.org/p/"
+  #     package-url: "https://pypi.org/project/science-synapse/"
   #   needs: test-pypi-release
