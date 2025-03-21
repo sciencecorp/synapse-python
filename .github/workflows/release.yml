@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: install test pypi release
         run: |
-          pip install --index-url https://test.pypi.org/simple/ science-synapse==v1.0.1
+          pip install --index-url https://test.pypi.org/simple/ science-synapse==v1.0.1-rc.2
 
       - name: run examples
         run: |
