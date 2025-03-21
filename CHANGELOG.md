@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.0.1](https://github.com/sciencecorp/synapse-python/compare/v1.0.0...v1.0.1) (2025-03-21)
+
+
+### Bug Fixes
+
+* fix missing import needed for impedance results saving ([#88](https://github.com/sciencecorp/synapse-python/issues/88)) ([3ee6af2](https://github.com/sciencecorp/synapse-python/commit/3ee6af2d6a3119337c16eab44ee8c80a14e099b4))
+
 ## [1.0.0](https://github.com/sciencecorp/synapse-python/compare/v0.11.0...v1.0.0) (2025-03-17)
 
 
