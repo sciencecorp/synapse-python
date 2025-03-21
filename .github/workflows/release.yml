@@ -75,8 +75,7 @@ jobs:
           synapse-sim --iface-ip 127.0.0.1 --rpc-port 50051 &
           sleep 2
 
-          # Run Example
-          python synapse/examples/stream_out.py 127.0.0.1:50051
+          synapsectl info 127.0.0.1:50051
 
           # Kill Simulator
           kill $(jobs -p)
