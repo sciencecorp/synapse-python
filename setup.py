@@ -26,7 +26,7 @@ extensions = [
 
 setup(
     name="science-synapse",
-    version="1.0.1rc6",
+    version="1.0.1rc7",
     description="Client library and CLI for the Synapse API",
     author="Science Team",
     author_email="team@science.xyz",
