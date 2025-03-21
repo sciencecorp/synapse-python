@@ -18,6 +18,23 @@ jobs:
       package-url: "https://test.pypi.org/project/science-synapse/"
       registry-token: ${{ secrets.TEST_PYPI_TOKEN }}
 
+  # validate-test-pypi-release:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: install test pypi release
+  #       run: |
+  #         pip install science-synapse==${GITHUB_REF_NAME#v}
+
+  #     - name: run examples
+  #       run: |
+  #         synapse-sim --iface-ip 127.0.0.1 --rpc-port 50051 &
+
+  #         sleep 2
+
+  #         python synapse/examples/stream_out.py 127.0.0.1:50051
+
+  #         kill $(jobs -p)
+
   # pypi-release:
   #   uses: ./.github/workflows/build.yml
   #   with:
