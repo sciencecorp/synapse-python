@@ -20,10 +20,12 @@ on:
         required: false
         type: string
         default: "3.11"
+    secrets:
       registry-token:
         description: "Token for registry authentication"
         required: true
-        type: string
+
+
 jobs:
   sdist:
     name: Build source distribution
