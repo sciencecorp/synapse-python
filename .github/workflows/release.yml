@@ -10,29 +10,118 @@ permissions:
   id-token: write
 
 jobs:
-  test-pypi-release:
-    uses: ./.github/workflows/build.yml
-    secrets:
-      registry-token: ${{ secrets.TEST_PYPI_TOKEN }}
-    with:
-      registry-name: "testpypi"
-      registry-url: "https://test.pypi.org/legacy/"
-      package-url: "https://test.pypi.org/project/science-synapse/"
+  sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+      - uses: actions/setup-python@v5
+      - name: Prep repo
+        run: |
+          pip install -r requirements.txt
+          make
+      - name: Build sdist
+        run: python -m build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish-testpypi:
+    name: Publish to testpypi
+    needs: [sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/legacy/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: List files
+        run: ls -la dist/
+
+      - name: Publish package distributions to testpypi
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          verbose: true
 
   validate-test-pypi-release:
     runs-on: ubuntu-latest
-    needs: test-pypi-release
+    needs: publish-testpypi
     steps:
       - name: install test pypi release
         run: |
-          pip install --index-url https://test.pypi.org/simple/ science-synapse==v1.0.1-rc.2
+          # Get version from GitHub ref (removes 'refs/tags/v' prefix)
+          VERSION=${GITHUB_REF_NAME#v}
+          pip install --index-url https://test.pypi.org/simple/ science-synapse==$VERSION
 
-      - name: run examples
+      - name: validate
         run: |
+          # Run Help
+          synapsectl --help
+
+          # Run Simulator
           synapse-sim --iface-ip 127.0.0.1 --rpc-port 50051 &
           sleep 2
+
+          # Run Example
           python synapse/examples/stream_out.py 127.0.0.1:50051
+
+          # Kill Simulator
           kill $(jobs -p)
+
+  # publish-pypi:
+  #   name: Publish to pypi
+  #   needs: [validate-test-pypi-release]
+  #   runs-on: ubuntu-latest
+  #   environment:
+  #     name: pypi
+  #     url:  https://pypi.org/p/science-synapse/
+  #   permissions:
+  #     id-token: write
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: sdist
+  #         path: dist
+
+  #     - name: Publish package distributions to pypi
+  #       uses: pypa/gh-action-pypi-publish@release/v1
+  #       with:
+  #         verbose: true
+
+  # test-pypi-release:
+  #   uses: ./.github/workflows/build.yml
+  #   secrets:
+  #     registry-token: ${{ secrets.TEST_PYPI_TOKEN }}
+  #   with:
+  #     registry-name: "testpypi"
+  #     registry-url: "https://test.pypi.org/legacy/"
+  #     package-url: "https://test.pypi.org/project/science-synapse/"
+
+  # validate-test-pypi-release:
+  #   runs-on: ubuntu-latest
+  #   needs: test-pypi-release
+  #   steps:
+  #     - name: install test pypi release
+  #       run: |
+  #         pip install --index-url https://test.pypi.org/simple/ science-synapse==v1.0.1-rc.2
+
+  #     - name: run examples
+  #       run: |
+  #         synapse-sim --iface-ip 127.0.0.1 --rpc-port 50051 &
+  #         sleep 2
+  #         python synapse/examples/stream_out.py 127.0.0.1:50051
+  #         kill $(jobs -p)
 
   # pypi-release:
   #   uses: ./.github/workflows/build.yml
