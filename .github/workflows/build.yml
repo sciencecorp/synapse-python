@@ -20,6 +20,10 @@ on:
         required: false
         type: string
         default: "3.11"
+    secrets:
+      registry-token:
+        description: "Token for registry authentication"
+        required: true
 
 jobs:
   sdist:
@@ -71,3 +75,6 @@ jobs:
         with:
           repository-url: ${{ inputs.registry-url }}
           verbose: true
+          # tokens are needed in reusable workflows (trusted publishing does not support reusable workflows)
+          #  https://github.com/pypa/gh-action-pypi-publish/blob/db8f07d3871a0a180efa06b95d467625c19d5d5f/README.md
+          password: ${{ secrets.registry-token }}

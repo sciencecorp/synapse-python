@@ -16,6 +16,7 @@ jobs:
       registry-name: "testpypi"
       registry-url: "https://test.pypi.org/legacy/"
       package-url: "https://test.pypi.org/project/science-synapse/"
+      registry-token: ${{ secrets.TEST_PYPI_TOKEN }}
 
   # pypi-release:
   #   uses: ./.github/workflows/build.yml
@@ -23,4 +24,5 @@ jobs:
   #     registry-name: "pypi"
   #     registry-url: "https://pypi.org/p/"
   #     package-url: "https://pypi.org/project/science-synapse/"
+  #     registry-token: ${{ secrets.PYPI_TOKEN }}
   #   needs: test-pypi-release
