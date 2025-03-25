@@ -14,7 +14,8 @@ clean:
 .PHONY: generate
 generate:
 	mkdir -p bin
-	mkdir -p ${PROTO_OUT}
+	mkdir -p ${PROTO_OUT}/api
+	git -C ${PROTO_DIR} describe --tags --abbrev=0 | sed 's/^v//' > ${PROTO_OUT}/api/version.txt || echo "0.0.0" > ${PROTO_OUT}/api/version.txt
 	${PROTOC} -I=${PROTO_DIR} --descriptor_set_out=bin/descriptors.binpb ${PROTOS}
 	${PROTOC} -I=${PROTO_DIR} --python_out=${PROTO_OUT} ${PROTOS}
 	${PROTOC} -I=${PROTO_DIR} --grpc_python_out=${PROTO_OUT} api/synapse.proto
