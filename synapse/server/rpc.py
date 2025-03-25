@@ -24,6 +24,13 @@ from synapse.utils.log import (
 
 LOG_FILEPATH = str(Path.home() / ".science" / "synapse" / "logs" / "server.log")
 
+def _read_api_version():
+    try:
+        with open(str(Path(__file__).parent.parent / "api" / "version.txt")) as f:
+            return f.read().strip()
+    except (FileNotFoundError, IOError):
+        return None
+
 
 async def serve(
     server_name,
@@ -70,6 +77,8 @@ class SynapseServicer(SynapseDeviceServicer):
         logging.getLogger().addHandler(self.stream_handler)
         init_file_handler(self.logger, LOG_FILEPATH)
 
+        self.synapse_api_version = _read_api_version()
+
     async def Info(self, request, context):
         self.logger.info("Info()")
         connections = [
@@ -79,7 +88,7 @@ class SynapseServicer(SynapseDeviceServicer):
         return DeviceInfo(
             name=self.name,
             serial=self.serial,
-            synapse_version=10,
+            synapse_version=self._synapse_api_version(),
             firmware_version=1,
             status=Status(
                 message=None,
@@ -372,3 +381,12 @@ class SynapseServicer(SynapseDeviceServicer):
 
     def _sockets_status_info(self):
         return [node.node_socket() for node in self.nodes if node.socket]
+
+    def _synapse_api_version(self):
+        if self.synapse_api_version is None:
+            return 0
+        try:
+            major, minor, patch = map(int, self.synapse_api_version.split('.'))
+            return (major & 0x3FF) << 20 | (minor & 0x3FF) << 10 | (patch & 0x3FF)
+        except Exception:
+            return 0
