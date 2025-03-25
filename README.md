@@ -96,8 +96,7 @@ To update the buffer size immediately:
 ```
 sudo sysctl -w kern.ipc.maxsockbuf=10485760
 ```
-
-or add the following to `/etc/sysctl.conf`:
+This change will be lost when restarting your computer. To make the setting persistent across reboots, add the following to `/etc/sysctl.conf` (you must create the file if it does not already exist):
 
 ```
 kern.ipc.maxsockbuf=10485760
