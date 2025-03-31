@@ -126,6 +126,7 @@ class StreamingQueryClient:
                     table.add_row(test.test_name, "[red]Failed[/red]", test.test_report)
 
         self.console.print(table)
+        return True
 
     def handle_impedance_stream(self, request):
         query = request.request.impedance_query
