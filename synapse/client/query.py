@@ -300,7 +300,6 @@ if __name__ == "__main__":
         sys.exit(1)
 
     client = StreamingQueryClient(args.uri, args.verbose, args.plot)
-
     request = StreamQueryRequest(request=request_config)
 
     if not client.stream_query(request):
