@@ -17,7 +17,9 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from rich.table import Table
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
+from rich.panel import Panel
 
 import matplotlib.pyplot as plt
 
@@ -46,7 +48,7 @@ class StreamingQueryClient:
             self.log_thread.join()
 
     def tail_logs_background(self):
-        self.last_log_line = None
+        self.last_log_line = ""
         for log in self.device.tail_logs():
             if self.last_log_line != log.message:
                 self.last_log_line = log.message
@@ -143,14 +145,43 @@ class StreamingQueryClient:
         all_measurements = []
         failed_measurements = []
 
-        with Progress(
+        progress = Progress(
             SpinnerColumn(),
             TextColumn("[bold cyan] Processing impedance measurements [/bold cyan]"),
             BarColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             TimeElapsedColumn(),
-        ) as progress:
+        )
+
+        def get_renderable():
+            if self.verbose:
+                return Group(
+                    Panel(
+                        self.last_log_line,
+                        title="Latest Device Log",
+                        border_style="cyan",
+                    ),
+                    progress,
+                )
+            else:
+                return progress
+
+        with Live(get_renderable(), refresh_per_second=10) as live:
             task = progress.add_task("Measuring impedance", total=electrode_count)
+
+            # If we are verbose, we want to show the latest log
+            stop_tailing_logs = asyncio.Event()
+
+            def update_progress():
+                while not stop_tailing_logs.is_set():
+                    if self.new_log_event.is_set():
+                        live.update(get_renderable())
+                        self.new_log_event.clear()
+
+            progress_thread = None
+            if self.verbose:
+                progress_thread = Thread(target=update_progress, daemon=True)
+                progress_thread.start()
 
             for response in self.device.stream_query(request):
                 if not response:
@@ -163,8 +194,12 @@ class StreamingQueryClient:
                     failed_measurements.extend(failed_batch)
 
                     failed_ids = [m.electrode_id for m in failed_batch]
-                    self.console.log(
+                    progress.console.log(
                         f"Failed to measure impedance for {failed_ids}, why: {response.message}"
+                    )
+                    measurements_received += len(failed_batch)
+                    progress.update(
+                        task, completed=min(measurements_received, electrode_count)
                     )
                     continue
 
@@ -181,9 +216,13 @@ class StreamingQueryClient:
 
                 if args.verbose:
                     for measurement in measurement_batch:
-                        progress.console.print(
+                        progress.console.log(
                             f"Electrode {measurement.electrode_id}: {measurement.magnitude}Ω"
                         )
+
+            if progress_thread:
+                stop_tailing_logs.set()
+                progress_thread.join()
 
         if all_measurements:
             self.display_impedance_results(all_measurements)
