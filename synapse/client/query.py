@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
+import asyncio
 import csv
 import numpy as np
+from threading import Thread
 import time
 import sys
 import synapse as syn
-from synapse.api.node_pb2 import NodeType
-from synapse.api.query_pb2 import QueryRequest, StreamQueryRequest, SelfTestQuery
-from synapse.api.synapse_pb2 import DeviceConfiguration
+from synapse.api.query_pb2 import QueryRequest, StreamQueryRequest
 from google.protobuf.json_format import Parse
 
 from rich.progress import (
@@ -34,6 +34,26 @@ class StreamingQueryClient:
             info = self.device.info()
             self.console.log(info)
 
+            # We tail the logs in the background with verbose set
+            self.log_stop_event = asyncio.Event()
+            self.new_log_event = asyncio.Event()
+            self.log_thread = Thread(target=self.tail_logs_background, daemon=True)
+            self.log_thread.start()
+
+    def close(self):
+        if self.log_thread.is_alive():
+            self.log_stop_event.set()
+            self.log_thread.join()
+
+    def tail_logs_background(self):
+        self.last_log_line = None
+        for log in self.device.tail_logs():
+            if self.last_log_line != log.message:
+                self.last_log_line = log.message
+                self.new_log_event.set()
+            if self.log_stop_event.is_set():
+                break
+
     def stream_query(self, request):
         query_type = request.request.query_type
         if query_type == QueryRequest.kImpedance:
@@ -53,9 +73,24 @@ class StreamingQueryClient:
         self.console.log("[cyan] Starting self test stream")
 
         all_responses = []
+
         with self.console.status(
             "Running Self Test", spinner="bouncingBall", spinner_style="green"
-        ):
+        ) as status:
+            # If we are verbose, we want to show the latest log
+            stop_tailing_logs = asyncio.Event()
+
+            def update_status():
+                while not stop_tailing_logs.is_set():
+                    if self.new_log_event.is_set():
+                        status.update(self.last_log_line)
+                        self.new_log_event.clear()
+
+            status_thread = None
+            if self.verbose:
+                status_thread = Thread(target=update_status, daemon=True)
+                status_thread.start()
+
             for response in self.device.stream_query(request):
                 if not response:
                     self.console.log("Stream is complete")
@@ -69,6 +104,10 @@ class StreamingQueryClient:
 
                 all_responses.append(response.self_test)
 
+            if status_thread:
+                stop_tailing_logs.set()
+                status_thread.join()
+
         if not all_responses:
             return False
 
@@ -79,7 +118,14 @@ class StreamingQueryClient:
 
         for response in all_responses:
             for test in response.tests:
-                print(test)
+                if test.passed:
+                    table.add_row(
+                        test.test_name, "[green]Passed[/green]", test.test_report
+                    )
+                else:
+                    table.add_row(test.test_name, "[red]Failed[/red]", test.test_report)
+
+        self.console.print(table)
 
     def handle_impedance_stream(self, request):
         query = request.request.impedance_query
@@ -154,8 +200,8 @@ class StreamingQueryClient:
     def display_impedance_results(self, measurements):
         table = Table(title="Impedance Measurements")
         table.add_column("Electorde ID", justify="right")
-        table.add_column("Magnitude", justify="right")
-        table.add_column("Phase", justify="right")
+        table.add_column("Magnitude (kΩ)", justify="right")
+        table.add_column("Phase (°)", justify="right")
 
         for measurement in measurements:
             table.add_row(
@@ -222,22 +268,11 @@ def load_config_from_file(path_to_config):
     try:
         with open(path_to_config, "r") as f:
             data = f.read()
-            proto = Parse(data, DeviceConfiguration())
-            return syn.Config.from_proto(proto)
+            proto = Parse(data, QueryRequest())
+            return proto
     except Exception:
         print(f"Failed to open {path_to_config}")
         return None
-
-
-def get_electrode_ids_from_config(config):
-    # Check if we have a broadband config
-    broadband = next(
-        (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
-    )
-    if not broadband:
-        return None
-    channels = broadband.signal.electrode.channels
-    return [i.electrode_id for i in channels]
 
 
 if __name__ == "__main__":
@@ -252,39 +287,21 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config",
         type=str,
-        help="Path to the configuration with the electrode ids",
+        help="Path to the QueryRequest configuration, in JSON format",
         required=True,
     )
 
     args = parser.parse_args()
 
     config_path = args.config
-    config = load_config_from_file(config_path)
-    if not config:
-        sys.exit(1)
-
-    electrode_ids = get_electrode_ids_from_config(config)
-    if not electrode_ids:
-        print("No electrode IDs present in the broadband configuration")
+    request_config = load_config_from_file(config_path)
+    if not request_config:
         sys.exit(1)
 
     client = StreamingQueryClient(args.uri, args.verbose, args.plot)
 
-    # request = StreamQueryRequest(
-    #     request=QueryRequest(
-    #         query_type=QueryRequest.kImpedance,
-    #         impedance_query=ImpedanceQuery(
-    #             electrode_ids=electrode_ids
-    #         )
-    #     )
-    # )
+    request = StreamQueryRequest(request=request_config)
 
-    request = StreamQueryRequest(
-        request=QueryRequest(
-            query_type=QueryRequest.kSelfTest,
-            self_test_query=SelfTestQuery(peripheral_id=2),
-        )
-    )
     if not client.stream_query(request):
         print("Failed to stream query for device")
         sys.exit(1)
