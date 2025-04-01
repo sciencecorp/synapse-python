@@ -205,9 +205,16 @@ def plot(args):
 
     # Extract channel ids from data file header
     if data_file.endswith(".dat"):
-        with open(data_file, "rb") as f:
-            header = f.read(num_channels * 2)
-            channel_ids = struct.unpack("h" * num_channels, header)
+        size = os.path.getsize(data_file)
+        if size > num_channels * 2:
+            with open(data_file, "rb") as f:
+                header = f.read(num_channels * 2)
+                channel_ids = struct.unpack("h" * num_channels, header)
+        else:
+            logger.error(
+                f"Data file is too small to contain channel ids. Expected {num_channels} channels."
+            )
+            return
 
     # Setup the window for the plot
     pg.setConfigOption("background", BACKGROUND_COLOR)
