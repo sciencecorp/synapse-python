@@ -37,9 +37,16 @@ def get_client_ip():
 class StreamOut(Node):
     type = NodeType.kStreamOut
 
-    def __init__(self, label=None, destination_address=None, destination_port=None):
+    def __init__(
+        self,
+        label=None,
+        destination_address=None,
+        destination_port=None,
+        read_timeout=STREAM_OUT_TIMEOUT_SEC,
+    ):
         self.__socket = None
         self.__label = label
+        self.__read_timeout = read_timeout
 
         # If we have been passed a None for destination address, try to resolve it
         if not destination_address:
@@ -92,7 +99,7 @@ class StreamOut(Node):
             )
 
         # Set a timeout
-        self.__socket.settimeout(STREAM_OUT_TIMEOUT_SEC)
+        self.__socket.settimeout(self.__read_timeout)
 
         # Bind to the destination address (our ip) and port
         try:
