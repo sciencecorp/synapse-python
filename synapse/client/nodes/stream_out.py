@@ -16,6 +16,7 @@ from synapse.utils.ndtp_types import (
 )
 
 DEFAULT_STREAM_OUT_PORT = 50038
+STREAM_OUT_TIMEOUT_SEC = 1  # seconds
 
 
 # Try to get the current user's ip for setting the destination address
@@ -36,9 +37,16 @@ def get_client_ip():
 class StreamOut(Node):
     type = NodeType.kStreamOut
 
-    def __init__(self, label=None, destination_address=None, destination_port=None):
+    def __init__(
+        self,
+        label=None,
+        destination_address=None,
+        destination_port=None,
+        read_timeout=STREAM_OUT_TIMEOUT_SEC,
+    ):
         self.__socket = None
         self.__label = label
+        self.__read_timeout = read_timeout
 
         # If we have been passed a None for destination address, try to resolve it
         if not destination_address:
@@ -55,8 +63,12 @@ class StreamOut(Node):
         if self.__socket is None:
             if self.open_socket() is None:
                 return None
-        data, _ = self.__socket.recvfrom(8192)
-        bytes_read = len(data)
+        try:
+            data, _ = self.__socket.recvfrom(8192)
+            bytes_read = len(data)
+        except socket.timeout:
+            logging.warning("StreamOut socket timed out.")
+            return None
         return self._unpack(data), bytes_read
 
     def open_socket(self):
@@ -85,6 +97,9 @@ class StreamOut(Node):
             logging.warning(
                 f"Could not set socket buffer size to {SOCKET_BUFSIZE_BYTES}. Current size is {recvbuf}. Consider increasing the system limit."
             )
+
+        # Set a timeout
+        self.__socket.settimeout(self.__read_timeout)
 
         # Bind to the destination address (our ip) and port
         try:
