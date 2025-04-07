@@ -4,6 +4,7 @@ import threading
 import time
 import traceback
 import os
+import logging
 from typing import Optional
 from operator import itemgetter
 import copy
@@ -263,7 +264,7 @@ def read_packets(
     node: syn.StreamOut,
     q: queue.Queue,
     plot_q: queue.Queue,
-    stop,
+    stop: threading.Event,
     duration: Optional[int] = None,
     num_ch: int = 32,
 ):
@@ -277,12 +278,12 @@ def read_packets(
         while not stop.is_set():
             read_ret = node.read()
             if read_ret is None:
-                print("Could not get a valid read from the node")
+                logging.error("Could not get a valid read from the node")
                 continue
 
             synapse_data, bytes_read = read_ret
             if synapse_data is None or bytes_read == 0:
-                print("Could not read data from node")
+                logging.error("Could not read data from node")
                 continue
             header, data = synapse_data
             monitor.process_packet(header, data, bytes_read)
@@ -297,7 +298,7 @@ def read_packets(
                 break
 
 
-def _binary_writer(stop, q, num_ch, output_base):
+def _binary_writer(stop, q: queue.Queue, num_ch, output_base):
     filename = f"{output_base}.dat"
     full_path = os.path.join(output_base, filename)
     if filename:
