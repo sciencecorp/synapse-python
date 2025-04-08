@@ -159,7 +159,9 @@ Dependencies:
 
     git submodule update --init
     pip install -r requirements.txt
-    make
+    ./setup.sh all
+    # or
+    make all
 
 To build and install in development mode:
 
