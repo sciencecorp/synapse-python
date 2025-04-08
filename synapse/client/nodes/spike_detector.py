@@ -1,25 +1,34 @@
-from typing import Optional, List
+from typing import Optional, List, Union
 from synapse.api.node_pb2 import NodeConfig, NodeType
 from synapse.api.nodes.spike_detect_pb2 import SpikeDetectConfig
 from synapse.client.node import Node
+from dataclasses import dataclass
 
+@dataclass
+class ThresholderConfig:
+    threshold_uV: int
 
-class SpikeDetect(Node):
-    type = NodeType.kSpikeDetect
+@dataclass
+class TemplateMatcherConfig:
+    template_uV: List[int]
+
+SpikeDetectorConfig = Union[ThresholderConfig, TemplateMatcherConfig]
+
+class SpikeDetector(Node):
+    type = NodeType.kSpikeDetector
 
     def __init__(
         self,
-        mode: SpikeDetectConfig.SpikeDetectMode,
-        threshold_uV: int = None,
-        template_uV: List[int] = None,
-        sort: bool = False,
-        bin_size_ms: int = None,
+        config: SpikeDetectorConfig,
     ):
-        self.mode = mode
-        self.threshold_uV = threshold_uV
-        self.template_uV = template_uV or []
-        self.sort = sort
-        self.bin_size_ms = bin_size_ms
+        if isinstance(config, ThresholderConfig):
+            self.threshold_uV = config.threshold_uV
+            self.template_uV = []
+        elif isinstance(config, TemplateMatcherConfig):
+            self.threshold_uV = None
+            self.template_uV = config.template_uV
+        else:
+            raise ValueError("invalid configuration type provided - must be ThresholderConfig or TemplateMatcherConfig")
 
     def _to_proto(self):
         n = NodeConfig()
@@ -27,8 +36,6 @@ class SpikeDetect(Node):
             mode=self.mode,
             threshold_uV=self.threshold_uV,
             template_uV=self.template_uV,
-            sort=self.sort,
-            bin_size_ms=self.bin_size_ms,
         )
         n.spike_detect.CopyFrom(p)
         return n
@@ -40,10 +47,8 @@ class SpikeDetect(Node):
         if not isinstance(proto, SpikeDetectConfig):
             raise ValueError("proto is not of type SpikeDetectConfig")
 
-        return SpikeDetect(
+        return SpikeDetector(
             mode=proto.mode,
             threshold_uV=proto.threshold_uV,
             template_uV=list(proto.template_uV),
-            sort=proto.sort,
-            bin_size_ms=proto.bin_size_ms,
         )
