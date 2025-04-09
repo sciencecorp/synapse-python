@@ -5,7 +5,7 @@ from typing import Optional
 
 import synapse as syn
 from synapse.api.synapse_pb2 import DeviceConfiguration
-from synapse.api.query_pb2 import QueryRequest, QueryResponse
+from synapse.api.query_pb2 import QueryRequest, QueryResponse, StreamQueryRequest
 from synapse.api.status_pb2 import StatusCode
 
 from google.protobuf import text_format
@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.pretty import pprint
 
 from synapse.utils.logging import log_entry_to_str
+from synapse.client.query import StreamingQueryClient
 
 
 def add_commands(subparsers):
@@ -25,6 +26,10 @@ def add_commands(subparsers):
     b = subparsers.add_parser("query", help="Execute a query on the device")
     b.add_argument("uri", type=str)
     b.add_argument("query_file", type=str)
+    b.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    b.add_argument("--plot", "-p", action="store_true", help="Plot the output")
+    b.add_argument("--stream", "-s", action="store_true", help="Stream the output")
+
     b.set_defaults(func=query)
 
     c = subparsers.add_parser("start", help="Start the device")
@@ -64,7 +69,8 @@ def add_commands(subparsers):
         help="Follow log output",
     )
     f.add_argument(
-        "--since", "-S",
+        "--since",
+        "-S",
         type=int,
         help="Get logs from the last N milliseconds",
         metavar="N",
@@ -94,6 +100,23 @@ def info(args):
 
 
 def query(args):
+    def load_query_request(path_to_config):
+        try:
+            with open(path_to_config, "r") as f:
+                data = f.read()
+                proto = Parse(data, QueryRequest())
+                return proto
+        except Exception:
+            print(f"Failed to open {path_to_config}")
+            return None
+
+    if args.stream:
+        client = StreamingQueryClient(args.uri, args.verbose, args.plot)
+        query_proto = load_query_request(args.query_file)
+        if not query_proto:
+            return False
+        return client.stream_query(StreamQueryRequest(request=query_proto))
+
     if Path(args.query_file).suffix != ".json":
         print("Query file must be a JSON file")
         return False
@@ -118,6 +141,7 @@ def query(args):
                         f.write(
                             f"{measurement.electrode_id},{measurement.magnitude},{measurement.phase},1\n"
                         )
+
 
 def start(args):
     console = Console()
@@ -194,12 +218,16 @@ def get_logs(args):
 
         start_time = parse_datetime(args.start_time)
         if args.start_time and not start_time:
-            console.print("[bold red]Invalid start time format. Use ISO format (e.g., '2024-03-14T15:30:00')")
+            console.print(
+                "[bold red]Invalid start time format. Use ISO format (e.g., '2024-03-14T15:30:00')"
+            )
             return
 
         end_time = parse_datetime(args.end_time)
         if args.end_time and not end_time:
-            console.print("[bold red]Invalid end time format. Use ISO format (e.g., '2024-03-14T15:30:00')")
+            console.print(
+                "[bold red]Invalid end time format. Use ISO format (e.g., '2024-03-14T15:30:00')"
+            )
             return
 
         with console.status("Getting logs...", spinner="bouncingBall"):
@@ -207,7 +235,7 @@ def get_logs(args):
                 log_level=args.log_level,
                 since_ms=args.since,
                 start_time=start_time,
-                end_time=end_time
+                end_time=end_time,
             )
 
             if not res or not res.entries:
