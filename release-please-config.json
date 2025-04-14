@@ -1,0 +1,5 @@
+{
+  "packages": { ".": { "release-type": "python" } },
+  "bootstrap-sha": "4d93567a0c5c6d48d2a7ce3a69e89fbf6395eb81",
+  "always-update": true
+}
