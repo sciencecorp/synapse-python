@@ -30,11 +30,13 @@ class SpikeDetector(Node):
 
     def _to_proto(self):
         n = NodeConfig()
-        p = SpikeDetectorConfig(
-            mode=self.mode,
-            threshold_uV=self.threshold_uV,
-            template_uV=self.template_uV,
-        )
+        p = SpikeDetectorConfig()
+        
+        if self.threshold_uV is not None:
+            p.thresholder.threshold_uV = self.threshold_uV
+        elif self.template_uV:
+            p.template_matcher.template_uV.extend(self.template_uV)
+            
         n.spike_detect.CopyFrom(p)
         return n
 
