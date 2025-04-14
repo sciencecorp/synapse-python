@@ -18,7 +18,7 @@ class SpikeBinner(Node):
         p = SpikeBinnerConfig(
             bin_size_ms=self.bin_size_ms,
         )
-        n.spike_detect.CopyFrom(p)
+        n.spike_binner.CopyFrom(p)
         return n
 
     @staticmethod

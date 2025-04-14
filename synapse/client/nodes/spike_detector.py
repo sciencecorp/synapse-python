@@ -37,7 +37,7 @@ class SpikeDetector(Node):
         elif self.template_uV:
             p.template_matcher.template_uV.extend(self.template_uV)
             
-        n.spike_detect.CopyFrom(p)
+        n.spike_detector.CopyFrom(p)
         return n
 
     @staticmethod
