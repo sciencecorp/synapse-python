@@ -15,10 +15,17 @@ class TemplateMatcherConfig:
 class SpikeDetector(Node):
     type = NodeType.kSpikeDetector
 
+    samples_per_spike: int
+    threshold_uV: Optional[int]
+    template_uV: Optional[List[int]]
+
     def __init__(
         self,
+        samples_per_spike: int,
         config: Union[ThresholderConfig, TemplateMatcherConfig],
     ):
+        self.samples_per_spike = samples_per_spike
+
         if isinstance(config, ThresholderConfig):
             self.threshold_uV = config.threshold_uV
             self.template_uV = []
@@ -31,13 +38,16 @@ class SpikeDetector(Node):
     def _to_proto(self):
         n = NodeConfig()
         p = SpikeDetectorConfig()
+
         
         if self.threshold_uV is not None:
             p.thresholder.threshold_uV = self.threshold_uV
         elif self.template_uV:
             p.template_matcher.template_uV.extend(self.template_uV)
+        p.samples_per_spike = self.samples_per_spike
             
         n.spike_detector.CopyFrom(p)
+        
         return n
 
     @staticmethod
@@ -46,6 +56,8 @@ class SpikeDetector(Node):
             raise ValueError("parameter 'proto' is missing")
         if not isinstance(proto, SpikeDetectorConfig):
             raise ValueError("proto is not of type SpikeDetectorConfig")
+
+        samples_per_spike = proto.samples_per_spike
 
         config: Tuple[ThresholderConfig, TemplateMatcherConfig] = None
         # Parse the mode from the oneof
@@ -56,4 +68,4 @@ class SpikeDetector(Node):
         else:
             raise ValueError("Invalid configuration: must contain either 'thresholder' or 'template_matcher'")
 
-        return SpikeDetector(config=config)
+        return SpikeDetector(samples_per_spike=samples_per_spike, config=config)
