@@ -214,7 +214,7 @@ class StreamingQueryClient:
                 # Add these to our batch
                 all_measurements.extend(measurement_batch)
 
-                if args.verbose:
+                if self.verbose:
                     for measurement in measurement_batch:
                         progress.console.log(
                             f"Electrode {measurement.electrode_id}: {measurement.magnitude}Ω"

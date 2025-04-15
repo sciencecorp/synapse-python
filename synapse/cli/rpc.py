@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.pretty import pprint
 
 from synapse.utils.logging import log_entry_to_str
-from synapse.client.query import StreamingQueryClient
+from synapse.cli.query import StreamingQueryClient
 
 
 def add_commands(subparsers):
