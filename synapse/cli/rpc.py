@@ -14,7 +14,7 @@ from google.protobuf.json_format import Parse
 from rich.console import Console
 from rich.pretty import pprint
 
-from synapse.utils.logging import log_entry_to_str
+from synapse.utils.log import log_entry_to_str
 
 
 def add_commands(subparsers):

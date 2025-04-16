@@ -15,7 +15,7 @@ from synapse.api.synapse_pb2_grpc import (
     SynapseDeviceServicer,
     add_SynapseDeviceServicer_to_server,
 )
-from synapse.utils.logging import (
+from synapse.utils.log import (
     StreamingLogHandler,
     init_file_handler,
     str_to_log_entry,

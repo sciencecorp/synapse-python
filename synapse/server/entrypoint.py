@@ -6,7 +6,7 @@ import asyncio
 import argparse
 from coolname import generate_slug
 
-from synapse.utils.logging import init_logging
+from synapse.utils.log import init_logging
 
 from synapse.server.rpc import serve
 from synapse.server.autodiscovery import BroadcastDiscoveryProtocol
