@@ -5,19 +5,20 @@ This repo contains the Python client for the [Synapse API](https://science.xyz/t
 Includes `synapsectl` command line utility:
 
     % synapsectl --help
-    usage: synapsectl [-h] [--version] [--uri -u]
-                    {discover,info,query,start,stop,configure,logs,read,plot} ...
+    usage: synapsectl [-h] [--name NAME] [--ip IP] [--version] [--verbose]
+                    {discover,info,query,start,stop,configure,logs,read,plot,file} ...
 
     Synapse Device Manager
 
     options:
     -h, --help            show this help message and exit
+    --name NAME           The device name to connect to
+    --ip IP               The IP address to connect to
     --version             show program's version number and exit
     --verbose, -v         Enable verbose output
-    --uri -u              Device control plane URI
 
     Commands:
-    {discover,info,query,start,stop,configure,logs,read,plot}
+    {discover,info,query,start,stop,configure,logs,read,plot,file}
         discover            Discover Synapse devices on the network
         info                Get device information
         query               Execute a query on the device
@@ -27,7 +28,7 @@ Includes `synapsectl` command line utility:
         logs                Get logs from the device
         read                Read from a device's StreamOut node
         plot                Plot recorded synapse data
-
+        file                File commands
 
 As well as the base for a device implementation (`synapse/server`),
 
