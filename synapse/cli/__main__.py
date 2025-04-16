@@ -1,11 +1,21 @@
 #!/usr/bin/env python
 import argparse
 import logging
+import ipaddress
+
 from importlib import metadata
 from synapse.cli import discover, rpc, streaming, offline_plot, files
 from rich.logging import RichHandler
 from rich.console import Console
 from synapse.utils.discover import discover_iter
+
+
+def is_valid_ip(input_str):
+    try:
+        ipaddress.ip_address(input_str)
+        return True
+    except ValueError:
+        return False
 
 
 def find_device_by_name(name, console):
@@ -35,15 +45,16 @@ def find_device_by_name(name, console):
 
 
 def setup_device_uri(args):
-    if not args.name and not args.ip:
+    if not args.uri:
+        # User doesn't want to use something that needs a uri
         return args
-    console = Console()
-    if args.name:
-        args.uri = find_device_by_name(args.name, console)
-        if not args.uri:
+    if not is_valid_ip(args.uri):
+        # User passed in a name
+        console = Console()
+        device_ip = find_device_by_name(args.uri, console)
+        if not device_ip:
             return None
-    if args.ip:
-        args.uri = args.ip
+        args.uri = device_ip
     return args
 
 
@@ -54,14 +65,8 @@ def main():
         formatter_class=lambda prog: argparse.HelpFormatter(prog, width=124),
     )
     parser.add_argument(
-        "--name",
-        help="The device name to connect to",
-        type=str,
-        default=None,
-    )
-    parser.add_argument(
-        "--ip",
-        help="The IP address to connect to",
+        "--uri",
+        help="The device identifier to connect to. Can either be the IP address or name",
         type=str,
         default=None,
     )

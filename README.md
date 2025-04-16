@@ -5,15 +5,14 @@ This repo contains the Python client for the [Synapse API](https://science.xyz/t
 Includes `synapsectl` command line utility:
 
     % synapsectl --help
-    usage: synapsectl [-h] [--name NAME] [--ip IP] [--version] [--verbose]
+    usage: synapsectl [-h] [--uri URI] [--version] [--verbose]
                     {discover,info,query,start,stop,configure,logs,read,plot,file} ...
 
     Synapse Device Manager
 
     options:
     -h, --help            show this help message and exit
-    --name NAME           The device name to connect to
-    --ip IP               The IP address to connect to
+    --uri URI             The device identifier to connect to. Can either be the IP address or name
     --version             show program's version number and exit
     --verbose, -v         Enable verbose output
 
