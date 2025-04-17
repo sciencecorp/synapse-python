@@ -110,12 +110,12 @@ class TimeSyncClient:
     def _send_next_sync_packet(self):
         if self.sequence_number >= self.config.max_sync_packets:
             self.update_estimate()
-            self.logger.debug(f"Synced with {self.sequence_number} packets, updating estimate - current offset: {self.latest_offset_ns} ns")
+            self.logger.info(f"Synced with {self.sequence_number} packets, updating estimate - current offset: {self.latest_offset_ns} ns")
             time.sleep(self.config.sync_interval_s)
             return
 
         if self.sequence_number == 0:
-            self.logger.debug(f"Sending sync packets...")
+            self.logger.info(f"Sending sync packets...")
 
         request = TimeSyncPacket()
         request.client_id = self.client_id
@@ -164,7 +164,7 @@ class TimeSyncClient:
     def time_ns(self) -> int:
         return time.time_ns() + self.latest_offset_ns
     
-    def time_s(self) -> float:
+    def time(self) -> float:
         return time.time() + self.latest_offset_ns / 1e9
 
 def main():
