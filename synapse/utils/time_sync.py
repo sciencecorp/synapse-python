@@ -1,13 +1,13 @@
-import asyncio
+import argparse
+from dataclasses import dataclass
 import logging
 import random
-import time
-from dataclasses import dataclass
-import argparse
-from typing import Union
-from synapse.api.time_pb2 import TimeSyncPacket
-import threading
 import socket
+import threading
+import time
+from typing import Union
+
+from synapse.api.time_pb2 import TimeSyncPacket
 
 @dataclass
 class TimeSyncConfig:
@@ -53,10 +53,7 @@ class TimeSyncClient:
         self.sync_thread = None
         self.receive_thread = None
 
-        if logger is not None:
-            self.logger = logger.getChild("time-sync")
-        else:
-            self.logger = logging.getLogger("time-sync")
+        self.logger = logging.getLogger("time-sync") if logger is None else logger
         
         self.logger.debug(f"TimeSyncClient initialized with client_id: {self.client_id}")
 
@@ -100,7 +97,6 @@ class TimeSyncClient:
     def _sync_loop(self):
         while self.running:
             self._send_next_sync_packet()
-            time.sleep(self.config.send_delay_ms / 1000.0)
 
     def _receive_loop(self):
         while self.running:
@@ -113,11 +109,13 @@ class TimeSyncClient:
 
     def _send_next_sync_packet(self):
         if self.sequence_number >= self.config.max_sync_packets:
-            self.logger.debug("Synced sufficient packets, updating estimate...")
             self.update_estimate()
-            self.logger.debug(f"Current offset: {self.latest_offset_ns}")
+            self.logger.debug(f"Synced with {self.sequence_number} packets, updating estimate - current offset: {self.latest_offset_ns} ns")
             time.sleep(self.config.sync_interval_s)
             return
+
+        if self.sequence_number == 0:
+            self.logger.debug(f"Sending sync packets...")
 
         request = TimeSyncPacket()
         request.client_id = self.client_id
@@ -128,6 +126,8 @@ class TimeSyncClient:
             self.socket.send(request.SerializeToString())
         except Exception as e:
             self.logger.error(f"Error sending packet: {e}")
+        finally:
+            time.sleep(self.config.send_delay_ms / 1000.0)
 
     def handle_response(self, data: bytes):
         now_ns = time.time_ns()
@@ -136,8 +136,6 @@ class TimeSyncClient:
             response = TimeSyncPacket()
             response.ParseFromString(data)
             response.client_receive_time_ns = now_ns
-
-            self.logger.debug(f"Received response: {response}")
 
             if response.client_id != self.client_id:
                 return
@@ -163,6 +161,12 @@ class TimeSyncClient:
     def get_offset_ns(self) -> int:
         return self.latest_offset_ns
 
+    def time_ns(self) -> int:
+        return time.time_ns() + self.latest_offset_ns
+    
+    def time_s(self) -> float:
+        return time.time() + self.latest_offset_ns / 1e9
+
 def main():
     parser = argparse.ArgumentParser(description='Time synchronization client')
     parser.add_argument('--host', type=str, default='localhost',
@@ -171,7 +175,7 @@ def main():
                        help='Time sync server port (default: 52340)')
     args = parser.parse_args()
 
-    from synapse.utils.log import init_logging
+    from synapse.utils.logging import init_logging
     init_logging(level=logging.DEBUG)
 
     client = TimeSyncClient(args.host, args.port)
