@@ -27,7 +27,6 @@ from rich.pretty import pprint
 
 def add_commands(subparsers):
     a = subparsers.add_parser("read", help="Read from a device's StreamOut node")
-    a.add_argument("uri", type=str, help="IP address of Synapse device")
     a.add_argument(
         "--config",
         type=str,

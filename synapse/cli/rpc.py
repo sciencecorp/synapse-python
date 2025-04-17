@@ -19,29 +19,23 @@ from synapse.utils.logging import log_entry_to_str
 
 def add_commands(subparsers):
     a = subparsers.add_parser("info", help="Get device information")
-    a.add_argument("uri", type=str)
     a.set_defaults(func=info)
 
     b = subparsers.add_parser("query", help="Execute a query on the device")
-    b.add_argument("uri", type=str)
     b.add_argument("query_file", type=str)
     b.set_defaults(func=query)
 
     c = subparsers.add_parser("start", help="Start the device")
-    c.add_argument("uri", type=str)
     c.set_defaults(func=start)
 
     d = subparsers.add_parser("stop", help="Stop the device")
-    d.add_argument("uri", type=str)
     d.set_defaults(func=stop)
 
     e = subparsers.add_parser("configure", help="Write a configuration to the device")
-    e.add_argument("uri", type=str)
     e.add_argument("config_file", type=str)
     e.set_defaults(func=configure)
 
     f = subparsers.add_parser("logs", help="Get logs from the device")
-    f.add_argument("uri", type=str)
     f.add_argument("--output", "-o", type=str, help="Optional file to write logs to")
     f.add_argument(
         "--quiet",
@@ -64,7 +58,8 @@ def add_commands(subparsers):
         help="Follow log output",
     )
     f.add_argument(
-        "--since", "-S",
+        "--since",
+        "-S",
         type=int,
         help="Get logs from the last N milliseconds",
         metavar="N",
@@ -118,6 +113,7 @@ def query(args):
                         f.write(
                             f"{measurement.electrode_id},{measurement.magnitude},{measurement.phase},1\n"
                         )
+
 
 def start(args):
     console = Console()
@@ -194,12 +190,16 @@ def get_logs(args):
 
         start_time = parse_datetime(args.start_time)
         if args.start_time and not start_time:
-            console.print("[bold red]Invalid start time format. Use ISO format (e.g., '2024-03-14T15:30:00')")
+            console.print(
+                "[bold red]Invalid start time format. Use ISO format (e.g., '2024-03-14T15:30:00')"
+            )
             return
 
         end_time = parse_datetime(args.end_time)
         if args.end_time and not end_time:
-            console.print("[bold red]Invalid end time format. Use ISO format (e.g., '2024-03-14T15:30:00')")
+            console.print(
+                "[bold red]Invalid end time format. Use ISO format (e.g., '2024-03-14T15:30:00')"
+            )
             return
 
         with console.status("Getting logs...", spinner="bouncingBall"):
@@ -207,7 +207,7 @@ def get_logs(args):
                 log_level=args.log_level,
                 since_ms=args.since,
                 start_time=start_time,
-                end_time=end_time
+                end_time=end_time,
             )
 
             if not res or not res.entries:

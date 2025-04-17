@@ -1,19 +1,50 @@
 #!/usr/bin/env python
 import argparse
 import logging
+import ipaddress
+
 from importlib import metadata
 from synapse.cli import discover, rpc, streaming, offline_plot, files
 from rich.logging import RichHandler
+from rich.console import Console
+from synapse.utils.discover import find_device_by_name
+
+
+def is_valid_ip(input_str):
+    try:
+        ipaddress.ip_address(input_str)
+        return True
+    except ValueError:
+        return False
+
+
+def setup_device_uri(args):
+    if not args.uri:
+        # User doesn't want to use something that needs a uri
+        return args
+    if not is_valid_ip(args.uri):
+        # User passed in a name
+        console = Console()
+        device_ip = find_device_by_name(args.uri, console)
+        if not device_ip:
+            return None
+        args.uri = device_ip
+    return args
 
 
 def main():
     logging.basicConfig(level=logging.INFO, handlers=[RichHandler()])
-
     parser = argparse.ArgumentParser(
         description="Synapse Device Manager",
         formatter_class=lambda prog: argparse.HelpFormatter(prog, width=124),
     )
-
+    parser.add_argument(
+        "--uri",
+        "-u",
+        help="The device identifier to connect to. Can either be the IP address or name",
+        type=str,
+        default=None,
+    )
     parser.add_argument(
         "--version",
         action="version",
@@ -26,18 +57,18 @@ def main():
         default=False,
         help="Enable verbose output",
     )
-    parser.add_argument(
-        "--uri", metavar="-u", type=str, default=None, help="Device control plane URI"
-    )
-
     subparsers = parser.add_subparsers(title="Commands")
-
     discover.add_commands(subparsers)
     rpc.add_commands(subparsers)
     streaming.add_commands(subparsers)
     offline_plot.add_commands(subparsers)
     files.add_commands(subparsers)
     args = parser.parse_args()
+
+    # If we need to setup the device URI, do that now
+    args = setup_device_uri(args)
+    if not args:
+        return
 
     if hasattr(args, "func"):
         args.func(args)
