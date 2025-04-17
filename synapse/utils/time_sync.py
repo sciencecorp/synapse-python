@@ -110,7 +110,7 @@ class TimeSyncClient:
     def _send_next_sync_packet(self):
         if self.sequence_number >= self.config.max_sync_packets:
             self.update_estimate()
-            self.logger.info(f"Synced with {self.sequence_number} packets, updating estimate - current offset: {self.latest_offset_ns} ns")
+            self.logger.info(f"Synced with {self.config.max_sync_packets} packets, updating estimate - current offset: {self.latest_offset_ns} ns")
             time.sleep(self.config.sync_interval_s)
             return
 
@@ -175,7 +175,7 @@ def main():
                        help='Time sync server port (default: 52340)')
     args = parser.parse_args()
 
-    from synapse.utils.logging import init_logging
+    from synapse.utils.log import init_logging
     init_logging(level=logging.DEBUG)
 
     client = TimeSyncClient(args.host, args.port)
