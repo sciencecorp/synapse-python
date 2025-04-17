@@ -7,7 +7,7 @@ from importlib import metadata
 from synapse.cli import discover, rpc, streaming, offline_plot, files
 from rich.logging import RichHandler
 from rich.console import Console
-from synapse.utils.discover import discover_iter
+from synapse.utils.discover import find_device_by_name
 
 
 def is_valid_ip(input_str):
@@ -16,32 +16,6 @@ def is_valid_ip(input_str):
         return True
     except ValueError:
         return False
-
-
-def find_device_by_name(name, console):
-    """Find a device by name using the discovery process."""
-    with console.status(
-        f"Searching for device with name {name}...", spinner="bouncingBall"
-    ):
-        # We are broadcasting data every 1 second
-        socket_timeout_sec = 1
-        discovery_timeout_sec = 5
-        found_devices = []
-        devices = discover_iter(socket_timeout_sec, discovery_timeout_sec)
-        for device in devices:
-            if device.name.lower() == name.lower():
-                return f"{device.host}:{device.port}"
-            found_devices.append(device)
-
-    console.print(f"[bold red]Device with name {name} not found")
-    console.print(
-        "[bold red]Either the device is not running or the name is incorrect\n"
-    )
-    if found_devices:
-        console.print("[yellow]We did find some devices:")
-        for device in found_devices:
-            console.print(f"[yellow]{device.name} ({device.host}:{device.port})")
-    return None
 
 
 def setup_device_uri(args):
@@ -66,6 +40,7 @@ def main():
     )
     parser.add_argument(
         "--uri",
+        "-u",
         help="The device identifier to connect to. Can either be the IP address or name",
         type=str,
         default=None,
