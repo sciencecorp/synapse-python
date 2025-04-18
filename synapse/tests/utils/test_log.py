@@ -1,6 +1,6 @@
 from datetime import datetime
 import logging
-from synapse.utils.logging import str_to_log_entry, log_entry_to_str, log_level_to_pb
+from synapse.utils.log import str_to_log_entry, log_entry_to_str, log_level_to_pb
 from synapse.api.logging_pb2 import LogEntry, LogLevel
 
 def test_log_level_conversion():
