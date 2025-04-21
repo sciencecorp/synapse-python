@@ -58,7 +58,7 @@ jobs:
 
           synapse-sim --iface-ip 127.0.0.1 --rpc-port 50051 &
 
-          sleep 2
+          sleep 5
 
           python synapse/examples/stream_out.py 127.0.0.1:50051
 
