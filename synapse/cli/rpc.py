@@ -14,17 +14,15 @@ from google.protobuf.json_format import Parse
 from rich.console import Console
 from rich.pretty import pprint
 
-from synapse.utils.logging import log_entry_to_str
 from synapse.cli.query import StreamingQueryClient
+from synapse.utils.log import log_entry_to_str
 
 
 def add_commands(subparsers):
     a = subparsers.add_parser("info", help="Get device information")
-    a.add_argument("uri", type=str)
     a.set_defaults(func=info)
 
     b = subparsers.add_parser("query", help="Execute a query on the device")
-    b.add_argument("uri", type=str)
     b.add_argument("query_file", type=str)
     b.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     b.add_argument("--plot", "-p", action="store_true", help="Plot the output")
@@ -33,20 +31,16 @@ def add_commands(subparsers):
     b.set_defaults(func=query)
 
     c = subparsers.add_parser("start", help="Start the device")
-    c.add_argument("uri", type=str)
     c.set_defaults(func=start)
 
     d = subparsers.add_parser("stop", help="Stop the device")
-    d.add_argument("uri", type=str)
     d.set_defaults(func=stop)
 
     e = subparsers.add_parser("configure", help="Write a configuration to the device")
-    e.add_argument("uri", type=str)
     e.add_argument("config_file", type=str)
     e.set_defaults(func=configure)
 
     f = subparsers.add_parser("logs", help="Get logs from the device")
-    f.add_argument("uri", type=str)
     f.add_argument("--output", "-o", type=str, help="Optional file to write logs to")
     f.add_argument(
         "--quiet",

@@ -14,7 +14,7 @@ from synapse.api.query_pb2 import StreamQueryRequest, StreamQueryResponse
 from synapse.api.status_pb2 import StatusCode, Status
 from synapse.api.synapse_pb2_grpc import SynapseDeviceStub
 from synapse.client.config import Config
-from synapse.utils.logging import log_level_to_pb
+from synapse.utils.log import log_level_to_pb
 
 DEFAULT_SYNAPSE_PORT = 647
 

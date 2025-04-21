@@ -48,7 +48,6 @@ def add_commands(subparsers: argparse._SubParsersAction):
     a: argparse.ArgumentParser = file_subparsers.add_parser(
         "ls", help="List files on device"
     )
-    a.add_argument("uri", type=str)
     a.add_argument(
         "path", type=str, nargs="?", default="/", help="Path to list files from"
     )
@@ -58,7 +57,6 @@ def add_commands(subparsers: argparse._SubParsersAction):
     b: argparse.ArgumentParser = file_subparsers.add_parser(
         "get", help="Get a file from device"
     )
-    b.add_argument("uri", type=str)
     b.add_argument("remote_path", type=str, help="Remote path of file to download")
     b.add_argument(
         "--output_path",
@@ -79,7 +77,6 @@ def add_commands(subparsers: argparse._SubParsersAction):
     c: argparse.ArgumentParser = file_subparsers.add_parser(
         "rm", help="Remove a file from device"
     )
-    c.add_argument("uri", type=str)
     c.add_argument("path", type=str, help="Path to file to remove")
     c.add_argument(
         "--recursive", "-r", action="store_true", help="Remove directories recursively"

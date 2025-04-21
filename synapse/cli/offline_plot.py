@@ -1,4 +1,5 @@
 import sys
+import struct
 import os
 import json
 import numpy as np
@@ -54,12 +55,26 @@ def setup_logging():
 def process_data(file_path, num_channels, logger):
     _, file_extension = os.path.splitext(file_path)
 
-    if file_extension in [".bin", ".dat"]:
+    if file_extension in [".bin"]:
         with open(file_path, "rb") as f:
             data = np.fromfile(f, dtype=np.int16)
 
         df = pd.DataFrame(data)
         new_len = len(df) // num_channels
+        df = df.head(new_len * num_channels)
+        df = df.values.reshape(-1, num_channels)
+
+        return pd.DataFrame(df)
+
+    if file_extension in [".dat"]:
+        with open(file_path, "rb") as f:
+            data = np.fromfile(f, dtype=np.int16)
+
+        df = pd.DataFrame(data)
+        new_len = (len(df)) // num_channels
+        df = df.tail(
+            -num_channels
+        )  # Remove the header info containing the channel mapping
         df = df.head(new_len * num_channels)
         df = df.values.reshape(-1, num_channels)
 
@@ -187,6 +202,19 @@ def plot(args):
     # Load the data
     data = process_data(data_file, num_channels, logger)
     logger.info(f"Loaded data with {data.shape[1]} channels")
+
+    # Extract channel ids from data file header
+    if data_file.endswith(".dat"):
+        size = os.path.getsize(data_file)
+        if size > num_channels * 2:
+            with open(data_file, "rb") as f:
+                header = f.read(num_channels * 2)
+                channel_ids = struct.unpack("h" * num_channels, header)
+        else:
+            logger.error(
+                f"Data file is too small to contain channel ids. Expected {num_channels} channels."
+            )
+            return
 
     # Setup the window for the plot
     pg.setConfigOption("background", BACKGROUND_COLOR)
