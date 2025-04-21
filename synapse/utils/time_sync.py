@@ -110,9 +110,8 @@ class TimeSyncClient:
             self.logger.debug(f"Synced with {self.config.max_sync_packets} packets, updating estimate - current offset: {self.latest_offset_ns} ns")
             time.sleep(self.config.sync_interval_s)
             if self.running:
-                self.sequence_number = 0
                 self._send_next_sync_packet()
-
+    
         else:
             time.sleep(self.config.send_delay_ms / 1000.0)
             if self.running:
@@ -165,6 +164,8 @@ class TimeSyncClient:
 
         self.current_rtts[self.sequence_number] = estimate
 
+        self.last_sync_time_ns = [time.time_ns(), self.time_ns()]
+
         self._schedule_next_sync()
 
     def _update_estimate(self):
@@ -175,7 +176,6 @@ class TimeSyncClient:
                           key=lambda x: x.rtt_ns)
         
         self.latest_offset_ns = best_estimate.offset_ns
-        self.last_sync_time_ns = [time.time_ns(), self.time_ns()]
         self.sequence_number = 0
         self.current_rtts = [TimeSyncEstimate() for _ in range(self.config.max_sync_packets)]
 
