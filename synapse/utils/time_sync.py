@@ -5,7 +5,7 @@ import random
 import socket
 import threading
 import time
-from typing import Union
+from typing import Tuple, Union
 
 from synapse.api.time_pb2 import TimeSyncPacket
 
@@ -41,7 +41,7 @@ def get_time_sync_estimate(packet: TimeSyncPacket) -> TimeSyncEstimate:
 
 class TimeSyncClient:
     def __init__(self, host: str, port: int, config: TimeSyncConfig = TimeSyncConfig(), logger: Union[logging.Logger, None] = None):
-        self.client_id = self.generate_client_id()
+        self.client_id = self._generate_client_id()
         self.host = host
         self.port = port
         self.running = False
@@ -49,15 +49,15 @@ class TimeSyncClient:
         self.config = config or TimeSyncConfig()
         self.current_rtts = [TimeSyncEstimate() for _ in range(self.config.max_sync_packets)]
         self.latest_offset_ns = 0
+        self.last_sync_time_ns = [0, 0]
+
         self.socket = None
         self.sync_thread = None
         self.receive_thread = None
 
         self.logger = logging.getLogger("time-sync") if logger is None else logger
         
-        self.logger.debug(f"TimeSyncClient initialized with client_id: {self.client_id}")
-
-    def generate_client_id(self) -> int:
+    def _generate_client_id(self) -> int:
         return random.randint(0, 2**32 - 1)
 
     def start(self) -> bool:
@@ -102,20 +102,21 @@ class TimeSyncClient:
         while self.running:
             try:
                 data, _ = self.socket.recvfrom(self.config.max_packet_size)
-                self.handle_response(data)
+                self._handle_response(data)
             except (socket.error, Exception) as e:
                 if self.running:
                     self.logger.error(f"Error receiving data: {e}")
 
     def _send_next_sync_packet(self):
         if self.sequence_number >= self.config.max_sync_packets:
-            self.update_estimate()
-            self.logger.info(f"Synced with {self.config.max_sync_packets} packets, updating estimate - current offset: {self.latest_offset_ns} ns")
+            self._update_estimate()
+            self.last_sync_time_ns = [time.time_ns(), self.time_ns()]
+            self.logger.debug(f"Synced with {self.config.max_sync_packets} packets, updating estimate - current offset: {self.latest_offset_ns} ns")
             time.sleep(self.config.sync_interval_s)
             return
 
         if self.sequence_number == 0:
-            self.logger.info(f"Sending sync packets...")
+            self.logger.debug(f"Sending sync packets...")
 
         request = TimeSyncPacket()
         request.client_id = self.client_id
@@ -129,7 +130,7 @@ class TimeSyncClient:
         finally:
             time.sleep(self.config.send_delay_ms / 1000.0)
 
-    def handle_response(self, data: bytes):
+    def _handle_response(self, data: bytes):
         now_ns = time.time_ns()
 
         try:
@@ -147,7 +148,7 @@ class TimeSyncClient:
         except Exception as e:
             self.logger.error(f"Error processing response: {e}")
 
-    def update_estimate(self):
+    def _update_estimate(self):
         if not self.current_rtts:
             return
 
@@ -160,6 +161,12 @@ class TimeSyncClient:
 
     def get_offset_ns(self) -> int:
         return self.latest_offset_ns
+
+    def get_last_sync_time_ns(self) -> Tuple[int, int]:
+        """
+        Returns a tuple of the last sync time in ns as [client's clock from time.time_ns(), synced clock from self.time_ns()]
+        """
+        return self.last_sync_time_ns
 
     def time_ns(self) -> int:
         return time.time_ns() + self.latest_offset_ns
