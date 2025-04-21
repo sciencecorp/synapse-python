@@ -158,7 +158,7 @@ For an example, see the [Blackrock Neurotech CerePlex driver](https://github.com
 Dependencies:
 
     git submodule update --init
-    pip install -r requirements.txt
+    pip install .
     ./setup.sh all
     # or
     make all
@@ -166,7 +166,7 @@ Dependencies:
 To build and install in development mode:
 
     git submodule update --init
-    pip install -e .
+    pip install -e .[dev]
     make
 
 To build and install a wheel:
