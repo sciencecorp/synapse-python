@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
 import csv
-import numpy as np
 from threading import Thread
 import time
 import sys
@@ -21,14 +20,11 @@ from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
 
-import matplotlib.pyplot as plt
-
 
 class StreamingQueryClient:
-    def __init__(self, uri, verbose=False, plot=False):
+    def __init__(self, uri, verbose=False):
         self.uri = uri
         self.verbose = verbose
-        self.plot = plot
         self.console = Console()
 
         self.device = syn.Device(self.uri, self.verbose)
@@ -145,6 +141,13 @@ class StreamingQueryClient:
         all_measurements = []
         failed_measurements = []
 
+        # Create a CSV file to read from at the beginning
+        filename = f"impedance_measurements_{time.strftime('%Y%m%d-%H%M%S')}.csv"
+        with open(filename, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Electrode ID", "Magnitude", "Phase"])
+        self.console.print(f"[green] Started saving measurements to {filename}")
+
         progress = Progress(
             SpinnerColumn(),
             TextColumn("[bold cyan] Processing impedance measurements [/bold cyan]"),
@@ -197,6 +200,10 @@ class StreamingQueryClient:
                     progress.console.log(
                         f"Failed to measure impedance for {failed_ids}, why: {response.message}"
                     )
+                    for sample in failed_batch:
+                        progress.console.log(
+                            f"electrode id (mag, phase): {sample.electrode_id}\t {sample.magnitude},{sample.phase}"
+                        )
                     measurements_received += len(failed_batch)
                     progress.update(
                         task, completed=min(measurements_received, electrode_count)
@@ -213,6 +220,7 @@ class StreamingQueryClient:
 
                 # Add these to our batch
                 all_measurements.extend(measurement_batch)
+                self.save_measurement_batch(filename, measurement_batch)
 
                 if self.verbose:
                     for measurement in measurement_batch:
@@ -227,8 +235,6 @@ class StreamingQueryClient:
         if all_measurements:
             self.display_impedance_results(all_measurements)
             self.save_impedance_results(all_measurements)
-            if self.plot:
-                self.plot_impedance_results(all_measurements)
         else:
             self.console.log("[bold red] All impedance measurements failed")
 
@@ -251,57 +257,14 @@ class StreamingQueryClient:
             )
         self.console.print(table)
 
-    def save_impedance_results(self, measurements):
-        # just match the original implementations filename
-        filename = f"impedance_measurements_{time.strftime('%Y%m%d-%H%M%S')}.csv"
-
-        # probably won't have a duplicate file here
-        with open(filename, "w", newline="") as f:
+    def save_measurement_batch(self, filename, measurements):
+        # Save a batch of measurements as they come in
+        with open(filename, "a", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["Electrode ID", "Magnitude", "Phase"])
             for measurement in measurements:
                 writer.writerow(
                     [measurement.electrode_id, measurement.magnitude, measurement.phase]
                 )
-
-        self.console.print(f"[green] Measurements saved to {filename}")
-
-    def plot_impedance_results(self, measurements):
-        electrode_ids = [measurement.electrode_id for measurement in measurements]
-
-        # Convert the magnitudes to kilo ohms
-        magnitudes = [measurement.magnitude / 1000 for measurement in measurements]
-        phases = [measurement.phase for measurement in measurements]
-
-        # Sort by the electrode id
-        sorted_indices = np.argsort(electrode_ids)
-        electrode_ids = [electrode_ids[i] for i in sorted_indices]
-        magnitudes = [magnitudes[i] for i in sorted_indices]
-        phases = [phases[i] for i in sorted_indices]
-        fig, ax = plt.subplots(figsize=(10, 6))
-        x_positions = np.arange(len(electrode_ids))
-
-        # Add phase values as text annotations on top of each bar
-        for i, (pos, y, phase) in enumerate(zip(x_positions, magnitudes, phases)):
-            ax.annotate(
-                f"{phase:.1f}°",
-                (pos, y),
-                xytext=(0, 3),
-                textcoords="offset points",
-                ha="center",
-                fontsize=9,
-            )
-
-        # Add labels and title
-        ax.set_xlabel("Electrode ID", fontsize=12)
-        ax.set_ylabel("Impedance Magnitude (kΩ)", fontsize=12)
-        ax.set_title("Electrode Impedance Measurements", fontsize=14)
-        ax.set_xticks(x_positions)
-        ax.set_xticklabels(electrode_ids)
-        ax.grid(axis="y", linestyle="--", alpha=0.7)
-
-        plt.tight_layout()
-        plt.show()
 
 
 def load_config_from_file(path_to_config):
@@ -322,9 +285,6 @@ if __name__ == "__main__":
     parser.add_argument("--uri", default="localhost:50051", help="Synapse server URI")
     parser.add_argument("--verbose", action="store_true", help="Use verbose output")
     parser.add_argument(
-        "--plot", action="store_true", help="Plot the output after the run"
-    )
-    parser.add_argument(
         "--config",
         type=str,
         help="Path to the QueryRequest configuration, in JSON format",
@@ -338,7 +298,7 @@ if __name__ == "__main__":
     if not request_config:
         sys.exit(1)
 
-    client = StreamingQueryClient(args.uri, args.verbose, args.plot)
+    client = StreamingQueryClient(args.uri, args.verbose)
     request = StreamQueryRequest(request=request_config)
 
     if not client.stream_query(request):

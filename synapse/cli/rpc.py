@@ -25,7 +25,6 @@ def add_commands(subparsers):
     b = subparsers.add_parser("query", help="Execute a query on the device")
     b.add_argument("query_file", type=str)
     b.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
-    b.add_argument("--plot", "-p", action="store_true", help="Plot the output")
     b.add_argument("--stream", "-s", action="store_true", help="Stream the output")
 
     b.set_defaults(func=query)
@@ -105,7 +104,7 @@ def query(args):
             return None
 
     if args.stream:
-        client = StreamingQueryClient(args.uri, args.verbose, args.plot)
+        client = StreamingQueryClient(args.uri, args.verbose)
         query_proto = load_query_request(args.query_file)
         if not query_proto:
             return False
