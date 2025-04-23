@@ -2,6 +2,7 @@
 import argparse
 import logging
 import ipaddress
+import sys
 
 from importlib import metadata
 from synapse.cli import discover, rpc, streaming, offline_plot, files
@@ -77,4 +78,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"Uncaught error in CLI. Why: {e}")
+        sys.exit(1)

@@ -4,7 +4,13 @@ from google.protobuf.empty_pb2 import Empty
 import logging
 from datetime import datetime
 
-from synapse.api.logging_pb2 import LogQueryResponse, LogQueryRequest, LogLevel, TailLogsRequest
+from synapse.api.logging_pb2 import (
+    LogQueryResponse,
+    LogQueryRequest,
+    LogLevel,
+    TailLogsRequest,
+)
+from synapse.api.query_pb2 import StreamQueryRequest, StreamQueryResponse
 from synapse.api.status_pb2 import StatusCode, Status
 from synapse.api.synapse_pb2_grpc import SynapseDeviceStub
 from synapse.client.config import Config
@@ -95,13 +101,13 @@ class Device(object):
         assert isinstance(config, Config), "config must be an instance of Config"
 
         config.set_device(self)
-        try:    
+        try:
             response = self.rpc.Configure(config.to_proto())
             return response
         except grpc.RpcError as e:
             self.logger.error("Error: %s", e.details())
             return None
-    
+
     def get_name(self) -> Optional[str]:
         info = self.info()
         return info.name if info else None
@@ -111,7 +117,7 @@ class Device(object):
         log_level: Union[str, LogLevel] = "INFO",
         since_ms: Optional[int] = None,
         start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
+        end_time: Optional[datetime] = None,
     ) -> Optional[LogQueryResponse]:
         try:
             request = LogQueryRequest()
@@ -136,7 +142,7 @@ class Device(object):
         log_level: Union[str, LogLevel] = LogLevel.LOG_LEVEL_INFO,
         since_ms: Optional[int] = None,
         start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
+        end_time: Optional[datetime] = None,
     ) -> Optional[Status]:
         try:
             request = LogQueryRequest()
@@ -155,7 +161,9 @@ class Device(object):
             self.logger.error("Error: %s", e.details())
             return None
 
-    def tail_logs(self, log_level: Union[str, LogLevel] = LogLevel.LOG_LEVEL_INFO) -> AsyncGenerator[LogQueryResponse, None]:
+    def tail_logs(
+        self, log_level: Union[str, LogLevel] = LogLevel.LOG_LEVEL_INFO
+    ) -> AsyncGenerator[LogQueryResponse, None]:
         try:
             request = TailLogsRequest()
             request.min_level = log_level_to_pb(log_level)
@@ -163,6 +171,16 @@ class Device(object):
         except grpc.RpcError as e:
             self.logger.error("Error: %s", e.details())
             return None
+
+    def stream_query(
+        self, stream_request: StreamQueryRequest
+    ) -> AsyncGenerator[StreamQueryResponse, None]:
+        try:
+            for response in self.rpc.StreamQuery(stream_request):
+                yield response
+        except Exception as e:
+            self.logger.error(f"Error during StreamQuery: {str(e)}")
+            yield StreamQueryResponse(code=StatusCode.kQueryFailed)
 
     def _handle_status_response(self, status):
         if status.code != StatusCode.kOk:
