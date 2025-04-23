@@ -80,6 +80,8 @@ def main():
         console = Console()
         console.log(f"[bold red] Uncaught error during function. Why: {e}")
         parser.print_help()
+    except KeyboardInterrupt:
+        print("User cancelled request")
 
 
 if __name__ == "__main__":
