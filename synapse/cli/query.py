@@ -133,6 +133,10 @@ class StreamingQueryClient:
             return False
 
         electrode_count = len(query.electrode_ids)
+        if electrode_count <= 0:
+            self.console.log("[bold red] No electrodes to query")
+            return False
+
         self.console.log(
             f"[cyan] Starting impedance_stream with {electrode_count} electordes"
         )
@@ -153,6 +157,7 @@ class StreamingQueryClient:
             TextColumn("[bold cyan] Processing impedance measurements [/bold cyan]"),
             BarColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TextColumn("[cyan]({task.completed}/{task.total})[/cyan]"),
             TimeElapsedColumn(),
         )
 
@@ -234,7 +239,6 @@ class StreamingQueryClient:
 
         if all_measurements:
             self.display_impedance_results(all_measurements)
-            self.save_impedance_results(all_measurements)
         else:
             self.console.log("[bold red] All impedance measurements failed")
 
@@ -301,6 +305,10 @@ if __name__ == "__main__":
     client = StreamingQueryClient(args.uri, args.verbose)
     request = StreamQueryRequest(request=request_config)
 
-    if not client.stream_query(request):
-        print("Failed to stream query for device")
+    try:
+        if not client.stream_query(request):
+            print("Failed to stream query for device")
+            sys.exit(1)
+    except Exception as e:
+        print(f"Failed to stream query. Why: {e}")
         sys.exit(1)
