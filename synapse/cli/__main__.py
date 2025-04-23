@@ -71,9 +71,14 @@ def main():
     if not args:
         return
 
-    if hasattr(args, "func"):
-        args.func(args)
-    else:
+    try:
+        if hasattr(args, "func"):
+            args.func(args)
+        else:
+            parser.print_help()
+    except Exception as e:
+        console = Console()
+        console.log(f"[bold red] Uncaught error during function. Why: {e}")
         parser.print_help()
 
 

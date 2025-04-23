@@ -23,6 +23,8 @@ class Device(object):
     sockets = None
 
     def __init__(self, uri, verbose=False):
+        if not uri:
+            raise ValueError("URI cannot be empty or none")
         if len(uri.split(":")) != 2:
             self.uri = uri + f":{DEFAULT_SYNAPSE_PORT}"
         else:
