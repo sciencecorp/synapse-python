@@ -5,7 +5,7 @@ from typing import Optional
 
 import synapse as syn
 from synapse.api.synapse_pb2 import DeviceConfiguration
-from synapse.api.query_pb2 import QueryRequest, QueryResponse
+from synapse.api.query_pb2 import QueryRequest, QueryResponse, StreamQueryRequest
 from synapse.api.status_pb2 import StatusCode
 
 from google.protobuf import text_format
@@ -14,6 +14,7 @@ from google.protobuf.json_format import Parse
 from rich.console import Console
 from rich.pretty import pprint
 
+from synapse.cli.query import StreamingQueryClient
 from synapse.utils.log import log_entry_to_str
 
 
@@ -23,6 +24,9 @@ def add_commands(subparsers):
 
     b = subparsers.add_parser("query", help="Execute a query on the device")
     b.add_argument("query_file", type=str)
+    b.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    b.add_argument("--stream", "-s", action="store_true", help="Stream the output")
+
     b.set_defaults(func=query)
 
     c = subparsers.add_parser("start", help="Start the device")
@@ -89,6 +93,23 @@ def info(args):
 
 
 def query(args):
+    def load_query_request(path_to_config):
+        try:
+            with open(path_to_config, "r") as f:
+                data = f.read()
+                proto = Parse(data, QueryRequest())
+                return proto
+        except Exception:
+            print(f"Failed to open {path_to_config}")
+            return None
+
+    if args.stream:
+        client = StreamingQueryClient(args.uri, args.verbose)
+        query_proto = load_query_request(args.query_file)
+        if not query_proto:
+            return False
+        return client.stream_query(StreamQueryRequest(request=query_proto))
+
     if Path(args.query_file).suffix != ".json":
         print("Query file must be a JSON file")
         return False
