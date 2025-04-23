@@ -1,0 +1,31 @@
+{
+    "nodes": [
+      {
+        "type": "kBroadbandSource",
+        "id": 1,
+        "broadbandSource": {
+          "peripheral_id": 100,
+          "sample_rate_hz": 32000,
+          "bit_width": 12,
+          "signal": {
+            "electrode": {
+              "channels": [{"id": 0, "electrode_id": 122, "reference_id": 513}, {"id": 1, "electrode_id": 126, "reference_id": 513}, {"id": 2, "electrode_id": 116, "reference_id": 513}, {"id": 3, "electrode_id": 120, "reference_id": 513}, {"id": 4, "electrode_id": 110, "reference_id": 513}, {"id": 5, "electrode_id": 114, "reference_id": 513}, {"id": 6, "electrode_id": 104, "reference_id": 513}, {"id": 7, "electrode_id": 108, "reference_id": 513}, {"id": 8, "electrode_id": 98, "reference_id": 513}, {"id": 9, "electrode_id": 66, "reference_id": 513}, {"id": 10, "electrode_id": 92, "reference_id": 513}, {"id": 11, "electrode_id": 60, "reference_id": 513}, {"id": 12, "electrode_id": 86, "reference_id": 513}, {"id": 13, "electrode_id": 54, "reference_id": 513}, {"id": 14, "electrode_id": 80, "reference_id": 513}, {"id": 15, "electrode_id": 48, "reference_id": 513}, {"id": 16, "electrode_id": 74, "reference_id": 513}, {"id": 17, "electrode_id": 38, "reference_id": 513}, {"id": 18, "electrode_id": 68, "reference_id": 513}, {"id": 19, "electrode_id": 36, "reference_id": 513}, {"id": 20, "electrode_id": 62, "reference_id": 513}, {"id": 21, "electrode_id": 0, "reference_id": 512}, {"id": 22, "electrode_id": 56, "reference_id": 513}, {"id": 23, "electrode_id": 4, "reference_id": 512}, {"id": 24, "electrode_id": 50, "reference_id": 513}, {"id": 25, "electrode_id": 12, "reference_id": 513}, {"id": 26, "electrode_id": 44, "reference_id": 513}, {"id": 27, "electrode_id": 14, "reference_id": 513}, {"id": 28, "electrode_id": 42, "reference_id": 513}, {"id": 29, "electrode_id": 20, "reference_id": 513}, {"id": 30, "electrode_id": 32, "reference_id": 513}, {"id": 31, "electrode_id": 26, "reference_id": 513}],
+              "low_cutoff_hz": 57,
+              "high_cutoff_hz": 13489
+            }
+          }
+        }
+      },
+      {
+        "type": "kController",
+        "id": 2,
+        "controller": {}
+      }
+    ],
+    "connections": [
+      {
+        "src_node_id": 1,
+        "dst_node_id": 2
+      }
+    ]
+  }
