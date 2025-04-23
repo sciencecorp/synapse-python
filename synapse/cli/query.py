@@ -54,12 +54,19 @@ class StreamingQueryClient:
 
     def stream_query(self, request):
         query_type = request.request.query_type
-        if query_type == QueryRequest.kImpedance:
-            return self.handle_impedance_stream(request)
-        elif query_type == QueryRequest.kSelfTest:
-            return self.handle_self_test_stream(request)
-        else:
-            self.console.log(f"[bold red]Unknown stream request: {query_type}")
+        try:
+            if query_type == QueryRequest.kImpedance:
+                return self.handle_impedance_stream(request)
+            elif query_type == QueryRequest.kSelfTest:
+                return self.handle_self_test_stream(request)
+            else:
+                self.console.log(f"[bold red]Unknown stream request: {query_type}")
+                return False
+        except Exception as e:
+            self.console.log(f"[bold red] Uncaught exception during stream: {e}")
+            return False
+        except KeyboardInterrupt:
+            self.console.log("[yellow] Operation cancelled by user")
             return False
 
     def handle_self_test_stream(self, request):
