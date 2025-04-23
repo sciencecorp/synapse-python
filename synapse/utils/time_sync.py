@@ -41,19 +41,20 @@ def get_time_sync_estimate(packet: TimeSyncPacket) -> TimeSyncEstimate:
 
 class TimeSyncClient:
     def __init__(self, host: str, port: int, config: TimeSyncConfig = TimeSyncConfig(), logger: Union[logging.Logger, None] = None):
-        self.response_timer = None
+        self.sequence_number = 0
         self.client_id = self._generate_client_id()
         self.host = host
         self.port = port
         self.running = False
-        self.sequence_number = 0
         self.config = config or TimeSyncConfig()
         self.current_rtts = [TimeSyncEstimate() for _ in range(self.config.max_sync_packets)]
         self.latest_offset_ns = 0
-        self.last_sync_time_ns = [0, 0]
+        self.last_sync_time_ns = (0, 0)
         self.socket = None
         self.worker_thread = None
         self.logger = logging.getLogger("time-sync") if logger is None else logger
+
+        self.logger.debug(f"TimeSyncClient initialized with client_id: {self.client_id} and host: {self.host} and port: {self.port}")
         
     def _generate_client_id(self) -> int:
         return random.randint(0, 2**32 - 1)
@@ -72,7 +73,7 @@ class TimeSyncClient:
         self.worker_thread.daemon = True
         self.worker_thread.start()
 
-        self.logger.info(f"TimeSyncClient started with client_id: {self.client_id} and host: {self.host} and port: {self.port}")
+        self.logger.info(f"TimeSyncClient started")
         return True
 
     def stop(self):
@@ -145,28 +146,28 @@ class TimeSyncClient:
             response = TimeSyncPacket()
             response.ParseFromString(data)
             response.client_receive_time_ns = now_ns
+
+            if response.client_id != self.client_id:
+                self.logger.warn(f"Received sync packet from {response.client_id}, but expected {self.client_id}")
+                return
+
+            estimate = get_time_sync_estimate(response)
+            self.logger.debug(f"updating estimate for sync packet {self.sequence_number} / {self.config.max_sync_packets}")
+
+            if self.sequence_number >= self.config.max_sync_packets:
+                self.logger.warn(f"Received sync packet {self.sequence_number} / {self.config.max_sync_packets}, but max is {self.config.max_sync_packets}")
+                return
+
+            self.current_rtts[self.sequence_number] = estimate
+
+            self.last_sync_time_ns = (time.time_ns(), self.time_ns())
+
         except Exception as e:
             self.logger.error(f"Error processing response: {e}")
+            return
+
+        finally:
             self._schedule_next_sync()
-            return
-
-        if response.client_id != self.client_id:
-            self.logger.warn(f"Received sync packet from {response.client_id}, but expected {self.client_id}")
-            self._schedule_next_sync()
-            return
-
-        estimate = get_time_sync_estimate(response)
-        self.logger.debug(f"updating estimate for sync packet {self.sequence_number} / {self.config.max_sync_packets}")
-
-        if self.sequence_number >= self.config.max_sync_packets:
-            self.logger.warn(f"Received sync packet {self.sequence_number} / {self.config.max_sync_packets}, but max is {self.config.max_sync_packets}")
-            return
-
-        self.current_rtts[self.sequence_number] = estimate
-
-        self.last_sync_time_ns = [time.time_ns(), self.time_ns()]
-
-        self._schedule_next_sync()
 
     def _update_estimate(self):
         if not self.current_rtts:
