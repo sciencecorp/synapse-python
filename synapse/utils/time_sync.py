@@ -148,14 +148,14 @@ class TimeSyncClient:
             response.client_receive_time_ns = now_ns
 
             if response.client_id != self.client_id:
-                self.logger.warn(f"Received sync packet from {response.client_id}, but expected {self.client_id}")
+                self.logger.warning(f"Received sync packet from {response.client_id}, but expected {self.client_id}")
                 return
 
             estimate = get_time_sync_estimate(response)
             self.logger.debug(f"updating estimate for sync packet {self.sequence_number} / {self.config.max_sync_packets}")
 
             if self.sequence_number >= self.config.max_sync_packets:
-                self.logger.warn(f"Received sync packet {self.sequence_number} / {self.config.max_sync_packets}, but max is {self.config.max_sync_packets}")
+                self.logger.warning(f"Received sync packet {self.sequence_number} / {self.config.max_sync_packets}, but max is {self.config.max_sync_packets}")
                 return
 
             self.current_rtts[self.sequence_number] = estimate
