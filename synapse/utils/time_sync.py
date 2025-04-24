@@ -23,11 +23,19 @@ class TimeSyncEstimate:
     offset_ns = 0
 
 
-def calculate_root_dispersion(samples: List[TimeSyncEstimate], best_offset_ns: int) -> int:
+def calculate_root_dispersion(samples: List[TimeSyncEstimate], best_offset_ns: int) -> Union[int, None]:
     if len(samples) == 0:
         return 0
         
-    min_rtt_sample = min(samples, key=lambda x: x.rtt_ns)
+    min_rtt_sample = None
+    for sample in samples:
+        if sample.rtt_ns <= 0:
+            continue
+        if min_rtt_sample is None or sample.rtt_ns < min_rtt_sample.rtt_ns:
+            min_rtt_sample = sample
+
+    if min_rtt_sample is None:
+        return None
     
     squared_deviations = [(sample.offset_ns - best_offset_ns) ** 2 for sample in samples]
     std_dev_ns = int((sum(squared_deviations) / len(samples)) ** 0.5)
@@ -67,7 +75,7 @@ class OffsetEstimator:
     def get_offset_ns(self) -> int:
         return self._best_offset_ns
     
-    def root_dispersion_ns(self) -> int:
+    def root_dispersion_ns(self) -> Union[int, None]:
         return calculate_root_dispersion(self._samples, self._best_offset_ns)
 
     def _update(self):
@@ -223,7 +231,7 @@ class TimeSyncClient:
             self.latest_offset_ns = self.offset_estimator.get_offset_ns()
             root_dispersion_ns = self.offset_estimator.root_dispersion_ns()
 
-            self.logger.debug(f"Updated estimate - current offset: {self.latest_offset_ns / 1e6} ms, dispersion: {root_dispersion_ns / 1e6} ms")
+            self.logger.debug(f"Updated estimate - current offset: {self.latest_offset_ns / 1e6} ms, dispersion: {root_dispersion_ns / 1e6 if root_dispersion_ns is not None else 'N/A'} ms")
 
         self.sequence_number = 0
         self.current_rtts = [TimeSyncEstimate() for _ in range(self.config.max_sync_packets)]
