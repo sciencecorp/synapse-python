@@ -173,10 +173,19 @@ class TimeSyncClient:
         if not self.current_rtts:
             return
 
-        best_estimate = min(self.current_rtts[:self.sequence_number + 1],
-                          key=lambda x: x.rtt_ns)
-        
-        self.latest_offset_ns = best_estimate.offset_ns
+        best_estimate = None
+        for estimate in self.current_rtts[:self.sequence_number + 1]:
+            if estimate.rtt_ns <= 0:
+                continue
+            if best_estimate is None or estimate.rtt_ns < best_estimate.rtt_ns:
+                best_estimate = estimate
+
+        if best_estimate is not None and best_estimate.rtt_ns > 0:
+            self.offset_estimator.add_sample(best_estimate)
+            
+            self.latest_offset_ns = self.offset_estimator.get_offset_ns()
+
+        # Reset sequence number and clear current RTTs
         self.sequence_number = 0
         self.current_rtts = [TimeSyncEstimate() for _ in range(self.config.max_sync_packets)]
 
