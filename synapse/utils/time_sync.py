@@ -112,7 +112,7 @@ class TimeSyncClient:
         self.worker_thread.daemon = True
         self.worker_thread.start()
 
-        self.logger.info(f"TimeSyncClient started")
+        self.logger.info("TimeSyncClient started")
         return True
 
     def stop(self):
@@ -163,7 +163,7 @@ class TimeSyncClient:
             return
 
         if self.sequence_number == 0:
-            self.logger.debug(f"Sending sync packets...")
+            self.logger.debug("Sending sync packets...")
 
         request = TimeSyncPacket()
         request.client_id = self.client_id
