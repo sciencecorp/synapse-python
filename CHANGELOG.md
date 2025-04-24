@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.1.0](https://github.com/sciencecorp/synapse-python/compare/v2.0.0...v2.1.0) (2025-04-24)
+
+
+### Features
+
+* add `get_last_sync_time_ns` to TimeSyncClient ([#102](https://github.com/sciencecorp/synapse-python/issues/102)) ([90a7ffc](https://github.com/sciencecorp/synapse-python/commit/90a7ffcb4e889d79a0d2fbe1127a6f2fa2186f82))
+* support streaming device queries ([#95](https://github.com/sciencecorp/synapse-python/issues/95)) ([e45e5f5](https://github.com/sciencecorp/synapse-python/commit/e45e5f5d9808445ec34acd0caee86ab5440039e6))
+
 ## [2.0.0](https://github.com/sciencecorp/synapse-python/compare/v1.0.2...v2.0.0) (2025-04-21)
 
 
