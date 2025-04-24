@@ -5,7 +5,7 @@ import random
 import socket
 import threading
 import time
-from typing import Tuple, Union
+from typing import Tuple, Union, List
 
 from synapse.api.time_pb2 import TimeSyncPacket
 
@@ -23,6 +23,18 @@ class TimeSyncEstimate:
     offset_ns = 0
 
 
+def calculate_root_dispersion(samples: List[TimeSyncEstimate], best_offset_ns: int) -> int:
+    if len(samples) == 0:
+        return 0
+        
+    min_rtt_sample = min(samples, key=lambda x: x.rtt_ns)
+    
+    squared_deviations = [(sample.offset_ns - best_offset_ns) ** 2 for sample in samples]
+    std_dev_ns = int((sum(squared_deviations) / len(samples)) ** 0.5)
+    
+    root_dispersion_ns = (min_rtt_sample.rtt_ns // 2) + (2 * std_dev_ns)
+    return root_dispersion_ns
+
 def get_time_sync_estimate(packet: TimeSyncPacket) -> TimeSyncEstimate:
     server_calculation_time_ns = packet.server_send_time_ns - packet.server_receive_time_ns
 
@@ -39,6 +51,32 @@ def get_time_sync_estimate(packet: TimeSyncPacket) -> TimeSyncEstimate:
     estimate.offset_ns = calculated_offset_ns
     return estimate
 
+class OffsetEstimator:
+    def __init__(self, window_size: int = 120):
+        self._window_size = window_size
+        self._best_offset_ns = 0
+        self._samples: List[TimeSyncEstimate] = []
+
+    def add_sample(self, estimate: TimeSyncEstimate):
+        self._samples.append(estimate)
+        if len(self._samples) > self._window_size:
+            self._samples.pop(0)
+
+        self._update()
+
+    def get_offset_ns(self) -> int:
+        return self._best_offset_ns
+    
+    def root_dispersion_ns(self) -> int:
+        return calculate_root_dispersion(self._samples, self._best_offset_ns)
+
+    def _update(self):
+        if len(self._samples) == 0:
+            return
+        
+        sorted_samples = sorted(self._samples, key=lambda x: x.rtt_ns)
+        self._best_offset_ns = sorted_samples[0].offset_ns
+
 class TimeSyncClient:
     def __init__(self, host: str, port: int, config: TimeSyncConfig = TimeSyncConfig(), logger: Union[logging.Logger, None] = None):
         self.sequence_number = 0
@@ -47,6 +85,7 @@ class TimeSyncClient:
         self.port = port
         self.running = False
         self.config = config or TimeSyncConfig()
+        self.offset_estimator = OffsetEstimator()
         self.current_rtts = [TimeSyncEstimate() for _ in range(self.config.max_sync_packets)]
         self.latest_offset_ns = 0
         self.last_sync_time_ns = (0, 0)
@@ -152,7 +191,6 @@ class TimeSyncClient:
                 return
 
             estimate = get_time_sync_estimate(response)
-            self.logger.debug(f"updating estimate for sync packet {self.sequence_number} / {self.config.max_sync_packets}")
 
             if self.sequence_number >= self.config.max_sync_packets:
                 self.logger.warning(f"Received sync packet {self.sequence_number} / {self.config.max_sync_packets}, but max is {self.config.max_sync_packets}")
@@ -174,7 +212,7 @@ class TimeSyncClient:
             return
 
         best_estimate = None
-        for estimate in self.current_rtts[:self.sequence_number + 1]:
+        for estimate in self.current_rtts[:min(self.sequence_number + 1, len(self.current_rtts))]:
             if estimate.rtt_ns <= 0:
                 continue
             if best_estimate is None or estimate.rtt_ns < best_estimate.rtt_ns:
@@ -182,10 +220,11 @@ class TimeSyncClient:
 
         if best_estimate is not None and best_estimate.rtt_ns > 0:
             self.offset_estimator.add_sample(best_estimate)
-            
             self.latest_offset_ns = self.offset_estimator.get_offset_ns()
+            root_dispersion_ns = self.offset_estimator.root_dispersion_ns()
 
-        # Reset sequence number and clear current RTTs
+            self.logger.debug(f"Updated estimate - current offset: {self.latest_offset_ns / 1e6} ms, dispersion: {root_dispersion_ns / 1e6} ms")
+
         self.sequence_number = 0
         self.current_rtts = [TimeSyncEstimate() for _ in range(self.config.max_sync_packets)]
 
