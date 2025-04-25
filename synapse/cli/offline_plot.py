@@ -55,7 +55,7 @@ def setup_logging():
 def process_data(file_path, num_channels, logger):
     _, file_extension = os.path.splitext(file_path)
     PARSE_NEW = True
-    SAVE_CSV = True
+    SAVE_CSV = False
 
     if file_extension in [".bin"]:
         with open(file_path, "rb") as f:
