@@ -54,6 +54,8 @@ def setup_logging():
 # Function to load binary data produced by the stream recording
 def process_data(file_path, num_channels, logger):
     _, file_extension = os.path.splitext(file_path)
+    PARSE_NEW = True
+    SAVE_CSV = True
 
     if file_extension in [".bin"]:
         with open(file_path, "rb") as f:
@@ -67,16 +69,54 @@ def process_data(file_path, num_channels, logger):
         return pd.DataFrame(df)
 
     if file_extension in [".dat"]:
-        with open(file_path, "rb") as f:
-            data = np.fromfile(f, dtype=np.int16)
+        if PARSE_NEW:
+            # For new format with timestamps:
+            # Each frame has: 64-bit unix ts + 64-bit monotonic ts + num_channels*16-bit samples
+            frame_size = 16 + num_channels * 2  # Size in bytes (16 for timestamps, 2 bytes per sample)
+            
+            with open(file_path, "rb") as f:
+                # Skip first num_channels * 2 bytes containing channel id map
+                f.seek(num_channels * 2)
+                
+                # Read all bytes and reshape into frames
+                data = np.fromfile(f, dtype=np.uint8)
+                num_frames = len(data) // frame_size
+                data = data[:num_frames * frame_size].reshape(-1, frame_size)
+                
+                # Extract timestamps and samples
+                unix_ts = data[:, :8].view(np.int64).flatten()
+                monotonic_ts = data[:, 8:16].view(np.int64).flatten()
+                samples = data[:, 16:].view(np.int16)  # Remaining bytes are samples
+                
+                # Create DataFrame with timestamps and channel data
+                df_dict = {
+                    't_unix_ms': unix_ts,
+                    't_monotonic_ns': monotonic_ts
+                }
+                for ch in range(num_channels):
+                    df_dict[f'ch{ch}'] = samples[:, ch]
+                
+                df = pd.DataFrame(df_dict)
+                
+                if SAVE_CSV:
+                    logger.info(f"Saving first 500 frames to {os.path.splitext(file_path)[0]}.csv")
+                    csv_path = os.path.splitext(file_path)[0] + '.csv'
+                    df.head(500).to_csv(csv_path, index=False)
+                # Reshape data like legacy format - channels only
+                df_channels = df[[f'ch{i}' for i in range(num_channels)]]
+                df = df_channels.values.reshape(-1, num_channels)
+                df = pd.DataFrame(df)
+                return df
+        else:
+            # Legacy format
+            with open(file_path, "rb") as f:
+                data = np.fromfile(f, dtype=np.int16)
 
-        df = pd.DataFrame(data)
-        new_len = (len(df)) // num_channels
-        df = df.tail(
-            -num_channels
-        )  # Remove the header info containing the channel mapping
-        df = df.head(new_len * num_channels)
-        df = df.values.reshape(-1, num_channels)
+            df = pd.DataFrame(data)
+            new_len = (len(df)) // num_channels
+            df = df.tail(-num_channels)  # Remove the header info containing the channel mapping
+            df = df.head(new_len * num_channels)
+            df = df.values.reshape(-1, num_channels)
 
         return pd.DataFrame(df)
 
