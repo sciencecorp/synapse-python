@@ -58,6 +58,11 @@ generate() {
     generate_protos "${PROTO_DIR_SYNAPSE_API}" "${PROTO_OUT_SYNAPSE_API}" "api/synapse.proto"
 }
 
+generate_version() {
+    echo "Generating version file..."
+    git -C ${PROTO_DIR_SYNAPSE_API} describe --tags --abbrev=0 | sed 's/^v//' > ${PROTO_OUT_SYNAPSE_API}/api/version.txt || echo "0.0.0" > ${PROTO_OUT_SYNAPSE_API}/api/version.txt
+}
+
 run_tests() {
     echo "Running tests..."
     pytest -v
@@ -70,6 +75,7 @@ case "$1" in
         ;;
     "generate")
         generate
+        generate_version
         ;;
     "test")
         run_tests
@@ -77,6 +83,7 @@ case "$1" in
     "all")
         clean
         generate
+        generate_version
         ;;
     *)
         echo "Usage: $0 {clean|generate|test|all}"
