@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import AsyncGenerator, Optional, Union
 import grpc
 from google.protobuf.empty_pb2 import Empty
