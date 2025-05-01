@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.2.0](https://github.com/sciencecorp/synapse-python/compare/v2.1.0...v2.2.0) (2025-05-01)
+
+
+### Features
+
+* Fix issue where uri is forgotten ([#104](https://github.com/sciencecorp/synapse-python/issues/104)) ([c84a88a](https://github.com/sciencecorp/synapse-python/commit/c84a88a949bec74c57f532696148b952de6434f7))
+* populate synapse_api_version DeviceInfo field in server ([#94](https://github.com/sciencecorp/synapse-python/issues/94)) ([20b0aea](https://github.com/sciencecorp/synapse-python/commit/20b0aeaf37776c9aebdca9420172cca13f87184f))
+
+
+### Bug Fixes
+
+* fix issue with LogLevel type annotation on certain client device methods ([#105](https://github.com/sciencecorp/synapse-python/issues/105)) ([e0bc439](https://github.com/sciencecorp/synapse-python/commit/e0bc439b7df613abbad87e7039ce18636a501170))
+
 ## [2.1.0](https://github.com/sciencecorp/synapse-python/compare/v2.0.0...v2.1.0) (2025-04-24)
 
 
