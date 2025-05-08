@@ -85,25 +85,6 @@ def add_commands(subparsers):
     f.set_defaults(func=get_logs)
 
 
-def list_taps(args):
-    console = Console()
-
-    request = QueryRequest()
-    request.query_type = QueryRequest.kListTaps
-    request.list_taps_query.SetInParent()
-    response = syn.Device(args.uri, args.verbose).query(request)
-
-    table = Table(title="Available Taps", show_lines=True)
-    table.add_column("Name", style="cyan")
-    table.add_column("Message Type", style="green")
-    table.add_column("Endpoint (will be abstracted)", style="green")
-
-    for tap in response.list_taps_response.taps:
-        table.add_row(tap.name, tap.message_type, tap.endpoint)
-
-    console.print(table)
-
-
 def info(args):
     console = Console()
     with console.status("Getting device information...", spinner="bouncingBall"):
@@ -267,3 +248,22 @@ def get_logs(args):
     finally:
         if output_file:
             output_file.close()
+
+
+def list_taps(args):
+    console = Console()
+
+    request = QueryRequest()
+    request.query_type = QueryRequest.kListTaps
+    request.list_taps_query.SetInParent()
+    response = syn.Device(args.uri, args.verbose).query(request)
+
+    table = Table(title="Available Taps", show_lines=True)
+    table.add_column("Name", style="cyan")
+    table.add_column("Message Type", style="green")
+    table.add_column("Endpoint", style="green")
+
+    for tap in response.list_taps_response.taps:
+        table.add_row(tap.name, tap.message_type, tap.endpoint)
+
+    console.print(table)
