@@ -885,7 +885,8 @@ def deploy_cmd(args):
         return
 
     # Deploy the package to the device
-    uri = getattr(args, "uri", None)
+    uri = args.uri
+    print(f"Deploying package to: {uri}")
     if uri:
         deploy_package(uri, deb_package)
     else:
@@ -939,9 +940,6 @@ def add_commands(subparsers):
     deploy_parser.add_argument(
         "app_dir", nargs="?", default=".", help="Path to the application directory"
     )
-    deploy_parser.add_argument(
-        "--uri", "-u", help="Device IP address to deploy to", type=str
-    )
     deploy_parser.set_defaults(func=deploy_cmd)
 
     # Start app command
@@ -949,7 +947,4 @@ def add_commands(subparsers):
         "start-app", help="Start an application on a Synapse device"
     )
     start_app_parser.add_argument("app_name", help="Name of the application to start")
-    start_app_parser.add_argument(
-        "--uri", "-u", help="Device IP address to start the app on", type=str
-    )
     start_app_parser.set_defaults(func=start_app_cmd)
