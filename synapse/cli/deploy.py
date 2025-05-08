@@ -489,108 +489,6 @@ def save_credentials(ip_address, username, login_password, root_password):
         console.print(f"[yellow]Warning: Failed to save credentials: {e}[/yellow]")
 
 
-def start_app(ip_address, app_name):
-    """Start the application on the device"""
-    # Stop any previous progress display
-    console.clear_live()
-
-    # Get cached credentials or prompt for new ones
-    cached_ip, username, login_password, root_password = load_cached_credentials()
-
-    # If no cached credentials or they don't match our target IP, prompt for new ones
-    if (
-        not cached_ip
-        or cached_ip != ip_address
-        or not username
-        or not login_password
-        or not root_password
-    ):
-        username, login_password, root_password = get_device_credentials(ip_address)
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}[/bold blue]"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(
-            f"[yellow]Starting {app_name} on {ip_address}...", total=1
-        )
-
-        try:
-            # Start the app using paramiko
-            import paramiko
-
-            client = None
-            shell = None
-
-            try:
-                # Create SSH client
-                client = paramiko.SSHClient()
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-                # Connect to the device
-                client.connect(
-                    ip_address, username=username, password=login_password, timeout=10
-                )
-
-                # Use interactive shell to run commands with sudo
-                shell = client.invoke_shell()
-
-                # Send the command to start the application
-                shell.send(f"sudo systemctl start {app_name}.service\n")
-                time.sleep(2)  # Wait for the command to execute
-
-                # Collect output to check for errors
-                output = ""
-                while shell.recv_ready():
-                    chunk = shell.recv(4096).decode("utf-8")
-                    output += chunk
-
-                # If there's an error, we'll usually see it in the output
-                if "error" in output.lower() or "failed" in output.lower():
-                    progress.update(task, visible=False)
-                    console.print(
-                        f"[bold red]Error:[/bold red] Failed to start application:\n{output}"
-                    )
-                    return False
-
-                # Save successful credentials
-                save_credentials(ip_address, username, login_password, root_password)
-
-                progress.update(task, advance=1)
-
-                console.print(
-                    Panel(
-                        f"[bold green]Successfully started[/bold green] [yellow]{app_name}[/yellow] [bold green]on[/bold green] [blue]{ip_address}[/blue]",
-                        title="Application Started",
-                        border_style="green",
-                        box=box.DOUBLE,
-                    )
-                )
-                return True
-
-            except Exception as e:
-                progress.update(task, visible=False)
-                console.print(f"[bold red]Error:[/bold red] {str(e)}")
-                return False
-
-        except Exception as e:
-            progress.update(task, visible=False)
-            console.print(
-                f"[bold red]Error:[/bold red] Failed to start application: {e}"
-            )
-            return False
-        finally:
-            # Clean up connections
-            try:
-                if shell:
-                    shell.close()
-                if client:
-                    client.close()
-            except:
-                pass
-
-
 def build_app(app_dir, app_name):
     """Build the application binary before packaging"""
     console.print(f"[yellow]Building application: {app_name}...[/yellow]")
@@ -802,18 +700,6 @@ def deploy_cmd(args):
         console.print(f"[green]Package available at:[/green] {deb_package}")
 
 
-def start_app_cmd(args):
-    """Handle the start-app command"""
-    uri = getattr(args, "uri", None)
-    if not uri:
-        console.print(
-            "[bold red]Error:[/bold red] No URI provided. Cannot start the application."
-        )
-        return
-
-    start_app(uri, args.app_name)
-
-
 def add_commands(subparsers):
     """Add deploy commands to the CLI"""
     # Deploy command
@@ -824,13 +710,6 @@ def add_commands(subparsers):
         "app_dir", nargs="?", default=".", help="Path to the application directory"
     )
     deploy_parser.set_defaults(func=deploy_cmd)
-
-    # Start app command
-    start_app_parser = subparsers.add_parser(
-        "start-app", help="Start an application on a Synapse device"
-    )
-    start_app_parser.add_argument("app_name", help="Name of the application to start")
-    start_app_parser.set_defaults(func=start_app_cmd)
 
 # ---------------------------------------------------------------------------
 # Helper utilities shared across this module
