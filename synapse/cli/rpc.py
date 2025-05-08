@@ -87,14 +87,18 @@ def add_commands(subparsers):
 
 def list_taps(args):
     console = Console()
-    taps = syn.Device(args.uri, args.verbose).list_taps()
 
-    table = Table(title="Available Taps")
+    request = QueryRequest()
+    request.query_type = QueryRequest.kListTaps
+    request.list_taps_query.SetInParent()
+    response = syn.Device(args.uri, args.verbose).query(request)
+
+    table = Table(title="Available Taps", show_lines=True)
     table.add_column("Name", style="cyan")
     table.add_column("Message Type", style="green")
-    table.add_column("Endpoint", style="green")
+    table.add_column("Endpoint (will be abstracted)", style="green")
 
-    for tap in taps.taps:
+    for tap in response.list_taps_response.taps:
         table.add_row(tap.name, tap.message_type, tap.endpoint)
 
     console.print(table)

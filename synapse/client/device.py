@@ -16,7 +16,6 @@ from synapse.api.status_pb2 import StatusCode, Status
 from synapse.api.synapse_pb2_grpc import SynapseDeviceStub
 from synapse.client.config import Config
 from synapse.utils.log import log_level_to_pb
-from synapse.api.tap_pb2 import ListTapsRequest
 
 DEFAULT_SYNAPSE_PORT = 647
 
@@ -185,14 +184,6 @@ class Device(object):
         except Exception as e:
             self.logger.error(f"Error during StreamQuery: {str(e)}")
             yield StreamQueryResponse(code=StatusCode.kQueryFailed)
-
-    def list_taps(self) -> ListTapResponse:
-        try:
-            request = ListTapsRequest()
-            return self.rpc.ListTaps(request)
-        except grpc.RpcError as e:
-            self.logger.error("Error: %s", e.details)
-            return None
 
     def _handle_status_response(self, status):
         if status.code != StatusCode.kOk:
