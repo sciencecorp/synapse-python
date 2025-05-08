@@ -1,5 +1,4 @@
 import os
-import sys
 import subprocess
 import shutil
 import json
@@ -764,12 +763,6 @@ def deploy_cmd(args):
     if not ensure_docker():
         return
 
-    # Ensure paramiko dependency is available
-    try:
-        ensure_paramiko()
-    except Exception:
-        return
-
     # Get absolute path of app directory
     app_dir = os.path.abspath(args.app_dir)
 
@@ -811,12 +804,6 @@ def deploy_cmd(args):
 
 def start_app_cmd(args):
     """Handle the start-app command"""
-    # Ensure paramiko dependency is available
-    try:
-        ensure_paramiko()
-    except Exception:
-        return
-
     uri = getattr(args, "uri", None)
     if not uri:
         console.print(
@@ -848,29 +835,6 @@ def add_commands(subparsers):
 # ---------------------------------------------------------------------------
 # Helper utilities shared across this module
 # ---------------------------------------------------------------------------
-
-def ensure_paramiko():
-    """Import paramiko, installing it on the fly if it is missing.
-
-    This logic was previously duplicated in multiple command handlers.  The
-    helper makes the intent explicit and keeps the main code paths concise.
-    """
-    try:
-        import importlib  # noqa: WPS433 – used intentionally for runtime import
-        importlib.import_module("paramiko")
-    except ImportError:
-        console.print(
-            "[yellow]Required module 'paramiko' not found. Attempting to install...[/yellow]"
-        )
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "paramiko>=2.7.2"])
-            console.print("[green]Successfully installed paramiko.[/green]")
-        except Exception as exc:  # pragma: no cover – best-effort installation
-            console.print(f"[bold red]Error:[/bold red] Failed to install paramiko: {exc}")
-            console.print("[yellow]Please manually install required dependencies:[/yellow]")
-            console.print("pip install paramiko>=2.7.2")
-            raise
-
 
 def get_synapse_root() -> str:
     """Return the absolute path to the *synapse-python* repository root."""
