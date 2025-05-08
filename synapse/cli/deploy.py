@@ -760,6 +760,10 @@ def build_app(app_dir, app_name):
 
 def deploy_cmd(args):
     """Handle the deploy command"""
+    # Ensure Docker is available and running
+    if not ensure_docker():
+        return
+
     # Ensure paramiko dependency is available
     try:
         ensure_paramiko()
@@ -888,3 +892,34 @@ def detect_arch() -> str:
     """Return an architecture tag suffix (``arm64`` or ``amd64``)."""
     arch = subprocess.check_output(["uname", "-m"]).decode("utf-8").strip()
     return "arm64" if arch in ("arm64", "aarch64") else "amd64"
+
+
+# ---------------------------------------------------------------------------
+# Environment sanity-check helpers
+# ---------------------------------------------------------------------------
+
+def ensure_docker() -> bool:
+    """Return True if the *docker* CLI is available and the daemon responds.
+
+    Prints a clear, user-friendly message and returns ``False`` otherwise so the
+    caller can abort early.
+    """
+    if shutil.which("docker") is None:
+        console.print(
+            "[bold red]Error:[/bold red] Docker CLI not found. Please install Docker before running this command."
+        )
+        return False
+
+    try:
+        subprocess.run(
+            ["docker", "info"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        console.print(
+            "[bold red]Error:[/bold red] Docker daemon does not appear to be running. Please start Docker and try again."
+        )
+        return False
