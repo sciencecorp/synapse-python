@@ -94,9 +94,7 @@ def package_app(app_dir, app_name):
     else:
         # We're outside Docker, need to use docker to package
         # Always use the build_docker.sh from the synapse-python package directly
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        synapse_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
-        build_docker_script = os.path.join(synapse_root, "synapse", "templates", "app", "build_docker.sh")
+        build_docker_script = get_build_docker_script()
         
         if not os.path.exists(build_docker_script):
             console.print(
@@ -108,9 +106,7 @@ def package_app(app_dir, app_name):
         os.chmod(build_docker_script, 0o755)
 
         # Path to ops templates inside synapse-python
-        template_ops_dir = os.path.join(
-            synapse_root, "synapse", "templates", "app", "ops"
-        )
+        template_ops_dir = get_template_ops_dir()
 
         with Progress(
             SpinnerColumn(),
@@ -121,9 +117,10 @@ def package_app(app_dir, app_name):
         ) as progress:
             build_task = progress.add_task("[yellow]Building Docker image...", total=1)
 
-            # Build the Docker image - capture output to prevent interference with progress
+            # ------------------------------------------------------------------
+            # STEP 1: Build the Docker image used for packaging the application
+            # ------------------------------------------------------------------
             try:
-                # Use capture_output to prevent Docker output from interfering with progress bars
                 result = subprocess.run(
                     ["bash", build_docker_script],
                     check=True,
@@ -132,34 +129,26 @@ def package_app(app_dir, app_name):
                     text=True,
                 )
 
-                # Only log errors if they occur, otherwise just update progress
-                if result.stderr and (
-                    "error" in result.stderr.lower() or "fail" in result.stderr.lower()
-                ):
+                # Log any warnings emitted by the build step so they are not lost
+                if result.stderr and any(word in result.stderr.lower() for word in ("error", "fail")):
                     console.print(f"[bold red]Warning:[/bold red] {result.stderr}")
 
+                # Mark the *build* step as complete
                 progress.update(build_task, advance=1)
-            except subprocess.CalledProcessError as e:
-                console.print(
-                    f"[bold red]Error:[/bold red] Failed to build Docker image: {e}"
-                )
-                if e.stderr:
-                    console.print(f"[red]{e.stderr}[/red]")
+            except subprocess.CalledProcessError as exc:
+                console.print(f"[bold red]Error:[/bold red] Failed to build Docker image: {exc}")
+                if exc.stderr:
+                    console.print(f"[red]{exc.stderr}[/red]")
                 return False
 
-            package_task = progress.add_task(
-                "[yellow]Packaging application...", total=1
-            )
+            # ------------------------------------------------------------------
+            # STEP 2: Package the application inside the freshly-built container
+            # ------------------------------------------------------------------
+            package_task = progress.add_task("[yellow]Packaging application...", total=1)
 
-            # Detect host architecture so we can use the correct image tag
-            arch = subprocess.check_output(["uname", "-m"]).decode("utf-8").strip()
-            if arch in ["arm64", "aarch64"]:
-                tag_suffix = "arm64"
-            else:
-                tag_suffix = "amd64"
-
+            tag_suffix = detect_arch()
             image = f"{os.path.basename(app_dir)}:latest-{tag_suffix}"
-
+            
             # Compose a bash script that prepares the template files and then runs the
             # packaging script.  All placeholder replacements and SOURCE_DIR
             # overrides happen entirely inside the container so that nothing ever
@@ -624,11 +613,7 @@ def build_app(app_dir, app_name):
     console.print("[yellow]Binary not found, attempting to build...[/yellow]")
 
     # Detect architecture
-    arch = subprocess.check_output(["uname", "-m"]).decode("utf-8").strip()
-    if arch in ["arm64", "aarch64"]:
-        tag_suffix = "arm64"
-    else:
-        tag_suffix = "amd64"
+    tag_suffix = detect_arch()
 
     # Image name
     image = f"{os.path.basename(app_dir)}:latest-{tag_suffix}"
@@ -648,10 +633,8 @@ def build_app(app_dir, app_name):
             f"[yellow]Docker image {image} not found, building it first...[/yellow]"
         )
         
-        # Always use the build_docker.sh from the synapse-python package directly
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        synapse_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
-        build_docker_script = os.path.join(synapse_root, "synapse", "templates", "app", "build_docker.sh")
+        # Always use the shared build_docker.sh script
+        build_docker_script = get_build_docker_script()
         
         if not os.path.exists(build_docker_script):
             console.print(
@@ -777,28 +760,11 @@ def build_app(app_dir, app_name):
 
 def deploy_cmd(args):
     """Handle the deploy command"""
-    # Check for required modules and install them if missing
+    # Ensure paramiko dependency is available
     try:
-        import paramiko
-    except ImportError:
-        console.print(
-            "[yellow]Required module 'paramiko' not found. Attempting to install...[/yellow]"
-        )
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "paramiko>=2.7.2"]
-            )
-            console.print("[green]Successfully installed paramiko.[/green]")
-            # Re-import after installing
-        except Exception as e:
-            console.print(
-                f"[bold red]Error:[/bold red] Failed to install paramiko: {e}"
-            )
-            console.print(
-                "[yellow]Please manually install required dependencies:[/yellow]"
-            )
-            console.print("pip install paramiko>=2.7.2")
-            return
+        ensure_paramiko()
+    except Exception:
+        return
 
     # Get absolute path of app directory
     app_dir = os.path.abspath(args.app_dir)
@@ -841,28 +807,11 @@ def deploy_cmd(args):
 
 def start_app_cmd(args):
     """Handle the start-app command"""
-    # Check for required modules and install them if missing
+    # Ensure paramiko dependency is available
     try:
-        import paramiko
-    except ImportError:
-        console.print(
-            "[yellow]Required module 'paramiko' not found. Attempting to install...[/yellow]"
-        )
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "paramiko>=2.7.2"]
-            )
-            console.print("[green]Successfully installed paramiko.[/green]")
-            # Re-import after installing
-        except Exception as e:
-            console.print(
-                f"[bold red]Error:[/bold red] Failed to install paramiko: {e}"
-            )
-            console.print(
-                "[yellow]Please manually install required dependencies:[/yellow]"
-            )
-            console.print("pip install paramiko>=2.7.2")
-            return
+        ensure_paramiko()
+    except Exception:
+        return
 
     uri = getattr(args, "uri", None)
     if not uri:
@@ -891,3 +840,51 @@ def add_commands(subparsers):
     )
     start_app_parser.add_argument("app_name", help="Name of the application to start")
     start_app_parser.set_defaults(func=start_app_cmd)
+
+# ---------------------------------------------------------------------------
+# Helper utilities shared across this module
+# ---------------------------------------------------------------------------
+
+def ensure_paramiko():
+    """Import paramiko, installing it on the fly if it is missing.
+
+    This logic was previously duplicated in multiple command handlers.  The
+    helper makes the intent explicit and keeps the main code paths concise.
+    """
+    try:
+        import importlib  # noqa: WPS433 – used intentionally for runtime import
+        importlib.import_module("paramiko")
+    except ImportError:
+        console.print(
+            "[yellow]Required module 'paramiko' not found. Attempting to install...[/yellow]"
+        )
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "paramiko>=2.7.2"])
+            console.print("[green]Successfully installed paramiko.[/green]")
+        except Exception as exc:  # pragma: no cover – best-effort installation
+            console.print(f"[bold red]Error:[/bold red] Failed to install paramiko: {exc}")
+            console.print("[yellow]Please manually install required dependencies:[/yellow]")
+            console.print("pip install paramiko>=2.7.2")
+            raise
+
+
+def get_synapse_root() -> str:
+    """Return the absolute path to the *synapse-python* repository root."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.abspath(os.path.join(script_dir, "..", ".."))
+
+
+def get_build_docker_script() -> str:
+    """Return the canonical *build_docker.sh* path used throughout the tool."""
+    return os.path.join(get_synapse_root(), "synapse", "templates", "app", "build_docker.sh")
+
+
+def get_template_ops_dir() -> str:
+    """Return the path to the shared *ops* template directory."""
+    return os.path.join(get_synapse_root(), "synapse", "templates", "app", "ops")
+
+
+def detect_arch() -> str:
+    """Return an architecture tag suffix (``arm64`` or ``amd64``)."""
+    arch = subprocess.check_output(["uname", "-m"]).decode("utf-8").strip()
+    return "arm64" if arch in ("arm64", "aarch64") else "amd64"
