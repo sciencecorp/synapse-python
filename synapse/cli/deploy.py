@@ -49,62 +49,7 @@ def validate_manifest(manifest_path):
         return False
 
 
-def replace_app_name_in_scripts(app_dir, app_name):
-    """Replace the app name in packaging scripts"""
-    package_script = os.path.join(app_dir, "ops", "package", "package.sh")
-
-    # List of scripts that need app name replacement
-    script_paths = [
-        os.path.join(app_dir, "ops", "package", "package.sh"),
-        os.path.join(app_dir, "ops", "package", "scripts", "postinstall.sh"),
-        os.path.join(app_dir, "ops", "package", "scripts", "preremove.sh"),
-        os.path.join(app_dir, "ops", "package", "scripts", "launch_synapse_app.sh"),
-    ]
-
-    # Replace template variables in each script
-    for script_path in script_paths:
-        if os.path.exists(script_path):
-            with open(script_path, "r") as f:
-                content = f.read()
-
-            # Replace the app name in the script
-            content = content.replace("{{APP_NAME}}", app_name)
-            content = content.replace(
-                'SYNAPSE_APP_EXE="synapse-example-app"', f'SYNAPSE_APP_EXE="{app_name}"'
-            )
-
-            with open(script_path, "w") as f:
-                f.write(content)
-
-    # Handle the systemd service file specially - it needs to be renamed
-    systemd_template = os.path.join(
-        app_dir, "ops", "package", "systemd", "{{APP_NAME}}.service"
-    )
-    systemd_target = os.path.join(
-        app_dir, "ops", "package", "systemd", f"{app_name}.service"
-    )
-
-    if os.path.exists(systemd_template):
-        # Read template content
-        with open(systemd_template, "r") as f:
-            content = f.read()
-
-        # Replace template variables
-        content = content.replace("{{APP_NAME}}", app_name)
-
-        # Write to the new file
-        with open(systemd_target, "w") as f:
-            f.write(content)
-
-        # Remove the template file if it's different from the target
-        if systemd_template != systemd_target:
-            try:
-                os.remove(systemd_template)
-            except:
-                pass
-
-
-def package_app(app_dir):
+def package_app(app_dir, app_name):
     """Package the application into a .deb file"""
     # Check if we're in a Docker container
     if os.path.exists("/.dockerenv"):
@@ -148,71 +93,24 @@ def package_app(app_dir):
                 return False
     else:
         # We're outside Docker, need to use docker to package
-        script_path = os.path.join(app_dir, "build_docker.sh")
-
-        # Check if build_docker.sh exists in app_dir
-        if not os.path.exists(script_path):
-            # Use the one from synapse-python instead
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            template_dir = os.path.join(script_dir, "..", "templates", "app")
-            script_path = os.path.join(template_dir, "build_docker.sh")
-
-            if not os.path.exists(script_path):
-                console.print(
-                    "[bold red]Error:[/bold red] Docker build script not found"
-                )
-                return False
-
-            # Copy the script to the app directory
-            shutil.copy(script_path, os.path.join(app_dir, "build_docker.sh"))
-            script_path = os.path.join(app_dir, "build_docker.sh")
-
-            # Also check if the ops directory exists, if not, copy template files
-            ops_dir = os.path.join(app_dir, "ops")
-            if not os.path.exists(ops_dir) or not os.path.exists(
-                os.path.join(ops_dir, "package", "package.sh")
-            ):
-                # Create the ops directory structure
-                os.makedirs(
-                    os.path.join(app_dir, "ops", "package", "scripts"), exist_ok=True
-                )
-                os.makedirs(
-                    os.path.join(app_dir, "ops", "package", "systemd"), exist_ok=True
-                )
-
-                # Copy template files from synapse-python
-                template_ops_dir = os.path.join(template_dir, "ops")
-                if os.path.exists(template_ops_dir):
-                    # Copy package.sh
-                    package_sh = os.path.join(template_ops_dir, "package", "package.sh")
-                    if os.path.exists(package_sh):
-                        shutil.copy(
-                            package_sh,
-                            os.path.join(app_dir, "ops", "package", "package.sh"),
-                        )
-
-                    # Copy scripts
-                    scripts_dir = os.path.join(template_ops_dir, "package", "scripts")
-                    if os.path.exists(scripts_dir):
-                        for script in os.listdir(scripts_dir):
-                            src = os.path.join(scripts_dir, script)
-                            dst = os.path.join(
-                                app_dir, "ops", "package", "scripts", script
-                            )
-                            shutil.copy(src, dst)
-
-                    # Copy systemd files
-                    systemd_dir = os.path.join(template_ops_dir, "package", "systemd")
-                    if os.path.exists(systemd_dir):
-                        for file in os.listdir(systemd_dir):
-                            src = os.path.join(systemd_dir, file)
-                            dst = os.path.join(
-                                app_dir, "ops", "package", "systemd", file
-                            )
-                            shutil.copy(src, dst)
-
+        # Always use the build_docker.sh from the synapse-python package directly
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        synapse_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+        build_docker_script = os.path.join(synapse_root, "synapse", "templates", "app", "build_docker.sh")
+        
+        if not os.path.exists(build_docker_script):
+            console.print(
+                f"[bold red]Error:[/bold red] Could not find Docker build script at {build_docker_script}"
+            )
+            return False
+            
         # Make sure the script is executable
-        os.chmod(script_path, 0o755)
+        os.chmod(build_docker_script, 0o755)
+
+        # Path to ops templates inside synapse-python
+        template_ops_dir = os.path.join(
+            synapse_root, "synapse", "templates", "app", "ops"
+        )
 
         with Progress(
             SpinnerColumn(),
@@ -227,7 +125,7 @@ def package_app(app_dir):
             try:
                 # Use capture_output to prevent Docker output from interfering with progress bars
                 result = subprocess.run(
-                    ["bash", script_path],
+                    ["bash", build_docker_script],
                     check=True,
                     cwd=app_dir,
                     capture_output=True,
@@ -253,33 +151,67 @@ def package_app(app_dir):
                 "[yellow]Packaging application...", total=1
             )
 
-            # Now run package.sh in the Docker container
+            # Detect host architecture so we can use the correct image tag
+            arch = subprocess.check_output(["uname", "-m"]).decode("utf-8").strip()
+            if arch in ["arm64", "aarch64"]:
+                tag_suffix = "arm64"
+            else:
+                tag_suffix = "amd64"
+
+            image = f"{os.path.basename(app_dir)}:latest-{tag_suffix}"
+
+            # Compose a bash script that prepares the template files and then runs the
+            # packaging script.  All placeholder replacements and SOURCE_DIR
+            # overrides happen entirely inside the container so that nothing ever
+            # gets written back to the application repository.
+
+            bash_cmd = f'''
+set -e
+APP_NAME="{app_name}"
+
+# Copy the template ops directory to a temporary working area inside the container
+TEMPLATE_DIR="/synapse_ops"
+TEMP_DIR="/tmp/synapse_package_ops"
+rm -rf "$TEMP_DIR"
+cp -r "$TEMPLATE_DIR" "$TEMP_DIR"
+
+# Replace placeholders in every file
+find "$TEMP_DIR" -type f -exec sed -i 's/{{{{APP_NAME}}}}/'"$APP_NAME"'/g' {{}} +
+
+# Rename the systemd service template to the correct name
+# The template file is literally called "{{APP_NAME}}.service" (double braces).
+if [ -f "$TEMP_DIR/package/systemd/{{{{APP_NAME}}}}.service" ]; then
+    mv "$TEMP_DIR/package/systemd/{{{{APP_NAME}}}}.service" "$TEMP_DIR/package/systemd/$APP_NAME.service"
+fi
+
+# Ensure the packaging script is executable and points to the correct source dir
+chmod +x "$TEMP_DIR/package/package.sh"
+sed -i 's|SOURCE_DIR=.*|SOURCE_DIR="/home/workspace"|' "$TEMP_DIR/package/package.sh"
+
+# Finally, run the packaging script from the workspace root so that the .deb lands
+# in the application directory that is mounted from the host.
+cd /home/workspace
+bash "$TEMP_DIR/package/package.sh"
+'''
+
+            cmd = [
+                "docker",
+                "run",
+                "-i",
+                "--rm",
+                "-v",
+                f"{os.path.abspath(app_dir)}:/home/workspace",
+                "-v",
+                f"{template_ops_dir}:/synapse_ops:ro",
+                image,
+                "/bin/bash",
+                "-c",
+                bash_cmd,
+            ]
+
+            # Run the packaging script in Docker - capture output
+            print(f"Running packaging script in Docker: {image}")
             try:
-                # Detect architecture
-                arch = subprocess.check_output(["uname", "-m"]).decode("utf-8").strip()
-                if arch in ["arm64", "aarch64"]:
-                    tag_suffix = "arm64"
-                else:
-                    tag_suffix = "amd64"
-
-                # Image name
-                image = f"{os.path.basename(app_dir)}:latest-{tag_suffix}"
-
-                # Run the packaging script in Docker - capture output
-                print(f"Running packaging script in Docker: {image}")
-                cmd = [
-                    "docker",
-                    "run",
-                    "-it",
-                    "--rm",
-                    "-v",
-                    f"{os.path.abspath(app_dir)}:/home/workspace",
-                    image,
-                    "/bin/bash",
-                    "-c",
-                    "cd /home/workspace && ./ops/package/package.sh",
-                ]
-
                 # Capture output to prevent it from interfering with progress bars
                 result = subprocess.run(
                     cmd, check=True, cwd=app_dir, capture_output=True, text=True
@@ -715,7 +647,21 @@ def build_app(app_dir, app_name):
         console.print(
             f"[yellow]Docker image {image} not found, building it first...[/yellow]"
         )
-        build_docker_script = os.path.join(app_dir, "build_docker.sh")
+        
+        # Always use the build_docker.sh from the synapse-python package directly
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        synapse_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+        build_docker_script = os.path.join(synapse_root, "synapse", "templates", "app", "build_docker.sh")
+        
+        if not os.path.exists(build_docker_script):
+            console.print(
+                f"[bold red]Error:[/bold red] Could not find Docker build script at {build_docker_script}"
+            )
+            return False
+            
+        # Make sure the script is executable
+        os.chmod(build_docker_script, 0o755)
+        
         try:
             # Run the build script without capturing output so user can see progress
             console.print("[blue]Running build_docker.sh...[/blue]")
@@ -872,11 +818,8 @@ def deploy_cmd(args):
         console.print("[bold red]Error:[/bold red] Failed to build the application.")
         return
 
-    # Replace app name in packaging scripts
-    replace_app_name_in_scripts(app_dir, app_name)
-
     # Package the app
-    if not package_app(app_dir):
+    if not package_app(app_dir, app_name):
         return
 
     # Find the generated .deb package
