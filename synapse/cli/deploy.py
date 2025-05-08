@@ -220,6 +220,7 @@ def package_app(app_dir):
                 image = f"{os.path.basename(app_dir)}:latest-{tag_suffix}"
                 
                 # Run the packaging script in Docker - capture output
+                print(f"Running packaging script in Docker: {image}")
                 cmd = [
                     'docker', 'run', '-it', '--rm',
                     '-v', f"{os.path.abspath(app_dir)}:/home/workspace",
@@ -615,25 +616,25 @@ def build_app(app_dir, app_name):
         'docker', 'run', '--rm',
         '-v', f"{os.path.abspath(app_dir)}:/home/workspace",
         image,
-        '/bin/bash', '-c', "cd /home/workspace && \
-        if [ -f CMakePresets.json ]; then \
-            # Use the existing presets if available\
-            echo 'Using existing CMake presets...' && \
-            cmake --preset=dynamic-aarch64 && \
-            cmake --build --preset=cross-release -j$(nproc); \
-        else \
-            # Fall back to manual configuration\
-            echo 'No CMake presets found, using manual configuration...' && \
-            export VCPKG_DEFAULT_TRIPLET=arm64-linux-dynamic-release && \
+        '/bin/bash', '-c', """cd /home/workspace && 
+        if [ -f CMakePresets.json ]; then 
+            # Use the existing presets if available
+            echo 'Using existing CMake presets...' && 
+            cmake --preset=dynamic-aarch64 && 
+            cmake --build --preset=cross-release -j$(nproc); 
+        else 
+            # Fall back to manual configuration
+            echo 'No CMake presets found, using manual configuration...' && 
+            export VCPKG_DEFAULT_TRIPLET=arm64-linux-dynamic-release && 
             cmake -B build -S . \
             -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake \
             -DVCPKG_TARGET_TRIPLET=arm64-linux-dynamic-release \
             -DVCPKG_INSTALLED_DIR=${VCPKG_ROOT}/vcpkg_installed \
             -DBUILD_SHARED_LIBS=ON \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_FOR_ARM64=ON && \
-            cmake --build build -j$(nproc); \
-        fi"
+            -DBUILD_FOR_ARM64=ON && 
+            cmake --build build -j$(nproc); 
+        fi"""
     ]
     
     try:
