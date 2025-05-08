@@ -1,0 +1,27 @@
+[Unit]
+Description=Synapse Application
+After=network-online.target
+
+# We need to wait for the network to be online before starting the service
+Wants=network-online.target
+
+# We need to wait for the udev service to be ready before starting the server
+Requires=systemd-udevd.service
+After=systemd-udevd.service
+
+# TODO: Make user run as non-root
+[Service]
+Type=exec
+User=root
+Restart=no
+
+ExecStart=/bin/bash -c "/opt/scifi/scripts/launch_synapse_app.sh"
+
+# Working directory
+WorkingDirectory=/opt/scifi
+
+# Environment variables
+Environment=SCIFI_ROOT=/opt/scifi
+
+[Install]
+WantedBy=multi-user.target 
