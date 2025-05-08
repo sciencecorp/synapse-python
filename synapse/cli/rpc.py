@@ -13,6 +13,7 @@ from google.protobuf.json_format import Parse
 
 from rich.console import Console
 from rich.pretty import pprint
+from rich.table import Table
 
 from synapse.cli.query import StreamingQueryClient
 from synapse.utils.log import log_entry_to_str
@@ -38,6 +39,9 @@ def add_commands(subparsers):
     e = subparsers.add_parser("configure", help="Write a configuration to the device")
     e.add_argument("config_file", type=str)
     e.set_defaults(func=configure)
+
+    e = subparsers.add_parser("taps", help="List available taps")
+    e.set_defaults(func=list_taps)
 
     f = subparsers.add_parser("logs", help="Get logs from the device")
     f.add_argument("--output", "-o", type=str, help="Optional file to write logs to")
@@ -79,6 +83,21 @@ def add_commands(subparsers):
         help="End time in ISO format (e.g., '2024-03-14T15:30:00')",
     )
     f.set_defaults(func=get_logs)
+
+
+def list_taps(args):
+    console = Console()
+    taps = syn.Device(args.uri, args.verbose).list_taps()
+
+    table = Table(title="Available Taps")
+    table.add_column("Name", style="cyan")
+    table.add_column("Message Type", style="green")
+    table.add_column("Endpoint", style="green")
+
+    for tap in taps.taps:
+        table.add_row(tap.name, tap.message_type, tap.endpoint)
+
+    console.print(table)
 
 
 def info(args):
