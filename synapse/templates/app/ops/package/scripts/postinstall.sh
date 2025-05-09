@@ -14,4 +14,3 @@ chmod 755 /opt/scifi/bin/"${SYNAPSE_APP_EXE}"
 
 # Reload and start the service
 systemctl daemon-reload
-systemctl enable "${SYNAPSE_APP_EXE}" 

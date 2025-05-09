@@ -6,29 +6,9 @@
 SYNAPSE_APP_EXE="{{APP_NAME}}"
 MANIFEST_FILE="/opt/scifi/config/app_manifest.json"
 
-# set the process priority to something high
-if ! renice -n -10 $$ > /dev/null 2>&1; then
-    echo "Failed to set process priority"
-    exit 1
-fi
-
-# Set CPU scheduler to FIFO
-# Might drop this down if the system is unstable
-if ! chrt -f -p 50 $$ > /dev/null 2>&1; then
-    echo "Failed to set CPU scheduler to FIFO"
-    exit 1
-fi
-
-# Note: Uncomment to set the CPU affinity to specific cores
-# taskset -c 0-3 $$ > /dev/null 2>&1
-
-# Set maximum locked memory to unlimited
-# ulimit -l unlimited
-
 # Set max UDP write buffer size to 4MB
 sysctl -w net.core.wmem_max=4194304
 sysctl -w net.core.wmem_default=4194304
-
 
 # Set up LD_LIBRARY_PATH to prefer our local libraries and user libraries
 export LD_LIBRARY_PATH=/opt/scifi/usr-libs:/opt/scifi/lib:$LD_LIBRARY_PATH
