@@ -58,7 +58,7 @@ cp "${SCRIPT_DIR}/systemd/${SYNAPSE_APP_EXE}.service" "${STAGING_DIR}/etc/system
 APP_SDK_DOCKER_DIR="/usr/lib/"
 APP_SDK_LIB_TARGET_DIR="${STAGING_DIR}/opt/scifi/lib"
 mkdir -p ${APP_SDK_LIB_TARGET_DIR}
-find "${APP_SDK_DOCKER_DIR}" -name "libsynapse*.so*" -type f -exec cp -v {} ${APP_SDK_LIB_TARGET_DIR}/ \;
+find "${APP_SDK_DOCKER_DIR}" -name "libsynapse*.so*" -exec cp -av {} ${APP_SDK_LIB_TARGET_DIR}/ \;
 
 # ---------------------------------------------------------------------------
 # Copy application manifest so the device can reference it later
