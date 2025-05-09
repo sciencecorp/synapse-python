@@ -54,6 +54,19 @@ cp "${SCRIPT_DIR}/scripts/launch_synapse_app.sh" "${STAGING_DIR}/opt/scifi/scrip
 mkdir -p ${STAGING_DIR}/etc/systemd/system
 cp "${SCRIPT_DIR}/systemd/${SYNAPSE_APP_EXE}.service" "${STAGING_DIR}/etc/systemd/system/"
 
+# ---------------------------------------------------------------------------
+# Copy application manifest so the device can reference it later
+#   Destination: /opt/scifi/config/manifests/<APP_NAME>.json
+# ---------------------------------------------------------------------------
+MANIFEST_SRC="${SOURCE_DIR}/manifest.json"
+if [ -f "${MANIFEST_SRC}" ]; then
+    MANIFEST_DST_DIR="${STAGING_DIR}/opt/scifi/config/manifests"
+    mkdir -p "${MANIFEST_DST_DIR}"
+    cp "${MANIFEST_SRC}" "${MANIFEST_DST_DIR}/${SYNAPSE_APP_EXE}.json"
+else
+    echo "Warning: manifest.json not found at ${MANIFEST_SRC}; skipping copy."
+fi
+
 fpm -s dir -t deb \
     -n "${SYNAPSE_APP_EXE}" \
     -f \

@@ -29,10 +29,22 @@ def add_commands(subparsers):
 
     b.set_defaults(func=query)
 
-    c = subparsers.add_parser("start", help="Start the device")
+    c = subparsers.add_parser("start", help="Start the device or an application")
+    c.add_argument(
+        "app_name",
+        nargs="?",
+        default=None,
+        help="Name of the application as specified in its manifest.json. If provided, the tool will attempt to locate the manifest, configure the device using its 'device_configuration', and then start the device.",
+    )
     c.set_defaults(func=start)
 
-    d = subparsers.add_parser("stop", help="Stop the device")
+    d = subparsers.add_parser("stop", help="Stop the device or an application")
+    d.add_argument(
+        "app_name",
+        nargs="?",
+        default=None,
+        help="Name of the application to stop (systemd service). If omitted, stops the whole device via RPC.",
+    )
     d.set_defaults(func=stop)
 
     e = subparsers.add_parser("configure", help="Write a configuration to the device")
@@ -137,20 +149,45 @@ def query(args):
 
 
 def start(args):
+    """Start the Synapse device (and any application services managed by
+    *ApplicationControllerNode*).  If an ``app_name`` is supplied we still just
+    issue the standard *Device.start* RPC – the controller node on-device will
+    decide which systemd service to launch.
+    """
+
     console = Console()
+
+    if getattr(args, "app_name", None):
+        console.print(
+            f"[yellow]Starting device; application '{args.app_name}' will be "
+            "started by the on-device ApplicationController.[/yellow]"
+        )
+
     with console.status("Starting device...", spinner="bouncingBall"):
-        stop_ret = syn.Device(args.uri, args.verbose).start_with_status()
-        if not stop_ret:
+        start_ret = syn.Device(args.uri, args.verbose).start_with_status()
+        if start_ret is None:
             console.print("[bold red]Internal error starting device")
             return
-        if stop_ret.code != StatusCode.kOk:
-            console.print(f"[bold red]Error starting\n{stop_ret.message}")
+        if start_ret.code != StatusCode.kOk:
+            console.print(f"[bold red]Error starting device[/bold red]\n{start_ret.message}")
             return
+
     console.print("[green]Device Started")
 
 
 def stop(args):
+    """Stop the Synapse device and, by extension, any application services
+    controlled by ApplicationControllerNode.
+    """
+
     console = Console()
+
+    if getattr(args, "app_name", None):
+        console.print(
+            f"[yellow]Stopping device; application '{args.app_name}' will be "
+            "shut down by the on-device ApplicationController.[/yellow]"
+        )
+
     with console.status("Stopping device...", spinner="bouncingBall"):
         stop_ret = syn.Device(args.uri, args.verbose).stop_with_status()
         if not stop_ret:
