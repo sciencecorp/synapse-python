@@ -35,7 +35,7 @@ done
 if [ "$BINARY_FOUND" = false ]; then
     echo "Binary not found in standard build directories, searching source directory..."
     BINARY_PATH=$(find "${SOURCE_DIR}" -name "${SYNAPSE_APP_EXE}" -type f | grep -v "${STAGING_DIR}" | head -n 1)
-    
+
     if [ -n "$BINARY_PATH" ]; then
         echo "Found binary at ${BINARY_PATH}"
         cp "${BINARY_PATH}" "${STAGING_DIR}/opt/scifi/bin/"
@@ -53,6 +53,12 @@ cp "${SCRIPT_DIR}/scripts/launch_synapse_app.sh" "${STAGING_DIR}/opt/scifi/scrip
 # Systemd service install and setup
 mkdir -p ${STAGING_DIR}/etc/systemd/system
 cp "${SCRIPT_DIR}/systemd/${SYNAPSE_APP_EXE}.service" "${STAGING_DIR}/etc/systemd/system/"
+
+# App SDK
+APP_SDK_DOCKER_DIR="/usr/lib/"
+APP_SDK_LIB_TARGET_DIR="${STAGING_DIR}/opt/scifi/lib"
+mkdir -p ${APP_SDK_LIB_TARGET_DIR}
+find "${APP_SDK_DOCKER_DIR}" -name "libsynapse*.so*" -type f -exec cp -v {} ${APP_SDK_LIB_TARGET_DIR}/ \;
 
 # ---------------------------------------------------------------------------
 # Copy application manifest so the device can reference it later
@@ -80,4 +86,4 @@ fpm -s dir -t deb \
     --after-install "${SCRIPT_DIR}/scripts/postinstall.sh" \
     --before-remove "${SCRIPT_DIR}/scripts/preremove.sh" \
     --after-remove "${SCRIPT_DIR}/scripts/postremove.sh" \
-    . 
+    .
