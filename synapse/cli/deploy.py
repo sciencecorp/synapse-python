@@ -58,31 +58,17 @@ def build_deb_package(app_dir: str, app_name: str, version: str = "0.1.0") -> bo
 
     try:
         staging_dir = tempfile.mkdtemp(prefix="synapse-package-")
+        binary_path = os.path.join(app_dir, "build-aarch64", app_name)
 
-        # ------------------------------------------------------------------
-        # 1. Locate the compiled binary and copy it to /opt/scifi/bin
-        # ------------------------------------------------------------------
-        possible_bins = [
-            os.path.join(app_dir, "build-aarch64", app_name),
-            os.path.join(app_dir, "build", app_name),
-            os.path.join(app_dir, "build-arm64", app_name),
-        ]
-
-        binary_path = next((p for p in possible_bins if os.path.exists(p)), None)
-
-        if binary_path is None:
+        if not os.path.exists(binary_path):
             console.print(
-                f"[bold red]Error:[/bold red] Compiled binary '{app_name}' not found."
+                f"[bold red]Error:[/bold red] Compiled binary '{app_name}' not found at {binary_path}."
             )
             return False
 
         bin_dst_dir = os.path.join(staging_dir, "opt", "scifi", "bin")
         os.makedirs(bin_dst_dir, exist_ok=True)
         shutil.copy2(binary_path, os.path.join(bin_dst_dir, app_name))
-
-        # ------------------------------------------------------------------
-        # 2. Generate systemd service & lifecycle scripts on the fly
-        # ------------------------------------------------------------------
 
         # Generate systemd unit
         svc_content = f"""[Unit]
@@ -136,9 +122,6 @@ WantedBy=multi-user.target
         os.chmod(postremove_path, 0o755)
         lifecycle_scripts_tmp.append(postremove_path)
 
-        # ------------------------------------------------------------------
-        # 3. Copy user-space Synapse SDK shared libs
-        # ------------------------------------------------------------------
         lib_dst_dir = os.path.join(staging_dir, "opt", "scifi", "lib")
         os.makedirs(lib_dst_dir, exist_ok=True)
         for lib in glob.glob("/usr/lib/libsynapse*.so*"):
@@ -147,9 +130,6 @@ WantedBy=multi-user.target
             except PermissionError:
                 console.print(f"[yellow]Skipping lib copy (perm): {lib}[/yellow]")
 
-        # ------------------------------------------------------------------
-        # 4. Build the .deb with FPM
-        # ------------------------------------------------------------------
         fpm_cmd = [
             "fpm",
             "-s",
@@ -187,10 +167,6 @@ WantedBy=multi-user.target
                 fpm_cmd.extend([opt, container_path])
 
         fpm_cmd.append(".")
-
-        # ------------------------------------------------------------------
-        # 5. Invoke FPM in a Docker container (consistent across hosts)
-        # ------------------------------------------------------------------
 
         fpm_image = "cdrx/fpm-ubuntu:latest"
         console.print(f"[yellow]Running FPM (Docker image: {fpm_image}) ...[/yellow]")
@@ -565,17 +541,11 @@ def build_app(app_dir, app_name):
     console.print(f"[yellow]Building application: {app_name}...[/yellow]")
 
     # Check if binary already exists
-    binary_paths = [
-        os.path.join(app_dir, "build-aarch64", app_name),
-        os.path.join(app_dir, "build", app_name),
-        os.path.join(app_dir, "build-arm64", app_name),
-        os.path.join(app_dir, "out", app_name),
-    ]
+    binary_path = os.path.join(app_dir, "build-aarch64", app_name)
 
-    for path in binary_paths:
-        if os.path.exists(path):
-            console.print(f"[green]Binary already exists at: {path}[/green]")
-            return True
+    if os.path.exists(binary_path):
+        console.print(f"[green]Binary already exists at: {binary_path}[/green]")
+        return True
 
     # Binary doesn't exist, build it
     console.print("[yellow]Binary not found, attempting to build...[/yellow]")
@@ -645,14 +615,14 @@ def build_app(app_dir, app_name):
             # Fall back to manual configuration
             echo 'No CMake presets found, using manual configuration...' &&
             export VCPKG_DEFAULT_TRIPLET=arm64-linux-dynamic-release &&
-            cmake -B build -S . \
+            cmake -B build-aarch64 -S . \
             -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake \
             -DVCPKG_TARGET_TRIPLET=arm64-linux-dynamic-release \
             -DVCPKG_INSTALLED_DIR=${VCPKG_ROOT}/vcpkg_installed \
             -DBUILD_SHARED_LIBS=ON \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_FOR_ARM64=ON &&
-            cmake --build build -j$(nproc);
+            cmake --build build-aarch64 -j$(nproc);
         fi""",
     ]
 
@@ -662,33 +632,32 @@ def build_app(app_dir, app_name):
         subprocess.run(build_cmd, check=True, cwd=app_dir)
 
         # Check if build succeeded
-        for path in binary_paths:
-            if os.path.exists(path):
-                console.print(f"[green]Successfully built binary at: {path}[/green]")
-                return True
+        if os.path.exists(binary_path):
+            console.print(f"[green]Successfully built binary at: {binary_path}[/green]")
+            return True
 
         # If we get here, the build might have succeeded but we can't find the binary
         console.print(
-            "[bold yellow]Warning: Build completed but binary not found in expected locations.[/bold yellow]"
+            f"[bold yellow]Warning: Build completed but binary not found at expected location: {binary_path}[/bold yellow]"
         )
         # Try to find it manually
-        binary_path = subprocess.run(
+        binary_found = subprocess.run(
             ["find", app_dir, "-type", "f", "-name", app_name, "-not", "-path", "*/.*"],
             capture_output=True,
             text=True,
             check=False,
         ).stdout.strip()
 
-        if binary_path:
-            binary_path = binary_path.split("\n")[0]  # Take the first match if multiple
-            console.print(f"[green]Found binary at: {binary_path}[/green]")
+        if binary_found:
+            binary_found_path = binary_found.split("\n")[0]  # Take the first match if multiple
+            console.print(f"[green]Found binary at: {binary_found_path}[/green]")
 
-            # Try to copy it to one of the standard locations
-            build_dir = os.path.join(app_dir, "build")
+            # Try to copy it to the standard location
+            build_dir = os.path.dirname(binary_path)
             os.makedirs(build_dir, exist_ok=True)
-            shutil.copy(binary_path, os.path.join(build_dir, app_name))
+            shutil.copy(binary_found_path, binary_path)
             console.print(
-                f"[green]Copied binary to: {os.path.join(build_dir, app_name)}[/green]"
+                f"[green]Copied binary to: {binary_path}[/green]"
             )
             return True
 
