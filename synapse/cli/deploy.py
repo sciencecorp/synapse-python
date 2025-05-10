@@ -154,39 +154,18 @@ def package_app(app_dir, app_name):
             tag_suffix = detect_arch()
             image = f"{os.path.basename(app_dir)}:latest-{tag_suffix}"
 
-            # Compose a bash script that prepares the template files and then runs the
-            # packaging script.  All placeholder replacements and SOURCE_DIR
-            # overrides happen entirely inside the container so that nothing ever
-            # gets written back to the application repository.
+            # Ensure the helper script exists and is executable on the host so it
+            # can be executed inside the container.
+            prepare_script = os.path.join(template_ops_dir, "prepare_and_package.sh")
+            if not os.path.exists(prepare_script):
+                console.print(
+                    f"[bold red]Error:[/bold red] Helper script not found at {prepare_script}"
+                )
+                return False
 
-            bash_cmd = f'''
-set -e
-APP_NAME="{app_name}"
-
-# Copy the template ops directory to a temporary working area inside the container
-TEMPLATE_DIR="/synapse_ops"
-TEMP_DIR="/tmp/synapse_package_ops"
-rm -rf "$TEMP_DIR"
-cp -r "$TEMPLATE_DIR" "$TEMP_DIR"
-
-# Replace placeholders in every file
-find "$TEMP_DIR" -type f -exec sed -i 's/{{{{APP_NAME}}}}/'"$APP_NAME"'/g' {{}} +
-
-# Rename the systemd service template to the correct name
-# The template file is literally called "{{APP_NAME}}.service" (double braces).
-if [ -f "$TEMP_DIR/package/systemd/{{{{APP_NAME}}}}.service" ]; then
-    mv "$TEMP_DIR/package/systemd/{{{{APP_NAME}}}}.service" "$TEMP_DIR/package/systemd/$APP_NAME.service"
-fi
-
-# Ensure the packaging script is executable and points to the correct source dir
-chmod +x "$TEMP_DIR/package/package.sh"
-sed -i 's|SOURCE_DIR=.*|SOURCE_DIR="/home/workspace"|' "$TEMP_DIR/package/package.sh"
-
-# Finally, run the packaging script from the workspace root so that the .deb lands
-# in the application directory that is mounted from the host.
-cd /home/workspace
-bash "$TEMP_DIR/package/package.sh"
-'''
+            # Make sure the script has execute permissions (mostly relevant for
+            # Windows or freshly-cloned repos).
+            os.chmod(prepare_script, 0o755)
 
             cmd = [
                 "docker",
@@ -199,8 +178,8 @@ bash "$TEMP_DIR/package/package.sh"
                 f"{template_ops_dir}:/synapse_ops:ro",
                 image,
                 "/bin/bash",
-                "-c",
-                bash_cmd,
+                "/synapse_ops/prepare_and_package.sh",
+                app_name,
             ]
 
             # Run the packaging script in Docker - capture output
