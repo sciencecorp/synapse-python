@@ -124,12 +124,45 @@ WantedBy=multi-user.target
 
         lib_dst_dir = os.path.join(staging_dir, "opt", "scifi", "lib")
         os.makedirs(lib_dst_dir, exist_ok=True)
-        # Recursively copy all libsynapse shared libraries from /usr/lib (mirrors
-        for lib in glob.glob("/usr/lib/**/libsynapse*.so*", recursive=True):
-            try:
-                shutil.copy2(lib, lib_dst_dir)
-            except PermissionError:
-                console.print(f"[yellow]Skipping lib copy (perm): {lib}[/yellow]")
+
+        try:
+            arch_suffix = detect_arch()  # "arm64" or "amd64"
+            image_tag = f"{app_name}:latest-{arch_suffix}"
+            platform_opt = "linux/arm64" if arch_suffix == "arm64" else "linux/amd64"
+
+            console.print(
+                f"[yellow]Extracting SDK libraries from Docker image [bold]{image_tag}[/bold]...[/yellow]"
+            )
+
+            docker_cmd = [
+                "docker",
+                "run",
+                "--rm",
+                "--platform",
+                platform_opt,
+                "-v",
+                f"{lib_dst_dir}:/out",
+                image_tag,
+                "/bin/bash",
+                "-c",
+                "find /usr/lib -name 'libsynapse*.so*' -exec cp -av {} /out/ \\;",
+            ]
+
+            subprocess.run(docker_cmd, check=True)
+
+        except subprocess.CalledProcessError as e:
+            console.print(
+                f"[bold red]Error:[/bold red] Failed to copy SDK libraries from Docker image: {e}"
+            )
+            console.print(
+                "[yellow]Falling back to host /usr/lib lookup for libsynapse*.so* (results may be incomplete).[/yellow]"
+            )
+
+            for lib in glob.glob("/usr/lib/**/libsynapse*.so*", recursive=True):
+                try:
+                    shutil.copy2(lib, lib_dst_dir)
+                except PermissionError:
+                    console.print(f"[yellow]Skipping lib copy (perm): {lib}[/yellow]")
 
         fpm_cmd = [
             "fpm",
