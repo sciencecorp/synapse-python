@@ -16,6 +16,8 @@ from rich.progress import (
 from rich.prompt import Prompt
 from rich import box
 
+import synapse.client.sftp as sftp
+
 # Set up console for normal output and a separate one for logs
 console = Console()
 log_console = Console(stderr=True)
@@ -304,31 +306,18 @@ def deploy_package(ip_address, deb_package_path):
         )
 
         try:
-            # Deploy directly using paramiko
-            client = None
-            sftp = None
             shell = None
-
-            # Create SSH client
-            import paramiko
-
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
             # Connect to the device (connection task)
             connect_task = progress.add_task("[green]Connecting to device...", total=1)
-
-            try:
-                client.connect(
-                    ip_address, username=username, password=login_password, timeout=10
-                )
-                progress.update(connect_task, completed=1)
-                progress.update(deploy_task, advance=1)
-            except Exception as e:
+            client, sftp_conn = sftp.connect_sftp(
+                hostname=ip_address, username=username, password=login_password
+            )
+            progress.update(connect_task, completed=1)
+            progress.update(deploy_task, advance=1)
+            if client is None or sftp_conn is None:
                 progress.update(connect_task, visible=False)
-                console.print(
-                    f"[bold red]Error connecting to {ip_address}:[/bold red] {str(e)}"
-                )
+                console.print(f"[bold red]Error connecting to {ip_address}[/bold red]")
                 console.print(
                     "[yellow]Please check your username and password.[/yellow]"
                 )
@@ -339,9 +328,8 @@ def deploy_package(ip_address, deb_package_path):
 
             try:
                 # Create SFTP client and upload
-                sftp = client.open_sftp()
                 remote_path = f"/tmp/{package_filename}"
-                sftp.put(deb_package_path, remote_path)
+                sftp_conn.put(deb_package_path, remote_path)
                 progress.update(upload_task, completed=1)
                 progress.update(deploy_task, advance=1)
             except Exception as e:
@@ -430,12 +418,9 @@ def deploy_package(ip_address, deb_package_path):
         finally:
             # Clean up connections
             try:
-                if shell:
+                sftp.close_sftp(client, sftp_conn)
+                if shell is not None:
                     shell.close()
-                if sftp:
-                    sftp.close()
-                if client:
-                    client.close()
             except Exception:
                 pass
 
