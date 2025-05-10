@@ -5,7 +5,7 @@ import ipaddress
 import sys
 
 from importlib import metadata
-from synapse.cli import discover, rpc, streaming, offline_plot, files
+from synapse.cli import discover, rpc, streaming, offline_plot, files, taps
 from rich.logging import RichHandler
 from rich.console import Console
 from synapse.utils.discover import find_device_by_name
@@ -64,6 +64,8 @@ def main():
     streaming.add_commands(subparsers)
     offline_plot.add_commands(subparsers)
     files.add_commands(subparsers)
+    taps.add_commands(subparsers)
+
     args = parser.parse_args()
 
     # If we need to setup the device URI, do that now
