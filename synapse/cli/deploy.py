@@ -150,8 +150,6 @@ WantedBy=multi-user.target
         # ------------------------------------------------------------------
         # 4. Build the .deb with FPM
         # ------------------------------------------------------------------
-        arch = detect_arch()
-
         fpm_cmd = [
             "fpm",
             "-s",
@@ -173,7 +171,7 @@ WantedBy=multi-user.target
             "--description",
             "Synapse Application",
             "--architecture",
-            arch,
+            "arm64",
         ]
 
         # Attach lifecycle scripts (referenced relative to /pkg inside container)
@@ -224,7 +222,9 @@ WantedBy=multi-user.target
         subprocess.run(docker_fpm_cmd, check=True)
 
         # Verify that a .deb was produced
-        deb_files = [f for f in os.listdir(app_dir) if f.endswith(".deb")]
+        deb_files = [
+            f for f in os.listdir(app_dir) if f.endswith(".deb") and "arm64" in f
+        ]
         if not deb_files:
             console.print(
                 f"[bold red]Error:[/bold red] FPM completed but no .deb found in {app_dir}."
