@@ -31,10 +31,15 @@ def add_commands(subparsers):
 
     c = subparsers.add_parser("start", help="Start the device or an application")
     c.add_argument(
-        "app_name",
+        "config_file",
         nargs="?",
         default=None,
-        help="Name of the application as specified in its manifest.json. If provided, the tool will attempt to locate the manifest, configure the device using its 'device_configuration', and then start the device.",
+        help=(
+            "Optional path to a device configuration JSON file. If supplied, "
+            "the CLI first uploads the configuration, then starts the device. "
+            "Running `synapsectl start` with no argument simply starts the "
+            "device without re-configuring it."
+        ),
     )
     c.set_defaults(func=start)
 
@@ -157,14 +162,44 @@ def start(args):
 
     console = Console()
 
-    if getattr(args, "app_name", None):
-        console.print(
-            f"[yellow]Starting device; application '{args.app_name}' will be "
-            "started by the on-device ApplicationController.[/yellow]"
-        )
+    config_obj = None  # syn.Config if we are provided a *.json* file
+    cfg_path = getattr(args, "config_file", None)
+
+    if cfg_path:
+        if Path(cfg_path).suffix != ".json":
+            console.print("[bold red]Configuration file must be a JSON file (.json)")
+            return
+
+        if not Path(cfg_path).is_file():
+            console.print(f"[bold red]Configuration file {cfg_path} does not exist")
+            return
+
+        # Load the configuration proto and build Config object
+        try:
+            with open(cfg_path, "r") as f:
+                json_text = f.read()
+            cfg_proto = Parse(json_text, DeviceConfiguration())
+            config_obj = syn.Config.from_proto(cfg_proto)
+        except Exception as e:
+            console.print(f"[bold red]Failed to parse configuration file[/bold red]: {e}")
+            return
+
+    device = syn.Device(args.uri, args.verbose)
+
+    # If we have a configuration, apply it first.
+    if config_obj is not None:
+        with console.status("Configuring device...", spinner="bouncingBall"):
+            cfg_ret = device.configure_with_status(config_obj)
+            if cfg_ret is None:
+                console.print("[bold red]Internal error configuring device")
+                return
+            if cfg_ret.code != StatusCode.kOk:
+                console.print(f"[bold red]Error configuring device[/bold red]\n{cfg_ret.message}")
+                return
+        console.print("[green]Device Configured")
 
     with console.status("Starting device...", spinner="bouncingBall"):
-        start_ret = syn.Device(args.uri, args.verbose).start_with_status()
+        start_ret = device.start_with_status()
         if start_ret is None:
             console.print("[bold red]Internal error starting device")
             return
