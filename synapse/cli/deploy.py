@@ -1,273 +1,17 @@
-import os
-import subprocess
-import shutil
 import json
-import logging
-import tempfile
-import glob
+import os
+
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import (
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-)
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.prompt import Prompt
-from rich import box
 
 import synapse.client.sftp as sftp
+from synapse.cli import build as builder
 
-# Set up console for normal output and a separate one for logs
 console = Console()
 log_console = Console(stderr=True)
-
-# Configure logging for paramiko to be less verbose
-logging.getLogger("paramiko").setLevel(logging.WARNING)
-
-
-def validate_manifest(manifest_path):
-    """Validate the manifest file exists and has required properties"""
-    try:
-        with open(manifest_path, "r") as f:
-            manifest = json.load(f)
-
-        # Basic validation
-        if "name" not in manifest:
-            console.print(
-                "[bold red]Error:[/bold red] manifest.json is missing required 'name' property"
-            )
-            return False
-
-        return manifest
-    except FileNotFoundError:
-        console.print(
-            f"[bold red]Error:[/bold red] manifest.json not found in {manifest_path}"
-        )
-        return False
-    except json.JSONDecodeError:
-        console.print("[bold red]Error:[/bold red] manifest.json is not valid JSON")
-        return False
-
-
-def build_deb_package(app_dir: str, app_name: str, version: str = "0.1.0") -> bool:
-    """Create a *.deb* package for *app_name* and place it in *app_dir*.
-
-    Returns ``True`` on success, ``False`` otherwise.
-    """
-
-    try:
-        staging_dir = tempfile.mkdtemp(prefix="synapse-package-")
-        binary_path = os.path.join(app_dir, "build-aarch64", app_name)
-
-        if not os.path.exists(binary_path):
-            console.print(
-                f"[bold red]Error:[/bold red] Compiled binary '{app_name}' not found at {binary_path}."
-            )
-            return False
-
-        bin_dst_dir = os.path.join(staging_dir, "opt", "scifi", "bin")
-        os.makedirs(bin_dst_dir, exist_ok=True)
-        shutil.copy2(binary_path, os.path.join(bin_dst_dir, app_name))
-
-        # Generate systemd unit
-        svc_content = f"""[Unit]
-Description=Synapse Application
-After=network-online.target
-Wants=network-online.target
-Requires=systemd-udevd.service
-After=systemd-udevd.service
-
-[Service]
-Type=simple
-User=root
-Restart=no
-ExecStartPre=/sbin/sysctl -w net.core.wmem_max=4194304
-ExecStartPre=/sbin/sysctl -w net.core.wmem_default=4194304
-Environment=LD_LIBRARY_PATH=/opt/scifi/usr-libs:/opt/scifi/lib
-Environment=SCIFI_ROOT=/opt/scifi
-ExecStart=/opt/scifi/bin/{app_name}
-WorkingDirectory=/opt/scifi
-
-[Install]
-WantedBy=multi-user.target
-"""
-
-        svc_dst = os.path.join(
-            staging_dir, "etc", "systemd", "system", f"{app_name}.service"
-        )
-        os.makedirs(os.path.dirname(svc_dst), exist_ok=True)
-        with open(svc_dst, "w", encoding="utf-8") as f:
-            f.write(svc_content)
-
-        lifecycle_scripts_tmp = []
-
-        postinstall_path = os.path.join(staging_dir, "postinstall.sh")
-        with open(postinstall_path, "w", encoding="utf-8") as f:
-            f.write("#!/bin/bash\nset -e\nsystemctl daemon-reload\n")
-        os.chmod(postinstall_path, 0o755)
-        lifecycle_scripts_tmp.append(postinstall_path)
-
-        preremove_path = os.path.join(staging_dir, "preremove.sh")
-        with open(preremove_path, "w", encoding="utf-8") as f:
-            f.write(
-                f"#!/bin/bash\nset -e\nsystemctl stop {app_name} || true\nsystemctl disable {app_name} || true\n"
-            )
-        os.chmod(preremove_path, 0o755)
-        lifecycle_scripts_tmp.append(preremove_path)
-
-        postremove_path = os.path.join(staging_dir, "postremove.sh")
-        with open(postremove_path, "w", encoding="utf-8") as f:
-            f.write("#!/bin/bash\nset -e\nsystemctl daemon-reload\n")
-        os.chmod(postremove_path, 0o755)
-        lifecycle_scripts_tmp.append(postremove_path)
-
-        lib_dst_dir = os.path.join(staging_dir, "opt", "scifi", "lib")
-        os.makedirs(lib_dst_dir, exist_ok=True)
-
-        try:
-            arch_suffix = detect_arch()  # "arm64" or "amd64"
-            image_tag = f"{app_name}:latest-{arch_suffix}"
-            platform_opt = "linux/arm64" if arch_suffix == "arm64" else "linux/amd64"
-
-            console.print(
-                f"[yellow]Extracting SDK libraries from Docker image [bold]{image_tag}[/bold]...[/yellow]"
-            )
-
-            docker_cmd = [
-                "docker",
-                "run",
-                "--rm",
-                "--platform",
-                platform_opt,
-                "-v",
-                f"{lib_dst_dir}:/out",
-                image_tag,
-                "/bin/bash",
-                "-c",
-                "find /usr/lib -name 'libsynapse*.so*' -exec cp -av {} /out/ \\;",
-            ]
-
-            subprocess.run(docker_cmd, check=True)
-
-        except subprocess.CalledProcessError as e:
-            console.print(
-                f"[bold red]Error:[/bold red] Failed to copy SDK libraries from Docker image: {e}"
-            )
-            console.print(
-                "[yellow]Falling back to host /usr/lib lookup for libsynapse*.so* (results may be incomplete).[/yellow]"
-            )
-
-            for lib in glob.glob("/usr/lib/**/libsynapse*.so*", recursive=True):
-                try:
-                    shutil.copy2(lib, lib_dst_dir)
-                except PermissionError:
-                    console.print(f"[yellow]Skipping lib copy (perm): {lib}[/yellow]")
-
-        fpm_cmd = [
-            "fpm",
-            "-s",
-            "dir",
-            "-t",
-            "deb",
-            "-n",
-            app_name,
-            "-f",
-            "-v",
-            version,
-            "-C",
-            staging_dir,
-            "--deb-no-default-config-files",
-            "--depends",
-            "systemd",
-            "--vendor",
-            "Science Corporation",
-            "--description",
-            "Synapse Application",
-            "--architecture",
-            "arm64",
-        ]
-
-        # Attach lifecycle scripts (referenced relative to /pkg inside container)
-        script_map = {
-            "postinstall.sh": "--after-install",
-            "preremove.sh": "--before-remove",
-            "postremove.sh": "--after-remove",
-        }
-        for path in lifecycle_scripts_tmp:
-            opt = script_map.get(os.path.basename(path))
-            if opt:
-                container_path = f"/pkg/{os.path.basename(path)}"
-                fpm_cmd.extend([opt, container_path])
-
-        fpm_cmd.append(".")
-
-        fpm_image = "cdrx/fpm-ubuntu:latest"
-        console.print(f"[yellow]Running FPM (Docker image: {fpm_image}) ...[/yellow]")
-
-        # Replace the host-specific staging dir with the container mount path
-        fpm_args = fpm_cmd[1:]
-        try:
-            c_index = fpm_args.index("-C") + 1
-            fpm_args[c_index] = "/pkg"
-        except ValueError:
-            pass
-
-        docker_fpm_cmd = [
-            "docker",
-            "run",
-            "--rm",
-            "--platform",
-            "linux/amd64",
-            "-v",
-            f"{staging_dir}:/pkg",
-            "-v",
-            f"{app_dir}:/out",
-            "-w",
-            "/out",
-            fpm_image,
-            "fpm",
-        ] + fpm_args
-
-        subprocess.run(docker_fpm_cmd, check=True)
-
-        # Verify that a .deb was produced
-        deb_files = [
-            f for f in os.listdir(app_dir) if f.endswith(".deb") and "arm64" in f
-        ]
-        if not deb_files:
-            console.print(
-                f"[bold red]Error:[/bold red] FPM completed but no .deb found in {app_dir}."
-            )
-            return False
-
-        console.print("[green]Package created successfully![/green]")
-        return True
-
-    except subprocess.CalledProcessError as exc:
-        console.print(f"[bold red]Error:[/bold red] FPM failed: {exc}")
-        return False
-
-    finally:
-        pass
-
-
-def package_app(app_dir, app_name):
-    """Package *app_name* into a .deb using the pure-Python builder."""
-
-    return build_deb_package(app_dir, app_name)
-
-
-def find_deb_package(app_dir):
-    """Find the generated .deb package in the app directory"""
-    for file in os.listdir(app_dir):
-        if file.endswith(".deb"):
-            return os.path.join(app_dir, file)
-
-    console.print(
-        f"[bold red]Error:[/bold red] Could not find .deb package in {app_dir}"
-    )
-    return None
 
 
 def get_device_credentials(ip_address):
@@ -570,171 +314,54 @@ def save_credentials(ip_address, username, login_password, root_password):
         console.print(f"[yellow]Warning: Failed to save credentials: {e}[/yellow]")
 
 
-def build_app(app_dir, app_name):
-    """Build the application binary before packaging"""
-    console.print(f"[yellow]Building application: {app_name}...[/yellow]")
-
-    # Check if binary already exists
-    binary_path = os.path.join(app_dir, "build-aarch64", app_name)
-
-    if os.path.exists(binary_path):
-        console.print(f"[green]Binary already exists at: {binary_path}[/green]")
-        return True
-
-    # Binary doesn't exist, build it
-    console.print("[yellow]Binary not found, attempting to build...[/yellow]")
-
-    # Detect architecture
-    tag_suffix = detect_arch()
-
-    # Image name
-    image = f"{os.path.basename(app_dir)}:latest-{tag_suffix}"
-
-    # Docker image doesn't exist, build it
-    console.print(
-        f"[yellow]Docker image {image} not found, building it first...[/yellow]"
-    )
-
-    # Build the Docker image directly via Python helper
-    try:
-        image = build_docker_image(app_dir, app_name)
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        console.print(f"[bold red]Error:[/bold red] Failed to build Docker image: {e}")
-        return False
-
-    # Now build the app in Docker
-    console.print("[yellow]Building application in Docker container...[/yellow]")
-    console.print(
-        "[dim]This may take a few minutes. You'll see output during the build process.[/dim]"
-    )
-
-    # First, try to run vcpkg to install dependencies
-    vcpkg_cmd = [
-        "docker",
-        "run",
-        "--rm",
-        "-v",
-        f"{os.path.abspath(app_dir)}:/home/workspace",
-        image,
-        "/bin/bash",
-        "-c",
-        "cd /home/workspace && if [ -f vcpkg.json ]; then echo 'Installing dependencies from vcpkg.json...'; ${VCPKG_ROOT}/vcpkg install --triplet arm64-linux-dynamic-release; fi",
-    ]
-
-    try:
-        console.print("[blue]Installing dependencies...[/blue]")
-        subprocess.run(vcpkg_cmd, check=True, cwd=app_dir)
-    except subprocess.CalledProcessError:
-        console.print(
-            "[yellow]Warning: Failed to install dependencies. The build might still succeed.[/yellow]"
-        )
-
-    # Now run the actual build command with a proper CMake preset
-    build_cmd = [
-        "docker",
-        "run",
-        "--rm",
-        "-v",
-        f"{os.path.abspath(app_dir)}:/home/workspace",
-        image,
-        "/bin/bash",
-        "-c",
-        """cd /home/workspace &&
-        if [ -f CMakePresets.json ]; then
-            # Use the existing presets if available
-            echo 'Using existing CMake presets...' &&
-            cmake --preset=dynamic-aarch64 -DVCPKG_TARGET_TRIPLET="arm64-linux-dynamic-release" &&
-            cmake --build --preset=cross-release -j$(nproc);
-        else
-            # Fall back to manual configuration
-            echo 'No CMake presets found, using manual configuration...' &&
-            export VCPKG_DEFAULT_TRIPLET=arm64-linux-dynamic-release &&
-            cmake -B build-aarch64 -S . \
-            -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake \
-            -DVCPKG_TARGET_TRIPLET=arm64-linux-dynamic-release \
-            -DVCPKG_INSTALLED_DIR=${VCPKG_ROOT}/vcpkg_installed \
-            -DBUILD_SHARED_LIBS=ON \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_FOR_ARM64=ON &&
-            cmake --build build-aarch64 -j$(nproc);
-        fi""",
-    ]
-
-    try:
-        # Run without capturing output so the user can see progress
-        console.print("[blue]Running build command...[/blue]")
-        subprocess.run(build_cmd, check=True, cwd=app_dir)
-
-        # Check if build succeeded
-        if os.path.exists(binary_path):
-            console.print(f"[green]Successfully built binary at: {binary_path}[/green]")
-            return True
-
-        # If we get here, the build might have succeeded but we can't find the binary
-        console.print(
-            f"[bold yellow]Warning: Build completed but binary not found at expected location: {binary_path}[/bold yellow]"
-        )
-        # Try to find it manually
-        binary_found = subprocess.run(
-            ["find", app_dir, "-type", "f", "-name", app_name, "-not", "-path", "*/.*"],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-
-        if binary_found:
-            binary_found_path = binary_found.split("\n")[0]  # Take the first match if multiple
-            console.print(f"[green]Found binary at: {binary_found_path}[/green]")
-
-            # Try to copy it to the standard location
-            build_dir = os.path.dirname(binary_path)
-            os.makedirs(build_dir, exist_ok=True)
-            shutil.copy(binary_found_path, binary_path)
-            console.print(
-                f"[green]Copied binary to: {binary_path}[/green]"
-            )
-            return True
-
-        return False
-    except subprocess.CalledProcessError:
-        console.print(
-            "[bold red]Error:[/bold red] Failed to build application. Check the CMake output above for details."
-        )
-        return False
-
-
 def deploy_cmd(args):
     """Handle the deploy command"""
-    # Ensure Docker is available and running
-    if not ensure_docker():
-        return
+    # If user supplied a pre-built package, skip local build/pkg steps.
+    if args.package:
+        deb_package = os.path.abspath(args.package)
+        if not os.path.exists(deb_package):
+            console.print(
+                f"[bold red]Error:[/bold red] Provided package not found: {deb_package}"
+            )
+            return
 
-    # Get absolute path of app directory
-    app_dir = os.path.abspath(args.app_dir)
+        console.print(
+            f"[bold]Deploying pre-built package:[/bold] [yellow]{os.path.basename(deb_package)}[/yellow]"
+        )
 
-    # Validate manifest.json
-    manifest_path = os.path.join(app_dir, "manifest.json")
-    manifest = validate_manifest(manifest_path)
-    if not manifest:
-        return
+    else:
+        # Ensure Docker is available and running only when we need to build
+        if not builder.ensure_docker():
+            return
 
-    # Get app name from manifest
-    app_name = manifest["name"]
-    console.print(f"[bold]Deploying application:[/bold] [yellow]{app_name}[/yellow]")
+        # Get absolute path of app directory
+        app_dir = os.path.abspath(args.app_dir)
 
-    # First, build the app
-    if not build_app(app_dir, app_name):
-        console.print("[bold red]Error:[/bold red] Failed to build the application.")
-        return
+        # Validate manifest.json
+        manifest_path = os.path.join(app_dir, "manifest.json")
+        manifest = builder.validate_manifest(manifest_path)
+        if not manifest:
+            return
 
-    # Package the app
-    if not package_app(app_dir, app_name):
-        return
+        # Get app name from manifest
+        app_name = manifest["name"]
+        console.print(
+            f"[bold]Deploying application:[/bold] [yellow]{app_name}[/yellow]"
+        )
 
-    # Find the generated .deb package
-    deb_package = find_deb_package(app_dir)
-    if not deb_package:
-        return
+        # Build & package locally
+        if not builder.build_app(app_dir, app_name):
+            console.print(
+                "[bold red]Error:[/bold red] Failed to build the application."
+            )
+            return
+
+        if not builder.package_app(app_dir, app_name):
+            return
+
+        deb_package = builder.find_deb_package(app_dir)
+        if not deb_package:
+            return
 
     # Deploy the package to the device
     uri = args.uri
@@ -756,87 +383,11 @@ def add_commands(subparsers):
     deploy_parser.add_argument(
         "app_dir", nargs="?", default=".", help="Path to the application directory"
     )
+    deploy_parser.add_argument(
+        "--package",
+        "-p",
+        help="Path to a pre-built .deb to deploy (skips local build and package steps)",
+        type=str,
+        default=None,
+    )
     deploy_parser.set_defaults(func=deploy_cmd)
-
-
-def detect_arch() -> str:
-    """Return an architecture tag suffix (``arm64`` or ``amd64``)."""
-    arch = subprocess.check_output(["uname", "-m"]).decode("utf-8").strip()
-    return "arm64" if arch in ("arm64", "aarch64") else "amd64"
-
-
-def ensure_docker() -> bool:
-    """Return True if the *docker* CLI is available and the daemon responds.
-
-    Prints a clear, user-friendly message and returns ``False`` otherwise so the
-    caller can abort early.
-    """
-    if shutil.which("docker") is None:
-        console.print(
-            "[bold red]Error:[/bold red] Docker CLI not found. Please install Docker before running this command."
-        )
-        return False
-
-    try:
-        subprocess.run(
-            ["docker", "info"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True,
-        )
-        return True
-    except subprocess.CalledProcessError:
-        console.print(
-            "[bold red]Error:[/bold red] Docker daemon does not appear to be running. Please start Docker and try again."
-        )
-        return False
-
-
-def build_docker_image(app_dir: str, app_name: str | None = None) -> str:
-    """Build (or rebuild) the SDK Docker image used for cross-compiling *app_name*.
-
-    Returns the fully-qualified image tag (``<app>:latest-<arch>``) or raises
-    ``subprocess.CalledProcessError`` if the build fails.
-    """
-    if app_name is None:
-        app_name = os.path.basename(app_dir)
-
-    arch_suffix = detect_arch()  # "arm64" or "amd64"
-
-    # Pick an arch-specific Dockerfile if it exists, otherwise fall back to the
-    # generic one.
-    dockerfile_rel = (
-        f"ops/docker/Dockerfile.{arch_suffix}"
-        if arch_suffix == "arm64"
-        else "ops/docker/Dockerfile"
-    )
-    dockerfile_path = os.path.join(app_dir, dockerfile_rel)
-    if not os.path.exists(dockerfile_path):
-        # Last chance: fall back to the generic Dockerfile regardless of arch.
-        dockerfile_path = os.path.join(app_dir, "ops/docker/Dockerfile")
-
-    if not os.path.exists(dockerfile_path):
-        raise FileNotFoundError(
-            f"Expected Dockerfile not found at {dockerfile_path}. "
-            "Ensure your application provides the required build Dockerfile(s)."
-        )
-
-    image_tag = f"{app_name}:latest-{arch_suffix}"
-
-    console.print(f"[yellow]Building Docker image [bold]{image_tag}[/bold]...[/yellow]")
-    subprocess.run(
-        [
-            "docker",
-            "build",
-            "-t",
-            image_tag,
-            "-f",
-            dockerfile_path,
-            ".",
-        ],
-        check=True,
-        cwd=app_dir,
-    )
-
-    console.print(f"[green]Successfully built Docker image {image_tag}[/green]")
-    return image_tag
