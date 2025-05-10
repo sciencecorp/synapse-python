@@ -29,10 +29,27 @@ def add_commands(subparsers):
 
     b.set_defaults(func=query)
 
-    c = subparsers.add_parser("start", help="Start the device")
+    c = subparsers.add_parser("start", help="Start the device or an application")
+    c.add_argument(
+        "config_file",
+        nargs="?",
+        default=None,
+        help=(
+            "Optional path to a device configuration JSON file. If supplied, "
+            "the CLI first uploads the configuration, then starts the device. "
+            "Running `synapsectl start` with no argument simply starts the "
+            "device without re-configuring it."
+        ),
+    )
     c.set_defaults(func=start)
 
-    d = subparsers.add_parser("stop", help="Stop the device")
+    d = subparsers.add_parser("stop", help="Stop the device or an application")
+    d.add_argument(
+        "app_name",
+        nargs="?",
+        default=None,
+        help="Name of the application to stop (systemd service). If omitted, stops the whole device via RPC.",
+    )
     d.set_defaults(func=stop)
 
     e = subparsers.add_parser("configure", help="Write a configuration to the device")
@@ -137,20 +154,75 @@ def query(args):
 
 
 def start(args):
+    """Start the Synapse device (and any application services managed by
+    *ApplicationControllerNode*).  If an ``app_name`` is supplied we still just
+    issue the standard *Device.start* RPC – the controller node on-device will
+    decide which systemd service to launch.
+    """
+
     console = Console()
+
+    config_obj = None  # syn.Config if we are provided a *.json* file
+    cfg_path = getattr(args, "config_file", None)
+
+    if cfg_path:
+        if Path(cfg_path).suffix != ".json":
+            console.print("[bold red]Configuration file must be a JSON file (.json)")
+            return
+
+        if not Path(cfg_path).is_file():
+            console.print(f"[bold red]Configuration file {cfg_path} does not exist")
+            return
+
+        # Load the configuration proto and build Config object
+        try:
+            with open(cfg_path, "r") as f:
+                json_text = f.read()
+            cfg_proto = Parse(json_text, DeviceConfiguration())
+            config_obj = syn.Config.from_proto(cfg_proto)
+        except Exception as e:
+            console.print(f"[bold red]Failed to parse configuration file[/bold red]: {e}")
+            return
+
+    device = syn.Device(args.uri, args.verbose)
+
+    # If we have a configuration, apply it first.
+    if config_obj is not None:
+        with console.status("Configuring device...", spinner="bouncingBall"):
+            cfg_ret = device.configure_with_status(config_obj)
+            if cfg_ret is None:
+                console.print("[bold red]Internal error configuring device")
+                return
+            if cfg_ret.code != StatusCode.kOk:
+                console.print(f"[bold red]Error configuring device[/bold red]\n{cfg_ret.message}")
+                return
+        console.print("[green]Device Configured")
+
     with console.status("Starting device...", spinner="bouncingBall"):
-        stop_ret = syn.Device(args.uri, args.verbose).start_with_status()
-        if not stop_ret:
+        start_ret = device.start_with_status()
+        if start_ret is None:
             console.print("[bold red]Internal error starting device")
             return
-        if stop_ret.code != StatusCode.kOk:
-            console.print(f"[bold red]Error starting\n{stop_ret.message}")
+        if start_ret.code != StatusCode.kOk:
+            console.print(f"[bold red]Error starting device[/bold red]\n{start_ret.message}")
             return
+
     console.print("[green]Device Started")
 
 
 def stop(args):
+    """Stop the Synapse device and, by extension, any application services
+    controlled by ApplicationControllerNode.
+    """
+
     console = Console()
+
+    if getattr(args, "app_name", None):
+        console.print(
+            f"[yellow]Stopping device; application '{args.app_name}' will be "
+            "shut down by the on-device ApplicationController.[/yellow]"
+        )
+
     with console.status("Stopping device...", spinner="bouncingBall"):
         stop_ret = syn.Device(args.uri, args.verbose).stop_with_status()
         if not stop_ret:
