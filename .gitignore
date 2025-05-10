@@ -184,5 +184,4 @@ output_*.json
 *.jsonl
 .scienv
 synapse_data*
-
 .synapse_deploy_cache.json
