@@ -124,7 +124,8 @@ WantedBy=multi-user.target
 
         lib_dst_dir = os.path.join(staging_dir, "opt", "scifi", "lib")
         os.makedirs(lib_dst_dir, exist_ok=True)
-        for lib in glob.glob("/usr/lib/libsynapse*.so*"):
+        # Recursively copy all libsynapse shared libraries from /usr/lib (mirrors
+        for lib in glob.glob("/usr/lib/**/libsynapse*.so*", recursive=True):
             try:
                 shutil.copy2(lib, lib_dst_dir)
             except PermissionError:
