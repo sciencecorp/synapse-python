@@ -1,1 +1,1 @@
-recursive-include synapse *.py *.pyx *.pyd *.c *.h *.sh *.service
+recursive-include synapse *.py *.pyx *.pyd *.c *.h
