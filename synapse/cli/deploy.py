@@ -94,13 +94,13 @@ def package_app(app_dir, app_name):
         # We're outside Docker, need to use docker to package
         # Always use the build_docker.sh from the synapse-python package directly
         build_docker_script = get_build_docker_script()
-        
+
         if not os.path.exists(build_docker_script):
             console.print(
                 f"[bold red]Error:[/bold red] Could not find Docker build script at {build_docker_script}"
             )
             return False
-            
+
         # Make sure the script is executable
         os.chmod(build_docker_script, 0o755)
 
@@ -129,13 +129,17 @@ def package_app(app_dir, app_name):
                 )
 
                 # Log any warnings emitted by the build step so they are not lost
-                if result.stderr and any(word in result.stderr.lower() for word in ("error", "fail")):
+                if result.stderr and any(
+                    word in result.stderr.lower() for word in ("error", "fail")
+                ):
                     console.print(f"[bold red]Warning:[/bold red] {result.stderr}")
 
                 # Mark the *build* step as complete
                 progress.update(build_task, advance=1)
             except subprocess.CalledProcessError as exc:
-                console.print(f"[bold red]Error:[/bold red] Failed to build Docker image: {exc}")
+                console.print(
+                    f"[bold red]Error:[/bold red] Failed to build Docker image: {exc}"
+                )
                 if exc.stderr:
                     console.print(f"[red]{exc.stderr}[/red]")
                 return False
@@ -143,11 +147,13 @@ def package_app(app_dir, app_name):
             # ------------------------------------------------------------------
             # STEP 2: Package the application inside the freshly-built container
             # ------------------------------------------------------------------
-            package_task = progress.add_task("[yellow]Packaging application...", total=1)
+            package_task = progress.add_task(
+                "[yellow]Packaging application...", total=1
+            )
 
             tag_suffix = detect_arch()
             image = f"{os.path.basename(app_dir)}:latest-{tag_suffix}"
-            
+
             # Compose a bash script that prepares the template files and then runs the
             # packaging script.  All placeholder replacements and SOURCE_DIR
             # overrides happen entirely inside the container so that nothing ever
@@ -430,7 +436,7 @@ def deploy_package(ip_address, deb_package_path):
                     sftp.close()
                 if client:
                     client.close()
-            except:
+            except Exception:
                 pass
 
 
@@ -515,43 +521,31 @@ def build_app(app_dir, app_name):
     # Image name
     image = f"{os.path.basename(app_dir)}:latest-{tag_suffix}"
 
-    # Check if Docker image exists
-    try:
-        subprocess.run(
-            ["docker", "image", "inspect", image],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        console.print(f"[green]Docker image {image} already exists.[/green]")
-    except subprocess.CalledProcessError:
-        # Docker image doesn't exist, build it
+    # Docker image doesn't exist, build it
+    console.print(
+        f"[yellow]Docker image {image} not found, building it first...[/yellow]"
+    )
+
+    # Always use the shared build_docker.sh script
+    build_docker_script = get_build_docker_script()
+
+    if not os.path.exists(build_docker_script):
         console.print(
-            f"[yellow]Docker image {image} not found, building it first...[/yellow]"
+            f"[bold red]Error:[/bold red] Could not find Docker build script at {build_docker_script}"
         )
-        
-        # Always use the shared build_docker.sh script
-        build_docker_script = get_build_docker_script()
-        
-        if not os.path.exists(build_docker_script):
-            console.print(
-                f"[bold red]Error:[/bold red] Could not find Docker build script at {build_docker_script}"
-            )
-            return False
-            
-        # Make sure the script is executable
-        os.chmod(build_docker_script, 0o755)
-        
-        try:
-            # Run the build script without capturing output so user can see progress
-            console.print("[blue]Running build_docker.sh...[/blue]")
-            subprocess.run(["bash", build_docker_script], check=True, cwd=app_dir)
-            console.print("[green]Successfully built Docker image.[/green]")
-        except subprocess.CalledProcessError as e:
-            console.print(
-                f"[bold red]Error:[/bold red] Failed to build Docker image: {e}"
-            )
-            return False
+        return False
+
+    # Make sure the script is executable
+    os.chmod(build_docker_script, 0o755)
+
+    try:
+        # Run the build script without capturing output so user can see progress
+        console.print("[blue]Running build_docker.sh...[/blue]")
+        subprocess.run(["bash", build_docker_script], check=True, cwd=app_dir)
+        console.print("[green]Successfully built Docker image.[/green]")
+    except subprocess.CalledProcessError as e:
+        console.print(f"[bold red]Error:[/bold red] Failed to build Docker image: {e}")
+        return False
 
     # Now build the app in Docker
     console.print("[yellow]Building application in Docker container...[/yellow]")
@@ -711,9 +705,11 @@ def add_commands(subparsers):
     )
     deploy_parser.set_defaults(func=deploy_cmd)
 
+
 # ---------------------------------------------------------------------------
 # Helper utilities shared across this module
 # ---------------------------------------------------------------------------
+
 
 def get_synapse_root() -> str:
     """Return the absolute path to the *synapse-python* repository root."""
@@ -723,7 +719,9 @@ def get_synapse_root() -> str:
 
 def get_build_docker_script() -> str:
     """Return the canonical *build_docker.sh* path used throughout the tool."""
-    return os.path.join(get_synapse_root(), "synapse", "templates", "app", "build_docker.sh")
+    return os.path.join(
+        get_synapse_root(), "synapse", "templates", "app", "build_docker.sh"
+    )
 
 
 def get_template_ops_dir() -> str:
@@ -740,6 +738,7 @@ def detect_arch() -> str:
 # ---------------------------------------------------------------------------
 # Environment sanity-check helpers
 # ---------------------------------------------------------------------------
+
 
 def ensure_docker() -> bool:
     """Return True if the *docker* CLI is available and the daemon responds.
