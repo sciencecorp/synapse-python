@@ -118,29 +118,24 @@ def build_docker_image(app_dir: str, app_name: str | None = None) -> str:
     return image_tag
 
 
-def build_app(app_dir: str, app_name: str) -> bool:
-    """Cross-compile *app_name* inside its SDK container.
-
-    Returns ``True`` on success, ``False`` otherwise.
-    """
+def build_app(app_dir: str, app_name: str, force_rebuild: bool = False) -> bool:
+    """Cross-compile *app_name* inside its SDK container."""
 
     console.print(f"[yellow]Building application: {app_name}...[/yellow]")
 
     binary_path = os.path.join(app_dir, "build-aarch64", app_name)
 
-    # Skip if binary already exists
-    if os.path.exists(binary_path):
-        console.print(f"[green]Binary already exists at: {binary_path}[/green]")
+    # Skip if binary already exists unless a rebuild was requested
+    if (not force_rebuild) and os.path.exists(binary_path):
+        console.print(
+            f"[green]Binary already exists at: {binary_path} (skipping rebuild) [/green]"
+        )
         return True
 
     console.print("[yellow]Binary not found, attempting to build...[/yellow]")
 
     arch_suffix = detect_arch()
     image_tag = f"{os.path.basename(app_dir)}:latest-{arch_suffix}"
-
-    console.print(
-        f"[yellow]Docker image {image_tag} not found, building it first...[/yellow]"
-    )
 
     # Build (or rebuild) the Docker image – this function is idempotent.
     try:
@@ -489,7 +484,7 @@ def build_cmd(args) -> None:
 
     # 1. Build phase (unless explicitly skipped)
     if not args.skip_build:
-        if not build_app(app_dir, app_name):
+        if not build_app(app_dir, app_name, force_rebuild=True):
             console.print(
                 "[bold red]Error:[/bold red] Failed to build the application."
             )
