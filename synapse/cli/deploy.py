@@ -2,15 +2,15 @@ import os
 import subprocess
 import shutil
 import json
-import time
 import logging
+import tempfile
+import glob
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import (
     Progress,
     SpinnerColumn,
     TextColumn,
-    BarColumn,
     TimeElapsedColumn,
 )
 from rich.prompt import Prompt
@@ -50,166 +50,202 @@ def validate_manifest(manifest_path):
         return False
 
 
+def build_deb_package(app_dir: str, app_name: str, version: str = "0.1.0") -> bool:
+    """Create a *.deb* package for *app_name* and place it in *app_dir*.
+
+    Returns ``True`` on success, ``False`` otherwise.
+    """
+
+    try:
+        staging_dir = tempfile.mkdtemp(prefix="synapse-package-")
+
+        # ------------------------------------------------------------------
+        # 1. Locate the compiled binary and copy it to /opt/scifi/bin
+        # ------------------------------------------------------------------
+        possible_bins = [
+            os.path.join(app_dir, "build-aarch64", app_name),
+            os.path.join(app_dir, "build", app_name),
+            os.path.join(app_dir, "build-arm64", app_name),
+        ]
+
+        binary_path = next((p for p in possible_bins if os.path.exists(p)), None)
+
+        if binary_path is None:
+            console.print(
+                f"[bold red]Error:[/bold red] Compiled binary '{app_name}' not found."
+            )
+            return False
+
+        bin_dst_dir = os.path.join(staging_dir, "opt", "scifi", "bin")
+        os.makedirs(bin_dst_dir, exist_ok=True)
+        shutil.copy2(binary_path, os.path.join(bin_dst_dir, app_name))
+
+        # ------------------------------------------------------------------
+        # 2. Generate systemd service & lifecycle scripts on the fly
+        # ------------------------------------------------------------------
+
+        # Generate systemd unit
+        svc_content = f"""[Unit]
+Description=Synapse Application
+After=network-online.target
+Wants=network-online.target
+Requires=systemd-udevd.service
+After=systemd-udevd.service
+
+[Service]
+Type=simple
+User=root
+Restart=no
+ExecStartPre=/sbin/sysctl -w net.core.wmem_max=4194304
+ExecStartPre=/sbin/sysctl -w net.core.wmem_default=4194304
+Environment=LD_LIBRARY_PATH=/opt/scifi/usr-libs:/opt/scifi/lib
+Environment=SCIFI_ROOT=/opt/scifi
+ExecStart=/opt/scifi/bin/{app_name}
+WorkingDirectory=/opt/scifi
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+        svc_dst = os.path.join(
+            staging_dir, "etc", "systemd", "system", f"{app_name}.service"
+        )
+        os.makedirs(os.path.dirname(svc_dst), exist_ok=True)
+        with open(svc_dst, "w", encoding="utf-8") as f:
+            f.write(svc_content)
+
+        lifecycle_scripts_tmp = []
+
+        postinstall_path = os.path.join(staging_dir, "postinstall.sh")
+        with open(postinstall_path, "w", encoding="utf-8") as f:
+            f.write("#!/bin/bash\nset -e\nsystemctl daemon-reload\n")
+        os.chmod(postinstall_path, 0o755)
+        lifecycle_scripts_tmp.append(postinstall_path)
+
+        preremove_path = os.path.join(staging_dir, "preremove.sh")
+        with open(preremove_path, "w", encoding="utf-8") as f:
+            f.write(
+                f"#!/bin/bash\nset -e\nsystemctl stop {app_name} || true\nsystemctl disable {app_name} || true\n"
+            )
+        os.chmod(preremove_path, 0o755)
+        lifecycle_scripts_tmp.append(preremove_path)
+
+        postremove_path = os.path.join(staging_dir, "postremove.sh")
+        with open(postremove_path, "w", encoding="utf-8") as f:
+            f.write("#!/bin/bash\nset -e\nsystemctl daemon-reload\n")
+        os.chmod(postremove_path, 0o755)
+        lifecycle_scripts_tmp.append(postremove_path)
+
+        # ------------------------------------------------------------------
+        # 3. Copy user-space Synapse SDK shared libs
+        # ------------------------------------------------------------------
+        lib_dst_dir = os.path.join(staging_dir, "opt", "scifi", "lib")
+        os.makedirs(lib_dst_dir, exist_ok=True)
+        for lib in glob.glob("/usr/lib/libsynapse*.so*"):
+            try:
+                shutil.copy2(lib, lib_dst_dir)
+            except PermissionError:
+                console.print(f"[yellow]Skipping lib copy (perm): {lib}[/yellow]")
+
+        # ------------------------------------------------------------------
+        # 4. Build the .deb with FPM
+        # ------------------------------------------------------------------
+        arch = detect_arch()
+
+        fpm_cmd = [
+            "fpm",
+            "-s",
+            "dir",
+            "-t",
+            "deb",
+            "-n",
+            app_name,
+            "-f",
+            "-v",
+            version,
+            "-C",
+            staging_dir,
+            "--deb-no-default-config-files",
+            "--depends",
+            "systemd",
+            "--vendor",
+            "Science Corporation",
+            "--description",
+            "Synapse Application",
+            "--architecture",
+            arch,
+        ]
+
+        # Attach lifecycle scripts (referenced relative to /pkg inside container)
+        script_map = {
+            "postinstall.sh": "--after-install",
+            "preremove.sh": "--before-remove",
+            "postremove.sh": "--after-remove",
+        }
+        for path in lifecycle_scripts_tmp:
+            opt = script_map.get(os.path.basename(path))
+            if opt:
+                container_path = f"/pkg/{os.path.basename(path)}"
+                fpm_cmd.extend([opt, container_path])
+
+        fpm_cmd.append(".")
+
+        # ------------------------------------------------------------------
+        # 5. Invoke FPM in a Docker container (consistent across hosts)
+        # ------------------------------------------------------------------
+
+        fpm_image = "cdrx/fpm-ubuntu:latest"
+        console.print(f"[yellow]Running FPM (Docker image: {fpm_image}) ...[/yellow]")
+
+        # Replace the host-specific staging dir with the container mount path
+        fpm_args = fpm_cmd[1:]
+        try:
+            c_index = fpm_args.index("-C") + 1
+            fpm_args[c_index] = "/pkg"
+        except ValueError:
+            pass
+
+        docker_fpm_cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            "linux/amd64",
+            "-v",
+            f"{staging_dir}:/pkg",
+            "-v",
+            f"{app_dir}:/out",
+            "-w",
+            "/out",
+            fpm_image,
+            "fpm",
+        ] + fpm_args
+
+        subprocess.run(docker_fpm_cmd, check=True)
+
+        # Verify that a .deb was produced
+        deb_files = [f for f in os.listdir(app_dir) if f.endswith(".deb")]
+        if not deb_files:
+            console.print(
+                f"[bold red]Error:[/bold red] FPM completed but no .deb found in {app_dir}."
+            )
+            return False
+
+        console.print("[green]Package created successfully![/green]")
+        return True
+
+    except subprocess.CalledProcessError as exc:
+        console.print(f"[bold red]Error:[/bold red] FPM failed: {exc}")
+        return False
+
+    finally:
+        pass
+
+
 def package_app(app_dir, app_name):
-    """Package the application into a .deb file"""
-    # Check if we're in a Docker container
-    if os.path.exists("/.dockerenv"):
-        # We're inside Docker, directly run the package script
-        package_script = os.path.join(app_dir, "ops", "package", "package.sh")
-        if not os.path.exists(package_script):
-            console.print(
-                f"[bold red]Error:[/bold red] Package script not found at {package_script}"
-            )
-            return False
+    """Package *app_name* into a .deb using the pure-Python builder."""
 
-        # Make sure the script is executable
-        os.chmod(package_script, 0o755)
-
-        # Make sure all the other scripts are executable too
-        script_dir = os.path.join(app_dir, "ops", "package", "scripts")
-        if os.path.exists(script_dir):
-            for script in os.listdir(script_dir):
-                if script.endswith(".sh"):
-                    script_path = os.path.join(script_dir, script)
-                    os.chmod(script_path, 0o755)
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[bold blue]{task.description}[/bold blue]"),
-            BarColumn(),
-            TimeElapsedColumn(),
-            console=console,
-        ) as progress:
-            task = progress.add_task("[yellow]Packaging application...", total=1)
-
-            # Run the package script
-            try:
-                subprocess.run(["bash", package_script], check=True, cwd=app_dir)
-                progress.update(task, advance=1)
-                return True
-            except subprocess.CalledProcessError as e:
-                console.print(
-                    f"[bold red]Error:[/bold red] Failed to package application: {e}"
-                )
-                return False
-    else:
-        # We're outside Docker, need to use docker to package
-        # Always use the build_docker.sh from the synapse-python package directly
-        build_docker_script = get_build_docker_script()
-
-        if not os.path.exists(build_docker_script):
-            console.print(
-                f"[bold red]Error:[/bold red] Could not find Docker build script at {build_docker_script}"
-            )
-            return False
-
-        # Make sure the script is executable
-        os.chmod(build_docker_script, 0o755)
-
-        # Path to ops templates inside synapse-python
-        template_ops_dir = get_template_ops_dir()
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[bold blue]{task.description}[/bold blue]"),
-            BarColumn(),
-            TimeElapsedColumn(),
-            console=console,
-        ) as progress:
-            build_task = progress.add_task("[yellow]Building Docker image...", total=1)
-
-            # ------------------------------------------------------------------
-            # STEP 1: Build the Docker image used for packaging the application
-            # ------------------------------------------------------------------
-            try:
-                result = subprocess.run(
-                    ["bash", build_docker_script],
-                    check=True,
-                    cwd=app_dir,
-                    capture_output=True,
-                    text=True,
-                )
-
-                # Log any warnings emitted by the build step so they are not lost
-                if result.stderr and any(
-                    word in result.stderr.lower() for word in ("error", "fail")
-                ):
-                    console.print(f"[bold red]Warning:[/bold red] {result.stderr}")
-
-                # Mark the *build* step as complete
-                progress.update(build_task, advance=1)
-            except subprocess.CalledProcessError as exc:
-                console.print(
-                    f"[bold red]Error:[/bold red] Failed to build Docker image: {exc}"
-                )
-                if exc.stderr:
-                    console.print(f"[red]{exc.stderr}[/red]")
-                return False
-
-            # ------------------------------------------------------------------
-            # STEP 2: Package the application inside the freshly-built container
-            # ------------------------------------------------------------------
-            package_task = progress.add_task(
-                "[yellow]Packaging application...", total=1
-            )
-
-            tag_suffix = detect_arch()
-            image = f"{os.path.basename(app_dir)}:latest-{tag_suffix}"
-
-            # Ensure the helper script exists and is executable on the host so it
-            # can be executed inside the container.
-            prepare_script = os.path.join(template_ops_dir, "prepare_and_package.sh")
-            if not os.path.exists(prepare_script):
-                console.print(
-                    f"[bold red]Error:[/bold red] Helper script not found at {prepare_script}"
-                )
-                return False
-
-            # Make sure the script has execute permissions (mostly relevant for
-            # Windows or freshly-cloned repos).
-            os.chmod(prepare_script, 0o755)
-
-            cmd = [
-                "docker",
-                "run",
-                "-i",
-                "--rm",
-                "-v",
-                f"{os.path.abspath(app_dir)}:/home/workspace",
-                "-v",
-                f"{template_ops_dir}:/synapse_ops:ro",
-                image,
-                "/bin/bash",
-                "/synapse_ops/prepare_and_package.sh",
-                app_name,
-            ]
-
-            # Run the packaging script in Docker - capture output
-            print(f"Running packaging script in Docker: {image}")
-            try:
-                # Capture output to prevent it from interfering with progress bars
-                result = subprocess.run(
-                    cmd, check=True, cwd=app_dir, capture_output=True, text=True
-                )
-
-                # Only log errors if they occur
-                if result.stderr and (
-                    "error" in result.stderr.lower() or "fail" in result.stderr.lower()
-                ):
-                    console.print(f"[bold red]Warning:[/bold red] {result.stderr}")
-
-                progress.update(package_task, advance=1)
-
-                # Display success message after completion
-                console.print("[green]Package created successfully![/green]")
-                return True
-            except subprocess.CalledProcessError as e:
-                console.print(
-                    f"[bold red]Error:[/bold red] Failed to package application: {e}"
-                )
-                if e.stderr:
-                    console.print(f"[red]{e.stderr}[/red]")
-                return False
+    return build_deb_package(app_dir, app_name)
 
 
 def find_deb_package(app_dir):
@@ -256,8 +292,6 @@ def get_device_credentials(ip_address):
 def deploy_package(ip_address, deb_package_path):
     """Deploy the package to the device"""
     package_filename = os.path.basename(deb_package_path)
-
-    # Stop any previous progress display
     console.clear_live()
 
     # Get cached credentials or prompt for new ones
@@ -276,9 +310,10 @@ def deploy_package(ip_address, deb_package_path):
     with Progress(
         SpinnerColumn(),
         TextColumn("[bold blue]{task.description}[/bold blue]"),
-        BarColumn(),
         TimeElapsedColumn(),
         console=console,
+        transient=True,
+        refresh_per_second=4,
     ) as progress:
         deploy_task = progress.add_task(
             f"[yellow]Deploying to {ip_address}...", total=3
@@ -318,37 +353,105 @@ def deploy_package(ip_address, deb_package_path):
 
             # Install task
             install_task = progress.add_task("[magenta]Installing package...", total=1)
+            progress.stop()
 
             try:
-                # Use expect-like behavior with Paramiko to handle su
-                shell = client.invoke_shell()
+                import time
 
-                # Set up a way to collect output
-                output = ""
+                def run_remote(cmd: str, needs_password: bool = False):
+                    """Execute *cmd* over SSH, stream live output, and return (exit_status, full_output).
 
-                # Send su command
-                shell.send("su -\n")
-                time.sleep(1)  # Wait for password prompt
+                    If *needs_password* is True the helper waits until a password
+                    prompt is detected before writing *root_password* to *stdin*.
+                    This behaves well for environments that rely solely on
+                    *su* for privilege escalation because writing the
+                    password too early can cause *su* to ignore it and block
+                    indefinitely.
+                    """
+                    stdin, stdout, stderr = client.exec_command(cmd, get_pty=True)
 
-                # Send root password
-                shell.send(f"{root_password}\n")
-                time.sleep(1)  # Wait for su to authenticate
+                    output = ""
+                    pw_sent = False
+                    buf_out = ""
+                    buf_err = ""
 
-                # Send dpkg command
-                shell.send(f"dpkg -i {remote_path}\n")
-                time.sleep(5)  # Give dpkg time to run
+                    def maybe_print(line: str, *, is_err: bool = False):
+                        """Filter *line* and print if it should be visible."""
+                        clean = line.replace("\r", "")
 
-                # Exit from root shell
-                shell.send("exit\n")
-                time.sleep(0.5)
+                        if "Reading database" in clean:
+                            return
 
-                # Collect the final output
-                while shell.recv_ready():
-                    chunk = shell.recv(4096).decode("utf-8")
-                    output += chunk
+                        if is_err:
+                            log_console.print(clean, style="red", end="")
+                        else:
+                            log_console.print(clean, end="")
 
-                # Check for common error indicators
-                if "error" in output.lower() or "failed" in output.lower():
+                    while not stdout.channel.exit_status_ready():
+                        while stdout.channel.recv_ready():
+                            chunk = stdout.channel.recv(1024).decode(errors="replace")
+                            output += chunk
+
+                            if (
+                                needs_password
+                                and ("password" in chunk.lower())
+                                and not pw_sent
+                            ):
+                                stdin.write(root_password + "\n")
+                                stdin.flush()
+                                pw_sent = True
+
+                            buf_out += chunk
+                            while "\n" in buf_out:
+                                line, buf_out = buf_out.split("\n", 1)
+                                maybe_print(line + "\n", is_err=False)
+
+                        while stderr.channel.recv_ready():
+                            chunk = stderr.channel.recv(1024).decode(errors="replace")
+                            output += chunk
+
+                            if (
+                                needs_password
+                                and ("password" in chunk.lower())
+                                and not pw_sent
+                            ):
+                                stdin.write(root_password + "\n")
+                                stdin.flush()
+                                pw_sent = True
+
+                            buf_err += chunk
+                            while "\n" in buf_err:
+                                line, buf_err = buf_err.split("\n", 1)
+                                maybe_print(line + "\n", is_err=True)
+
+                        time.sleep(0.1)
+
+                    if buf_out:
+                        maybe_print(buf_out, is_err=False)
+                        buf_out = ""
+                    if buf_err:
+                        maybe_print(buf_err, is_err=True)
+                        buf_err = ""
+
+                    output += stdout.read().decode()
+                    output += stderr.read().decode()
+                    exit_status = stdout.channel.recv_exit_status()
+                    return exit_status, output
+
+                # If we are already root, skip any privilege escalation
+                if username == "root":
+                    esc_cmd = f"DEBIAN_FRONTEND=noninteractive dpkg -i {remote_path} && rm {remote_path}"
+                    exit_status, output = run_remote(esc_cmd)
+                else:
+                    # Elevate privileges with su (target devices never have sudo)
+                    su_cmd = f"su -c 'env DEBIAN_FRONTEND=noninteractive dpkg -i {remote_path} && rm {remote_path}'"
+                    exit_status, output = run_remote(su_cmd, needs_password=True)
+
+                # Restart the live progress display now that installation is
+                # complete so subsequent updates render properly.
+                progress.start()
+
+                if exit_status != 0:
                     progress.update(install_task, visible=False)
                     progress.update(deploy_task, visible=False)
                     console.print(
@@ -361,16 +464,13 @@ def deploy_package(ip_address, deb_package_path):
                     )
                     return False
 
-                # Cleanup
-                shell.send(f"rm {remote_path}\n")
-                time.sleep(0.5)
-
-                # Mark installation as complete
                 progress.update(install_task, completed=1)
                 progress.update(deploy_task, advance=1)
 
-                # Save successful credentials
                 save_credentials(ip_address, username, login_password, root_password)
+
+                progress.stop()
+                console.clear_live()
 
                 console.print(
                     Panel(
@@ -383,6 +483,7 @@ def deploy_package(ip_address, deb_package_path):
                 return True
 
             except Exception as e:
+                progress.start()
                 progress.update(install_task, visible=False)
                 progress.update(deploy_task, visible=False)
                 console.print(
@@ -490,24 +591,10 @@ def build_app(app_dir, app_name):
         f"[yellow]Docker image {image} not found, building it first...[/yellow]"
     )
 
-    # Always use the shared build_docker.sh script
-    build_docker_script = get_build_docker_script()
-
-    if not os.path.exists(build_docker_script):
-        console.print(
-            f"[bold red]Error:[/bold red] Could not find Docker build script at {build_docker_script}"
-        )
-        return False
-
-    # Make sure the script is executable
-    os.chmod(build_docker_script, 0o755)
-
+    # Build the Docker image directly via Python helper
     try:
-        # Run the build script without capturing output so user can see progress
-        console.print("[blue]Running build_docker.sh...[/blue]")
-        subprocess.run(["bash", build_docker_script], check=True, cwd=app_dir)
-        console.print("[green]Successfully built Docker image.[/green]")
-    except subprocess.CalledProcessError as e:
+        image = build_docker_image(app_dir, app_name)
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         console.print(f"[bold red]Error:[/bold red] Failed to build Docker image: {e}")
         return False
 
@@ -660,7 +747,6 @@ def deploy_cmd(args):
 
 def add_commands(subparsers):
     """Add deploy commands to the CLI"""
-    # Deploy command
     deploy_parser = subparsers.add_parser(
         "deploy", help="Deploy an application to a Synapse device"
     )
@@ -670,38 +756,10 @@ def add_commands(subparsers):
     deploy_parser.set_defaults(func=deploy_cmd)
 
 
-# ---------------------------------------------------------------------------
-# Helper utilities shared across this module
-# ---------------------------------------------------------------------------
-
-
-def get_synapse_root() -> str:
-    """Return the absolute path to the *synapse-python* repository root."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.abspath(os.path.join(script_dir, "..", ".."))
-
-
-def get_build_docker_script() -> str:
-    """Return the canonical *build_docker.sh* path used throughout the tool."""
-    return os.path.join(
-        get_synapse_root(), "synapse", "templates", "app", "build_docker.sh"
-    )
-
-
-def get_template_ops_dir() -> str:
-    """Return the path to the shared *ops* template directory."""
-    return os.path.join(get_synapse_root(), "synapse", "templates", "app", "ops")
-
-
 def detect_arch() -> str:
     """Return an architecture tag suffix (``arm64`` or ``amd64``)."""
     arch = subprocess.check_output(["uname", "-m"]).decode("utf-8").strip()
     return "arm64" if arch in ("arm64", "aarch64") else "amd64"
-
-
-# ---------------------------------------------------------------------------
-# Environment sanity-check helpers
-# ---------------------------------------------------------------------------
 
 
 def ensure_docker() -> bool:
@@ -729,3 +787,53 @@ def ensure_docker() -> bool:
             "[bold red]Error:[/bold red] Docker daemon does not appear to be running. Please start Docker and try again."
         )
         return False
+
+
+def build_docker_image(app_dir: str, app_name: str | None = None) -> str:
+    """Build (or rebuild) the SDK Docker image used for cross-compiling *app_name*.
+
+    Returns the fully-qualified image tag (``<app>:latest-<arch>``) or raises
+    ``subprocess.CalledProcessError`` if the build fails.
+    """
+    if app_name is None:
+        app_name = os.path.basename(app_dir)
+
+    arch_suffix = detect_arch()  # "arm64" or "amd64"
+
+    # Pick an arch-specific Dockerfile if it exists, otherwise fall back to the
+    # generic one.
+    dockerfile_rel = (
+        f"ops/docker/Dockerfile.{arch_suffix}"
+        if arch_suffix == "arm64"
+        else "ops/docker/Dockerfile"
+    )
+    dockerfile_path = os.path.join(app_dir, dockerfile_rel)
+    if not os.path.exists(dockerfile_path):
+        # Last chance: fall back to the generic Dockerfile regardless of arch.
+        dockerfile_path = os.path.join(app_dir, "ops/docker/Dockerfile")
+
+    if not os.path.exists(dockerfile_path):
+        raise FileNotFoundError(
+            f"Expected Dockerfile not found at {dockerfile_path}. "
+            "Ensure your application provides the required build Dockerfile(s)."
+        )
+
+    image_tag = f"{app_name}:latest-{arch_suffix}"
+
+    console.print(f"[yellow]Building Docker image [bold]{image_tag}[/bold]...[/yellow]")
+    subprocess.run(
+        [
+            "docker",
+            "build",
+            "-t",
+            image_tag,
+            "-f",
+            dockerfile_path,
+            ".",
+        ],
+        check=True,
+        cwd=app_dir,
+    )
+
+    console.print(f"[green]Successfully built Docker image {image_tag}[/green]")
+    return image_tag
