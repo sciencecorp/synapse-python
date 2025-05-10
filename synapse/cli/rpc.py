@@ -16,6 +16,7 @@ from rich.pretty import pprint
 
 from synapse.cli.query import StreamingQueryClient
 from synapse.utils.log import log_entry_to_str
+from synapse.cli.device_info_display import DeviceInfoDisplay
 
 
 def add_commands(subparsers):
@@ -99,14 +100,9 @@ def add_commands(subparsers):
 
 
 def info(args):
-    console = Console()
-    with console.status("Getting device information...", spinner="bouncingBall"):
-        info = syn.Device(args.uri, args.verbose).info()
-
-    if not info:
-        console.print(f"[bold red]Failed to get device information from {args.uri}")
-        return
-    pprint(info)
+    device = syn.Device(args.uri, args.verbose)
+    display = DeviceInfoDisplay()
+    display.summary(device)
 
 
 def query(args):
@@ -116,41 +112,65 @@ def query(args):
                 data = f.read()
                 proto = Parse(data, QueryRequest())
                 return proto
-        except Exception:
-            print(f"Failed to open {path_to_config}")
+        except FileNotFoundError:
+            console.print(f"[red]Failed to open {path_to_config}: File not found[/red]")
+            return None
+        except Exception as e:
+            console.print(f"[red]Failed to parse query file: {str(e)}[/red]")
             return None
 
+    console = Console()
     if args.stream:
         client = StreamingQueryClient(args.uri, args.verbose)
         query_proto = load_query_request(args.query_file)
         if not query_proto:
             return False
-        return client.stream_query(StreamQueryRequest(request=query_proto))
+        try:
+            return client.stream_query(StreamQueryRequest(request=query_proto))
+        except Exception as e:
+            console.print(f"[red]Error streaming query: {str(e)}[/red]")
+            return False
 
     if Path(args.query_file).suffix != ".json":
-        print("Query file must be a JSON file")
+        console.print("[red]Query file must be a JSON file[/red]")
         return False
 
-    with open(args.query_file) as query_json:
-        query_proto = Parse(query_json.read(), QueryRequest())
-        print("Running query:")
-        print(query_proto)
+    try:
+        with open(args.query_file) as query_json:
+            query_proto = Parse(query_json.read(), QueryRequest())
+            console.print("Running query:")
+            console.print(query_proto)
 
-        result: QueryResponse = syn.Device(args.uri, args.verbose).query(query_proto)
-        if result:
-            print(text_format.MessageToString(result))
+            result: QueryResponse = syn.Device(args.uri, args.verbose).query(
+                query_proto
+            )
+            if result:
+                console.print(text_format.MessageToString(result))
 
-            if result.HasField("impedance_response"):
-                measurements = result.impedance_response
-                # Write impedance measurements to a CSV file
-                with open(
-                    f"impedance_measurements_{time.strftime('%Y%m%d-%H%M%S')}.csv", "w"
-                ) as f:
-                    f.write("Electrode ID,Magnitude (Ohms),Phase (degrees),Status\n")
-                    for measurement in measurements.measurements:
-                        f.write(
-                            f"{measurement.electrode_id},{measurement.magnitude},{measurement.phase},1\n"
+                if result.HasField("impedance_response"):
+                    measurements = result.impedance_response
+                    # Write impedance measurements to a CSV file
+                    timestamp = time.strftime("%Y%m%d-%H%M%S")
+                    filename = f"impedance_measurements_{timestamp}.csv"
+                    try:
+                        with open(filename, "w") as f:
+                            f.write(
+                                "Electrode ID,Magnitude (Ohms),Phase (degrees),Status\n"
+                            )
+                            for measurement in measurements.measurements:
+                                f.write(
+                                    f"{measurement.electrode_id},{measurement.magnitude},{measurement.phase},1\n"
+                                )
+                        console.print(
+                            f"[green]Impedance measurements saved to {filename}[/green]"
                         )
+                    except IOError as e:
+                        console.print(
+                            f"[red]Error writing impedance measurements: {str(e)}[/red]"
+                        )
+    except Exception as e:
+        console.print(f"[red]Error executing query: {str(e)}[/red]")
+        return False
 
 
 def start(args):
@@ -181,7 +201,9 @@ def start(args):
             cfg_proto = Parse(json_text, DeviceConfiguration())
             config_obj = syn.Config.from_proto(cfg_proto)
         except Exception as e:
-            console.print(f"[bold red]Failed to parse configuration file[/bold red]: {e}")
+            console.print(
+                f"[bold red]Failed to parse configuration file[/bold red]: {e}"
+            )
             return
 
     device = syn.Device(args.uri, args.verbose)
@@ -194,7 +216,9 @@ def start(args):
                 console.print("[bold red]Internal error configuring device")
                 return
             if cfg_ret.code != StatusCode.kOk:
-                console.print(f"[bold red]Error configuring device[/bold red]\n{cfg_ret.message}")
+                console.print(
+                    f"[bold red]Error configuring device[/bold red]\n{cfg_ret.message}"
+                )
                 return
         console.print("[green]Device Configured")
 
@@ -204,7 +228,9 @@ def start(args):
             console.print("[bold red]Internal error starting device")
             return
         if start_ret.code != StatusCode.kOk:
-            console.print(f"[bold red]Error starting device[/bold red]\n{start_ret.message}")
+            console.print(
+                f"[bold red]Error starting device[/bold red]\n{start_ret.message}"
+            )
             return
 
     console.print("[green]Device Started")
