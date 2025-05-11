@@ -6,37 +6,38 @@ Includes `synapsectl` command line utility:
 
     % synapsectl --help
     usage: synapsectl [-h] [--uri URI] [--version] [--verbose]
-                    {discover,info,query,start,stop,configure,logs,read,plot,file} ...
+                  {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy} ...
 
     Synapse Device Manager
 
     options:
     -h, --help            show this help message and exit
-    --uri URI             The device identifier to connect to. Can either be the IP address or name
+    --uri URI, -u URI     The device identifier to connect to. Can either be the IP address or name
     --version             show program's version number and exit
     --verbose, -v         Enable verbose output
 
     Commands:
-    {discover,info,query,start,stop,configure,logs,read,plot,file}
+    {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy}
         discover            Discover Synapse devices on the network
         info                Get device information
         query               Execute a query on the device
-        start               Start the device
-        stop                Stop the device
+        start               Start the device or an application
+        stop                Stop the device or an application
         configure           Write a configuration to the device
         logs                Get logs from the device
         read                Read from a device's StreamOut node
         plot                Plot recorded synapse data
         file                File commands
+        taps                Interact with taps on the network
+        deploy              Deploy an application to a Synapse device
 
 As well as the base for a device implementation (`synapse/server`),
 
 And a toy device `synapse-sim` for local development,
 
     % synapse-sim --help
-    usage: synapse-sim [-h] --iface-ip IFACE_IP [--rpc-port RPC_PORT]
-                        [--discovery-port DISCOVERY_PORT] [--discovery-addr DISCOVERY_ADDR] [--name NAME] [--serial SERIAL]
-                        [-v]
+    usage: synapse-sim [-h] --iface-ip IFACE_IP [--rpc-port RPC_PORT] [--discovery-port DISCOVERY_PORT]
+                   [--discovery-addr DISCOVERY_ADDR] [--name NAME] [--serial SERIAL] [-v]
 
     Simple Synapse Device Simulator (Development)
 
@@ -96,6 +97,7 @@ To update the buffer size immediately:
 ```
 sudo sysctl -w kern.ipc.maxsockbuf=10485760
 ```
+
 This change will be lost when restarting your computer. To make the setting persistent across reboots, add the following to `/etc/sysctl.conf` (you must create the file if it does not already exist):
 
 ```
