@@ -24,6 +24,7 @@ from synapse.utils.log import (
 
 LOG_FILEPATH = str(Path.home() / ".science" / "synapse" / "logs" / "server.log")
 
+
 def _read_api_version():
     try:
         with open(str(Path(__file__).parent.parent / "api" / "version.txt")) as f:
@@ -362,21 +363,21 @@ class SynapseServicer(SynapseDeviceServicer):
         return True
 
     async def _start_streaming(self):
-        self.logger.info("starting streaming...")
+        self.logger.info("Starting streaming...")
         for node in self.nodes:
             node.start()
         self.state = DeviceState.kRunning
-        self.logger.info("streaming started.")
+        self.logger.info("Streaming started.")
         return True
 
     async def _stop_streaming(self):
         if self.state != DeviceState.kRunning:
             return False
-        self.logger.info("stopping streaming...")
+        self.logger.info("Stopping streaming...")
         for node in self.nodes:
             node.stop()
         self.state = DeviceState.kStopped
-        self.logger.info("streaming stopped.")
+        self.logger.info("Streaming stopped.")
         return True
 
     def _sockets_status_info(self):
@@ -386,7 +387,7 @@ class SynapseServicer(SynapseDeviceServicer):
         if self.synapse_api_version is None:
             return 0
         try:
-            major, minor, patch = map(int, self.synapse_api_version.split('.'))
+            major, minor, patch = map(int, self.synapse_api_version.split("."))
             return (major & 0x3FF) << 20 | (minor & 0x3FF) << 10 | (patch & 0x3FF)
         except Exception:
             return 0
