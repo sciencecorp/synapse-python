@@ -208,6 +208,8 @@ def start(args):
 
     device = syn.Device(args.uri, args.verbose)
 
+    device_name = device.get_name()
+
     # If we have a configuration, apply it first.
     if config_obj is not None:
         with console.status("Configuring device...", spinner="bouncingBall"):
@@ -217,10 +219,10 @@ def start(args):
                 return
             if cfg_ret.code != StatusCode.kOk:
                 console.print(
-                    f"[bold red]Error configuring device[/bold red]\n{cfg_ret.message}"
+                    f"[bold red]Error configuring device[/bold red]\nResponse from {device_name}:\n{cfg_ret.message}"
                 )
                 return
-        console.print("[green]Device Configured")
+        console.print("[green]Device configured")
 
     with console.status("Starting device...", spinner="bouncingBall"):
         start_ret = device.start_with_status()
@@ -229,11 +231,11 @@ def start(args):
             return
         if start_ret.code != StatusCode.kOk:
             console.print(
-                f"[bold red]Error starting device[/bold red]\n{start_ret.message}"
+                f"[bold red]Error starting device[/bold red]\nResponse from {device_name}:\n{start_ret.message}"
             )
             return
 
-    console.print("[green]Device Started")
+    console.print("[green]Device started")
 
 
 def stop(args):
@@ -257,7 +259,7 @@ def stop(args):
         if stop_ret.code != StatusCode.kOk:
             console.print(f"[bold red]Error stopping\n{stop_ret.message}")
             return
-    console.print("[green]Device Stopped")
+    console.print("[green]Device stopped")
 
 
 def configure(args):
@@ -279,7 +281,7 @@ def configure(args):
         if config_ret.code != StatusCode.kOk:
             console.print(f"[bold red]Error configuring\n{config_ret.message}")
             return
-        console.print("[green]Device Configured")
+        console.print("[green]Device configured")
 
 
 def get_logs(args):

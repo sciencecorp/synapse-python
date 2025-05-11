@@ -51,7 +51,7 @@ class BaseNode(object):
         for task in self.tasks:
             task.cancel()
         self.tasks = []
-        self.logger.info("stopped")
+        self.logger.info("Stopped")
         return Status()
 
     async def on_data_received(self, data: SynapseData):
