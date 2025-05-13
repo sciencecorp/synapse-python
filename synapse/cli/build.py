@@ -340,7 +340,7 @@ WantedBy=multi-user.target
                 image_tag,
                 "/bin/bash",
                 "-c",
-                "find /usr/lib -name 'libsynapse*.so*' -exec cp -av {} /out/ \\;",
+                "find /usr/lib -name 'libsynapse*.so*' -exec cp -a {} /out/ \\;",
             ]
 
             subprocess.run(docker_cmd, check=True)
@@ -398,7 +398,9 @@ WantedBy=multi-user.target
         fpm_cmd.append(".")
 
         fpm_image = "cdrx/fpm-ubuntu:latest"
-        console.print(f"[yellow]Running FPM (Docker image: {fpm_image}) ...[/yellow]")
+        console.print(
+            f"[yellow]Packaging App for Synapse Device (Docker image: {fpm_image}) ...[/yellow]"
+        )
 
         # Replace host-specific staging dir with container mount path
         fpm_args = fpm_cmd[1:]
@@ -424,7 +426,13 @@ WantedBy=multi-user.target
             "fpm",
         ] + fpm_args
 
-        subprocess.run(docker_fpm_cmd, check=True)
+        subprocess.run(
+            docker_fpm_cmd,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
 
         # Verify that a .deb was produced
         deb_files = [

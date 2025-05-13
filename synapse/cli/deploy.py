@@ -158,18 +158,42 @@ def deploy_package(ip_address, deb_package_path):
                     live.refresh()
 
             except Exception as e:
-                # Show error in the panel
-                response_panel.renderable = (
-                    f"[bold red]Error during deployment: {str(e)}[/bold red]"
-                )
+                # Instead of replacing the panel, preserve progress and add error
+                display_items = []
+
+                # Show completed steps with checkmarks
+                for i, resp in enumerate(responses):
+                    if i < current_index:
+                        display_items.append(f"[green]✓[/green] Step {i + 1}: {resp}")
+                    elif i == current_index:
+                        # Mark the current step as failed
+                        display_items.append(
+                            f"[red]✗[/red] Step {i + 1}: {resp} - FAILED"
+                        )
+                        break
+
+                # Add the error message at the bottom
+                display_items.append(f"[bold red]Error: {str(e)}[/bold red]")
+
+                # Update the panel with progress and error
+                response_panel.renderable = Group(*display_items)
                 response_panel.border_style = "red"
                 live.refresh()
 
         except Exception as e:
-            # Show error in the panel
-            response_panel.renderable = (
-                f"[bold red]Error during deployment: {str(e)}[/bold red]"
-            )
+            # For the outer exception, also preserve any progress made
+            display_items = []
+
+            # Show any completed steps with checkmarks
+            for i, resp in enumerate(responses):
+                if i < current_index:
+                    display_items.append(f"[green]✓[/green] Step {i + 1}: {resp}")
+
+            # Add the error message
+            display_items.append(f"[bold red]Error during setup: {str(e)}[/bold red]")
+
+            # Update the panel with progress and error
+            response_panel.renderable = Group(*display_items)
             response_panel.border_style = "red"
             live.refresh()
 
