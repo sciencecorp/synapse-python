@@ -200,6 +200,10 @@ def deploy_package(ip_address, deb_package_path):
 
 def deploy_cmd(args):
     """Handle the deploy command"""
+    # Make sure we have docker, if not it will print an error
+    if not builder.ensure_docker():
+        return
+
     # If user supplied a pre-built package, skip local build/pkg steps.
     if args.package:
         deb_package = os.path.abspath(args.package)
