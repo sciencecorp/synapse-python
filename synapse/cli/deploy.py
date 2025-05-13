@@ -1,46 +1,74 @@
-import json
+import hashlib
 import os
 
-from rich import box
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
-from rich.prompt import Prompt
+from rich.spinner import Spinner
+from rich.text import Text
+from rich.live import Live
+from rich.console import Group
 
-import synapse.client.sftp as sftp
 from synapse.cli import build as builder
+import synapse as syn
+from synapse.api.app_pb2 import PackageMetadata, AppPackageChunk
+
+# 1MB chunks
+FILE_CHUNK_SIZE = 1024 * 1024
+
 
 console = Console()
 log_console = Console(stderr=True)
 
 
-def get_device_credentials(ip_address):
-    """Get user credentials with clear prompts"""
-    console.print()
-    console.print(
-        Panel(
-            f"[bold yellow]Device Connection Details[/bold yellow]\n[white]Target device:[/white] [green]{ip_address}[/green]",
-            border_style="blue",
-        )
+def calculate_sha256(file_path):
+    """Calculate SHA256 hash of a file."""
+    sha256_hash = hashlib.sha256()
+
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+
+    return sha256_hash.hexdigest()
+
+
+def extract_version(package_name):
+    """Extract version from debian package name."""
+    try:
+        # Format: package-name_version_architecture.deb
+        parts = package_name.split("_")
+        if len(parts) >= 2:
+            return parts[1]
+    except Exception:
+        pass
+
+    return ""
+
+
+def create_metadata(file_path, console):
+    """Create package metadata from file."""
+    file_name = os.path.basename(file_path)
+    file_size = os.path.getsize(file_path)
+
+    with console.status(
+        f"[bold blue]Calculating SHA256 for [cyan]{file_name}[/cyan]...", spinner="dots"
+    ):
+        sha256_sum = calculate_sha256(file_path)
+
+    version = extract_version(file_name)
+
+    metadata = PackageMetadata(
+        name=file_name, version=version, size=file_size, sha256_sum=sha256_sum
     )
 
-    username = Prompt.ask("Enter login username", default="scifi")
+    meta_text = Text()
+    meta_text.append("Package Metadata\n", style="bold blue")
+    meta_text.append(f"Name: {metadata.name}\n", style="cyan")
+    meta_text.append(f"Version: {metadata.version}\n", style="cyan")
+    meta_text.append(f"Size: {metadata.size:,} bytes\n", style="cyan")
+    meta_text.append(f"SHA256: {metadata.sha256_sum}", style="cyan")
+    console.print(Panel(meta_text, border_style="blue"))
 
-    import getpass
-
-    console.print(
-        "[bold blue]Enter login password (input will be hidden):[/bold blue]", end=" "
-    )
-    login_password = getpass.getpass("")
-
-    console.print(
-        "[bold blue]Enter root password for package installation (input will be hidden):[/bold blue]",
-        end=" ",
-    )
-    root_password = getpass.getpass("")
-
-    console.print()
-    return username, login_password, root_password
+    return metadata
 
 
 def deploy_package(ip_address, deb_package_path):
@@ -48,270 +76,102 @@ def deploy_package(ip_address, deb_package_path):
     package_filename = os.path.basename(deb_package_path)
     console.clear_live()
 
-    # Get cached credentials or prompt for new ones
-    cached_ip, username, login_password, root_password = load_cached_credentials()
+    device = syn.Device(ip_address, False)
+    metadata = create_metadata(deb_package_path, console)
+    console.print(
+        f"[bold green]Deploying:[/bold green] [cyan]{package_filename}[/cyan]"
+    )
 
-    # If no cached credentials or they don't match our target IP, prompt for new ones
-    if (
-        not cached_ip
-        or cached_ip != ip_address
-        or not username
-        or not login_password
-        or not root_password
-    ):
-        username, login_password, root_password = get_device_credentials(ip_address)
+    # Load our file into chunks
+    chunks = []
+    chunk_sizes = []
+    total_bytes = 0
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}[/bold blue]"),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
-        refresh_per_second=4,
-    ) as progress:
-        deploy_task = progress.add_task(
-            f"[yellow]Deploying to {ip_address}...", total=3
-        )
+    # First chunk is metadata
+    chunks.append(AppPackageChunk(metadata=metadata))
+    chunk_sizes.append(metadata.size)
+    total_bytes += metadata.size
 
+    with console.status("[bold yellow]Loading file...[/bold yellow]", spinner="dots"):
+        with open(deb_package_path, "rb") as f:
+            chunk_data = f.read(FILE_CHUNK_SIZE)
+            while chunk_data:
+                chunks.append(AppPackageChunk(file_chunk=chunk_data))
+                chunk_size = len(chunk_data)
+                chunk_sizes.append(chunk_size)
+                total_bytes += chunk_size
+                chunk_data = f.read(FILE_CHUNK_SIZE)
+
+    responses = []
+    response_panel = Panel("Waiting for responses...", title="Device Responses")
+    with Live(response_panel, refresh_per_second=10, console=console) as live:
         try:
-            shell = None
 
-            # Connect to the device (connection task)
-            connect_task = progress.add_task("[green]Connecting to device...", total=1)
-            client, sftp_conn = sftp.connect_sftp(
-                hostname=ip_address, username=username, password=login_password
-            )
-            progress.update(connect_task, completed=1)
-            progress.update(deploy_task, advance=1)
-            if client is None or sftp_conn is None:
-                progress.update(connect_task, visible=False)
-                console.print(f"[bold red]Error connecting to {ip_address}[/bold red]")
-                console.print(
-                    "[yellow]Please check your username and password.[/yellow]"
-                )
-                return False
-
-            # Upload file task
-            upload_task = progress.add_task("[cyan]Uploading package...", total=1)
+            def chunk_generator():
+                bytes_sent = 0
+                for i, chunk in enumerate(chunks):
+                    bytes_sent += chunk_sizes[i]
+                    yield chunk
 
             try:
-                # Create SFTP client and upload
-                remote_path = f"/tmp/{package_filename}"
-                sftp_conn.put(deb_package_path, remote_path)
-                progress.update(upload_task, completed=1)
-                progress.update(deploy_task, advance=1)
-            except Exception as e:
-                progress.update(upload_task, visible=False)
-                console.print(f"[bold red]Error uploading package:[/bold red] {str(e)}")
-                return False
+                device_responses = device.rpc.DeployApp(chunk_generator())
+                current_index = 0
 
-            # Install task
-            install_task = progress.add_task("[magenta]Installing package...", total=1)
-            progress.stop()
+                # Process each response from the device
+                for response in device_responses:
+                    message = str(response.message)
 
-            try:
-                import time
+                    # Add this response to our list
+                    responses.append(message)
 
-                def run_remote(cmd: str, needs_password: bool = False):
-                    """Execute *cmd* over SSH, stream live output, and return (exit_status, full_output).
+                    # Create a display for all responses
+                    display_items = []
 
-                    If *needs_password* is True the helper waits until a password
-                    prompt is detected before writing *root_password* to *stdin*.
-                    This behaves well for environments that rely solely on
-                    *su* for privilege escalation because writing the
-                    password too early can cause *su* to ignore it and block
-                    indefinitely.
-                    """
-                    stdin, stdout, stderr = client.exec_command(cmd, get_pty=True)
-
-                    output = ""
-                    pw_sent = False
-                    buf_out = ""
-                    buf_err = ""
-
-                    def maybe_print(line: str, *, is_err: bool = False):
-                        """Filter *line* and print if it should be visible."""
-                        clean = line.replace("\r", "")
-
-                        if "Reading database" in clean:
-                            return
-
-                        if is_err:
-                            log_console.print(clean, style="red", end="")
+                    for i, resp in enumerate(responses):
+                        if i < current_index:
+                            # Completed response gets a checkmark
+                            display_items.append(
+                                f"[green]✓[/green] Step {i + 1}: {resp}"
+                            )
+                        elif i == current_index:
+                            # Current response gets a spinner
+                            spinner = Spinner("dots", text=f" Step {i + 1}: {resp}")
+                            display_items.append(spinner)
                         else:
-                            log_console.print(clean, end="")
+                            # Future responses (shouldn't happen in this loop, but included for completeness)
+                            display_items.append(f"⋯ Step {i + 1}: {resp}")
 
-                    while not stdout.channel.exit_status_ready():
-                        while stdout.channel.recv_ready():
-                            chunk = stdout.channel.recv(1024).decode(errors="replace")
-                            output += chunk
+                    # Update the panel with all responses
+                    response_panel.renderable = Group(*display_items)
+                    live.refresh()
 
-                            if (
-                                needs_password
-                                and ("password" in chunk.lower())
-                                and not pw_sent
-                            ):
-                                stdin.write(root_password + "\n")
-                                stdin.flush()
-                                pw_sent = True
+                    # Move to next response
+                    current_index += 1
 
-                            buf_out += chunk
-                            while "\n" in buf_out:
-                                line, buf_out = buf_out.split("\n", 1)
-                                maybe_print(line + "\n", is_err=False)
-
-                        while stderr.channel.recv_ready():
-                            chunk = stderr.channel.recv(1024).decode(errors="replace")
-                            output += chunk
-
-                            if (
-                                needs_password
-                                and ("password" in chunk.lower())
-                                and not pw_sent
-                            ):
-                                stdin.write(root_password + "\n")
-                                stdin.flush()
-                                pw_sent = True
-
-                            buf_err += chunk
-                            while "\n" in buf_err:
-                                line, buf_err = buf_err.split("\n", 1)
-                                maybe_print(line + "\n", is_err=True)
-
-                        time.sleep(0.1)
-
-                    if buf_out:
-                        maybe_print(buf_out, is_err=False)
-                        buf_out = ""
-                    if buf_err:
-                        maybe_print(buf_err, is_err=True)
-                        buf_err = ""
-
-                    output += stdout.read().decode()
-                    output += stderr.read().decode()
-                    exit_status = stdout.channel.recv_exit_status()
-                    return exit_status, output
-
-                # If we are already root, skip any privilege escalation
-                if username == "root":
-                    esc_cmd = f"DEBIAN_FRONTEND=noninteractive dpkg -i {remote_path} && rm {remote_path}"
-                    exit_status, output = run_remote(esc_cmd)
-                else:
-                    # Elevate privileges with su (target devices never have sudo)
-                    su_cmd = f"su -c 'env DEBIAN_FRONTEND=noninteractive dpkg -i {remote_path} && rm {remote_path}'"
-                    exit_status, output = run_remote(su_cmd, needs_password=True)
-
-                # Restart the live progress display now that installation is
-                # complete so subsequent updates render properly.
-                progress.start()
-
-                if exit_status != 0:
-                    progress.update(install_task, visible=False)
-                    progress.update(deploy_task, visible=False)
-                    console.print(
-                        Panel(
-                            f"[bold red]Installation Error[/bold red]\n\n{output}",
-                            title="Deployment Failed",
-                            border_style="red",
-                            box=box.DOUBLE,
-                        )
-                    )
-                    return False
-
-                progress.update(install_task, completed=1)
-                progress.update(deploy_task, advance=1)
-
-                save_credentials(ip_address, username, login_password, root_password)
-
-                progress.stop()
-                console.clear_live()
-
-                console.print(
-                    Panel(
-                        f"[bold green]Successfully deployed[/bold green] [yellow]{package_filename}[/yellow] [bold green]to[/bold green] [blue]{ip_address}[/blue]",
-                        title="Deployment Successful",
-                        border_style="green",
-                        box=box.DOUBLE,
-                    )
-                )
-                return True
+                if responses:
+                    # Create final display with all responses marked complete
+                    final_items = [
+                        f"[green]✓[/green] Step {i + 1}: {resp}"
+                        for i, resp in enumerate(responses)
+                    ]
+                    response_panel.renderable = Group(*final_items)
+                    live.refresh()
 
             except Exception as e:
-                progress.start()
-                progress.update(install_task, visible=False)
-                progress.update(deploy_task, visible=False)
-                console.print(
-                    f"[bold red]Error during installation:[/bold red] {str(e)}"
+                # Show error in the panel
+                response_panel.renderable = (
+                    f"[bold red]Error during deployment: {str(e)}[/bold red]"
                 )
-                return False
+                response_panel.border_style = "red"
+                live.refresh()
 
         except Exception as e:
-            progress.update(deploy_task, visible=False)
-            console.print(f"[bold red]Error:[/bold red] Failed to deploy package: {e}")
-            return False
-        finally:
-            # Clean up connections
-            try:
-                sftp.close_sftp(client, sftp_conn)
-                if shell is not None:
-                    shell.close()
-            except Exception:
-                pass
-
-
-def load_cached_credentials():
-    """Load cached credentials from the config file"""
-    cache_file = ".synapse_deploy_cache.json"
-    try:
-        if os.path.exists(cache_file):
-            with open(cache_file, "r") as f:
-                data = json.load(f)
-                ip_address = data.get("ip_address")
-                username = data.get("username", "scifi")
-                encoded_login_password = data.get("encoded_login_password")
-                encoded_root_password = data.get("encoded_root_password")
-
-                if encoded_login_password and encoded_root_password:
-                    import base64
-
-                    login_password = base64.b64decode(encoded_login_password).decode(
-                        "utf-8"
-                    )
-                    root_password = base64.b64decode(encoded_root_password).decode(
-                        "utf-8"
-                    )
-                    console.print(
-                        f"[green]Using cached credentials for [bold]{username}@{ip_address}[/bold][/green]"
-                    )
-                    return ip_address, username, login_password, root_password
-    except Exception as e:
-        console.print(
-            f"[yellow]Warning: Failed to load cached credentials: {e}[/yellow]"
-        )
-    return None, None, None, None
-
-
-def save_credentials(ip_address, username, login_password, root_password):
-    """Save credentials to cache file"""
-    cache_file = ".synapse_deploy_cache.json"
-    try:
-        import base64
-
-        with open(cache_file, "w") as f:
-            data = {
-                "ip_address": ip_address,
-                "username": username,
-                "encoded_login_password": base64.b64encode(
-                    login_password.encode("utf-8")
-                ).decode("utf-8"),
-                "encoded_root_password": base64.b64encode(
-                    root_password.encode("utf-8")
-                ).decode("utf-8"),
-            }
-            json.dump(data, f)
-        os.chmod(cache_file, 0o600)  # Restrict file permissions
-    except Exception as e:
-        console.print(f"[yellow]Warning: Failed to save credentials: {e}[/yellow]")
+            # Show error in the panel
+            response_panel.renderable = (
+                f"[bold red]Error during deployment: {str(e)}[/bold red]"
+            )
+            response_panel.border_style = "red"
+            live.refresh()
 
 
 def deploy_cmd(args):
@@ -365,7 +225,6 @@ def deploy_cmd(args):
 
     # Deploy the package to the device
     uri = args.uri
-    print(f"Deploying package to: {uri}")
     if uri:
         deploy_package(uri, deb_package)
     else:
