@@ -1,0 +1,101 @@
+name: main
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  id-token: write
+
+jobs:
+  sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+      - uses: actions/setup-python@v5
+      - name: Prep repo
+        run: |
+          pip install -r requirements.txt
+          make
+      - name: Build sdist
+        run: python -m build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish-testpypi:
+    name: Publish to testpypi
+    needs: [sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/legacy/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: List files
+        run: ls -la dist/
+
+      - name: Publish package distributions to testpypi
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          verbose: true
+
+  validate-test-pypi-release:
+    runs-on: ubuntu-latest
+    needs: publish-testpypi
+    steps:
+      - name: wait for package to be available
+        run: sleep 30
+
+      - name: install test pypi release
+        run: |
+          # Get version from GitHub ref (removes 'refs/tags/v' prefix)
+          VERSION=${GITHUB_REF_NAME#v}
+          pip install --extra-index-url https://test.pypi.org/simple/ science-synapse==$VERSION
+
+      - name: validate
+        run: |
+          # Run Help
+          synapsectl --help
+
+          # Run Simulator
+          synapse-sim --iface-ip 127.0.0.1 --rpc-port 50051 &
+          sleep 2
+
+          synapsectl -u 127.0.0.1:50051 info
+
+          # Kill Simulator
+          kill $(jobs -p)
+
+  publish-pypi:
+    name: Publish to pypi
+    needs: [validate-test-pypi-release]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url:  https://pypi.org/p/science-synapse/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Publish package distributions to pypi
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
