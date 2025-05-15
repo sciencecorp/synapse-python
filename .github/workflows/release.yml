@@ -75,7 +75,7 @@ jobs:
           synapse-sim --iface-ip 127.0.0.1 --rpc-port 50051 &
           sleep 2
 
-          synapsectl info 127.0.0.1:50051
+          synapsectl -u 127.0.0.1:50051 info
 
           # Kill Simulator
           kill $(jobs -p)
