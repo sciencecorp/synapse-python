@@ -79,22 +79,13 @@ def build_docker_image(app_dir: str, app_name: str | None = None) -> str:
 
     arch_suffix = detect_arch()  # "arm64" or "amd64"
 
-    # Prefer an arch-specific Dockerfile if provided (``ops/docker/Dockerfile.arm64``)
-    dockerfile_rel = (
-        f"ops/docker/Dockerfile.{arch_suffix}"
-        if arch_suffix == "arm64"
-        else "ops/docker/Dockerfile"
-    )
-    dockerfile_path = os.path.join(app_dir, dockerfile_rel)
-
-    if not os.path.exists(dockerfile_path):
-        # Fall back to generic Dockerfile regardless of arch.
-        dockerfile_path = os.path.join(app_dir, "ops/docker/Dockerfile")
+    # Look for a Dockerfile at the top level of the app directory
+    dockerfile_path = os.path.join(app_dir, "Dockerfile")
 
     if not os.path.exists(dockerfile_path):
         raise FileNotFoundError(
             f"Expected Dockerfile not found at {dockerfile_path}. "
-            "Ensure your application provides the required build Dockerfile(s)."
+            "Ensure your application provides the required Dockerfile."
         )
 
     image_tag = f"{app_name}:latest-{arch_suffix}"
