@@ -36,6 +36,14 @@ class SynapsePlotter:
         self.selected_channel_idx = 0
         self.selected_channel_id = self.channel_ids[0]
 
+        # Track which channels are visible
+        self.visible_channels = {ch_id: True for ch_id in self.channel_ids}
+
+        # Start off with only the first three channels
+        for idx, ch_id in enumerate(self.channel_ids):
+            if idx > 2:
+                self.visible_channels[ch_id] = False
+
         # Track start time for display
         self.start_time = None
 
@@ -70,6 +78,27 @@ class SynapsePlotter:
                 tag="channel_combo",
                 width=80,
             )
+            dpg.add_separator()
+
+            # Channel visibility checkboxes
+            dpg.add_text("Visible Channels:")
+            with dpg.group(horizontal=True):
+                dpg.add_button(
+                    label="Select All", callback=self.select_all_channels, width=90
+                )
+                dpg.add_button(
+                    label="Select None", callback=self.select_none_channels, width=90
+                )
+            with dpg.group(tag="channel_checkboxes"):
+                for ch_id in self.channel_ids:
+                    dpg.add_checkbox(
+                        label=f"Channel {ch_id}",
+                        default_value=self.visible_channels[ch_id],
+                        callback=self.toggle_channel_visibility,
+                        user_data=ch_id,
+                        tag=f"channel_checkbox_{ch_id}",
+                    )
+
             dpg.add_separator()
             dpg.add_text("Elapsed Time (s):")
             dpg.add_text("", tag="elapsed_time_text")
@@ -164,12 +193,68 @@ class SynapsePlotter:
                             tag="zoomed_line",
                         )
 
+    def toggle_channel_visibility(self, sender, app_data, user_data):
+        """Called when a channel visibility checkbox is toggled."""
+        channel_id = user_data
+        self.visible_channels[channel_id] = app_data
+
+        # Update the visibility of the line in the plot
+        line_tag = f"all_line_ch{channel_id}"
+
+        if app_data:  # If checkbox is checked
+            dpg.show_item(line_tag)
+        else:  # If checkbox is unchecked
+            dpg.hide_item(line_tag)
+
+        # If this channel is the currently selected zoomed channel and we're hiding it,
+        # find the first visible channel and select it for zoom view
+        if not app_data and channel_id == self.selected_channel_id:
+            # Find the first visible channel
+            for ch_id in self.channel_ids:
+                if self.visible_channels[ch_id]:
+                    # Update zoomed view to this channel
+                    self.selected_channel_id = ch_id
+                    self.selected_channel_idx = self.channel_to_index[ch_id]
+                    dpg.configure_item("zoomed_line", label=f"Channel {ch_id}")
+                    dpg.set_value("channel_combo", str(ch_id))
+                    break
+
+    def select_all_channels(self, sender=None, app_data=None, user_data=None):
+        """Select all channels to be visible."""
+        for ch_id in self.channel_ids:
+            self.visible_channels[ch_id] = True
+            dpg.set_value(f"channel_checkbox_{ch_id}", True)
+            dpg.show_item(f"all_line_ch{ch_id}")
+
+    def select_none_channels(self, sender=None, app_data=None, user_data=None):
+        """Deselect all channels except the currently zoomed channel."""
+        # First find which channel is currently in zoom view
+        zoomed_ch_id = self.selected_channel_id
+
+        # Make sure at least one channel stays visible (the zoomed one)
+        for ch_id in self.channel_ids:
+            visible = ch_id == zoomed_ch_id
+            self.visible_channels[ch_id] = visible
+            dpg.set_value(f"channel_checkbox_{ch_id}", visible)
+
+            if visible:
+                dpg.show_item(f"all_line_ch{ch_id}")
+            else:
+                dpg.hide_item(f"all_line_ch{ch_id}")
+
     def channel_selection_callback(self, sender, app_data, user_data):
         """Called when user picks a channel from the combo."""
         self.selected_channel_id = int(app_data)
         self.selected_channel_idx = self.channel_to_index[self.selected_channel_id]
+
         # Update the label of the zoomed line
         dpg.configure_item("zoomed_line", label=f"Channel {self.selected_channel_id}")
+
+        # Make sure the selected channel is visible
+        if not self.visible_channels[self.selected_channel_id]:
+            self.visible_channels[self.selected_channel_id] = True
+            dpg.set_value(f"channel_checkbox_{self.selected_channel_id}", True)
+            dpg.show_item(f"all_line_ch{self.selected_channel_id}")
 
     def set_zoom_y_min(self, sender, app_data):
         self.zoom_y_min = app_data
@@ -220,12 +305,16 @@ class SynapsePlotter:
         """
         # Downsample factor for performance
         # Note(gilbert): we should probably make this configurable, it is arbitrary
-        ds_factor = 10
+        ds_factor = int(10)
 
         # -----------------------------
         # Update "All Channels" Plot
         # -----------------------------
         for idx, ch_id in enumerate(self.channel_ids):
+            # Skip updating if channel is not visible
+            if not self.visible_channels[ch_id]:
+                continue
+
             pos = self.buffer_positions[idx]
 
             # Roll data so that index -1 corresponds to the newest sample

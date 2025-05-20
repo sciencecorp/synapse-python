@@ -19,6 +19,8 @@ import synapse.client.channel as channel
 import synapse.utils.ndtp_types as ndtp_types
 import synapse.cli.synapse_plotter as plotter
 from synapse.utils.packet_monitor import PacketMonitor
+from synapse.api.datatype_pb2 import BroadbandFrame
+from synapse.client.taps import Tap
 
 from rich.console import Console
 from rich.live import Live
@@ -237,7 +239,8 @@ def read(args):
         thread.start()
 
     try:
-        read_packets(stream_out, q, plot_q, stop, args.duration)
+        tap = Tap(args.uri, True)
+        read_packets(stream_out, q, plot_q, stop, tap, args.duration)
     except KeyboardInterrupt:
         pass
     finally:
@@ -264,6 +267,7 @@ def read_packets(
     q: queue.Queue,
     plot_q: queue.Queue,
     stop: threading.Event,
+    tap: Tap,
     duration: Optional[int] = None,
     num_ch: int = 32,
 ):
@@ -275,23 +279,25 @@ def read_packets(
 
     with Live(monitor.generate_stat_table(), refresh_per_second=4) as live:
         while not stop.is_set():
-            read_ret = node.read()
+            # read_ret = node.read()
+            read_ret = tap.read()
             if read_ret is None:
                 logging.error("Could not get a valid read from the node")
                 continue
 
-            synapse_data, bytes_read = read_ret
-            if synapse_data is None or bytes_read == 0:
+            broadband_frame = BroadbandFrame()
+            broadband_frame.ParseFromString(read_ret)
+            if broadband_frame is None:
                 logging.error("Could not read data from node")
                 continue
-            header, data = synapse_data
-            monitor.process_packet(header, data, bytes_read)
+            monitor.process_broadband_frame(broadband_frame)
+
             live.update(monitor.generate_stat_table())
 
             # Always add the data to the writer queues
-            q.put(data)
+            q.put(broadband_frame)
             if plot_q:
-                plot_q.put(copy.deepcopy(data))
+                plot_q.put(copy.deepcopy(broadband_frame))
 
             if duration and (time.time() - start) > duration:
                 break

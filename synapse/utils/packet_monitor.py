@@ -33,6 +33,19 @@ class PacketMonitor:
         self.last_stats_time = self.start_time
         self.last_bandwidth_time = self.start_time
 
+    def process_broadband_frame(self, broadband_frame):
+        packet_timestamp = broadband_frame.timestamp
+        sequence_number = broadband_frame.sequence_number
+        bytes_read = len(broadband_frame.data)
+
+        self.packet_count += 1
+        self.bytes_received += bytes_read
+        self.bytes_received_in_interval += bytes_read
+
+        self.handle_sequence_number(sequence_number)
+
+        return True
+
     def process_packet(self, header, data, bytes_read):
         if not data:
             return False
