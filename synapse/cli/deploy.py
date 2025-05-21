@@ -1,16 +1,15 @@
 import hashlib
 import os
 
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
-from rich.live import Live
-from rich.console import Group
 
-from synapse.cli import build as builder
 import synapse as syn
-from synapse.api.app_pb2 import PackageMetadata, AppPackageChunk
+from synapse.api.app_pb2 import AppPackageChunk, PackageMetadata
+from synapse.cli import build as builder
 
 # 1MB chunks
 FILE_CHUNK_SIZE = 1024 * 1024
@@ -247,7 +246,8 @@ def deploy_cmd(args):
         if not builder.package_app(app_dir, app_name):
             return
 
-        deb_package = builder.find_deb_package(app_dir)
+        dist_dir = os.path.join(app_dir, "dist")
+        deb_package = builder.find_deb_package(dist_dir)
         if not deb_package:
             return
 

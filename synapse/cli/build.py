@@ -79,22 +79,13 @@ def build_docker_image(app_dir: str, app_name: str | None = None) -> str:
 
     arch_suffix = detect_arch()  # "arm64" or "amd64"
 
-    # Prefer an arch-specific Dockerfile if provided (``ops/docker/Dockerfile.arm64``)
-    dockerfile_rel = (
-        f"ops/docker/Dockerfile.{arch_suffix}"
-        if arch_suffix == "arm64"
-        else "ops/docker/Dockerfile"
-    )
-    dockerfile_path = os.path.join(app_dir, dockerfile_rel)
-
-    if not os.path.exists(dockerfile_path):
-        # Fall back to generic Dockerfile regardless of arch.
-        dockerfile_path = os.path.join(app_dir, "ops/docker/Dockerfile")
+    # Look for a Dockerfile at the top level of the app directory
+    dockerfile_path = os.path.join(app_dir, "Dockerfile")
 
     if not os.path.exists(dockerfile_path):
         raise FileNotFoundError(
             f"Expected Dockerfile not found at {dockerfile_path}. "
-            "Ensure your application provides the required build Dockerfile(s)."
+            "Ensure your application provides the required Dockerfile."
         )
 
     image_tag = f"{app_name}:latest-{arch_suffix}"
@@ -123,7 +114,7 @@ def build_app(app_dir: str, app_name: str, force_rebuild: bool = False) -> bool:
 
     console.print(f"[yellow]Building application: {app_name}...[/yellow]")
 
-    binary_path = os.path.join(app_dir, "build-aarch64", app_name)
+    binary_path = os.path.join(app_dir, "build/aarch64", app_name)
 
     # Skip if binary already exists unless a rebuild was requested
     if (not force_rebuild) and os.path.exists(binary_path):
@@ -156,9 +147,11 @@ def build_app(app_dir: str, app_name: str, force_rebuild: bool = False) -> bool:
         image_tag,
         "/bin/bash",
         "-c",
-        "cd /home/workspace && if [ -f vcpkg.json ]; then "
+        "cd /home/workspace && "
+        "if [ -f vcpkg.json ]; then "
         "echo 'Installing dependencies from vcpkg.json...' && "
-        "${VCPKG_ROOT}/vcpkg install --triplet arm64-linux-dynamic-release; fi",
+        '${VCPKG_ROOT}/vcpkg install --triplet arm64-linux-dynamic-release --x-install-root "$PWD/build/host/vcpkg_installed"; '
+        "fi",
     ]
 
     try:
@@ -188,14 +181,14 @@ def build_app(app_dir: str, app_name: str, force_rebuild: bool = False) -> bool:
             "else "
             "echo 'No CMake presets found, using manual configuration...' && "
             "export VCPKG_DEFAULT_TRIPLET=arm64-linux-dynamic-release && "
-            "cmake -B build-aarch64 -S . "
+            "cmake -B build/aarch64 -S . "
             "-DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake "
             "-DVCPKG_TARGET_TRIPLET=arm64-linux-dynamic-release "
-            "-DVCPKG_INSTALLED_DIR=${VCPKG_ROOT}/vcpkg_installed "
+            "-DVCPKG_INSTALLED_DIR=${VCPKG_ROOT}/build/host/vcpkg_installed "
             "-DBUILD_SHARED_LIBS=ON "
             "-DCMAKE_BUILD_TYPE=Release "
             "-DBUILD_FOR_ARM64=ON && "
-            "cmake --build build-aarch64 -j$(nproc); "
+            "cmake --build build/aarch64 -j$(nproc); "
             "fi"
         ),
     ]
@@ -255,7 +248,7 @@ def build_deb_package(app_dir: str, app_name: str, version: str = "0.1.0") -> bo
 
     try:
         staging_dir = tempfile.mkdtemp(prefix="synapse-package-")
-        binary_path = os.path.join(app_dir, "build-aarch64", app_name)
+        binary_path = os.path.join(app_dir, "build/aarch64", app_name)
 
         if not os.path.exists(binary_path):
             console.print(
@@ -410,6 +403,9 @@ WantedBy=multi-user.target
         except ValueError:
             pass
 
+        dist_dir = os.path.join(app_dir, "dist")
+        os.makedirs(dist_dir, exist_ok=True)
+
         docker_fpm_cmd = [
             "docker",
             "run",
@@ -419,7 +415,7 @@ WantedBy=multi-user.target
             "-v",
             f"{staging_dir}:/pkg",
             "-v",
-            f"{app_dir}:/out",
+            f"{dist_dir}:/out",
             "-w",
             "/out",
             fpm_image,
@@ -436,11 +432,11 @@ WantedBy=multi-user.target
 
         # Verify that a .deb was produced
         deb_files = [
-            f for f in os.listdir(app_dir) if f.endswith(".deb") and "arm64" in f
+            f for f in os.listdir(dist_dir) if f.endswith(".deb") and "arm64" in f
         ]
         if not deb_files:
             console.print(
-                f"[bold red]Error:[/bold red] FPM completed but no .deb found in {app_dir}."
+                f"[bold red]Error:[/bold red] FPM completed but no .deb found in {dist_dir}."
             )
             return False
 
@@ -463,14 +459,14 @@ def package_app(app_dir: str, app_name: str) -> bool:
     return build_deb_package(app_dir, app_name)
 
 
-def find_deb_package(app_dir: str) -> str | None:
+def find_deb_package(dist_dir: str) -> str | None:
     """Return the path to the .deb generated in *app_dir* or *None*."""
-    for file in os.listdir(app_dir):
+    for file in os.listdir(dist_dir):
         if file.endswith(".deb"):
-            return os.path.join(app_dir, file)
+            return os.path.join(dist_dir, file)
 
     console.print(
-        f"[bold red]Error:[/bold red] Could not find .deb package in {app_dir}"
+        f"[bold red]Error:[/bold red] Could not find .deb package in {dist_dir}"
     )
     return None
 
@@ -507,7 +503,7 @@ def build_cmd(args) -> None:
         return
 
     # 3. Locate artefact and present summary panel
-    deb_path = find_deb_package(app_dir)
+    deb_path = find_deb_package(os.path.join(app_dir, "dist"))
     if not deb_path:
         return
 
