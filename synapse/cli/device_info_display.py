@@ -16,11 +16,18 @@ def visualize_configuration(info_dict, status):
             if node_type == "Application":
                 app = node.get("application", {})
                 name = app.get("name", "Unknown")
-                status = nodes_status[index].get("application", None)
-                if status:
-                    status = status.get("running", False)
+
+                application_status = nodes_status[index].get("application", None)
+                running = application_status.get("running", False)
+                if not running:
+                    error_logs = application_status.get(
+                        "error_logs", "Could not get error logs"
+                    )
+
                 node_tree.add(f"Name: {name}")
-                node_tree.add(f"Running: {status}")
+                node_tree.add(f"Running: {running}")
+                if not running:
+                    node_tree.add(f"Error Logs:\n{error_logs}")
             elif node_type == "BroadbandSource":
                 source = node.get("broadband_source", {})
                 if "signal" in source and "electrode" in source["signal"]:
