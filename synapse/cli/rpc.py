@@ -12,11 +12,11 @@ from google.protobuf import text_format
 from google.protobuf.json_format import Parse
 
 from rich.console import Console
-from rich.pretty import pprint
 
 from synapse.cli.query import StreamingQueryClient
 from synapse.utils.log import log_entry_to_str
 from synapse.cli.device_info_display import DeviceInfoDisplay
+from synapse.utils.proto import load_config
 
 
 def add_commands(subparsers):
@@ -196,10 +196,7 @@ def start(args):
 
         # Load the configuration proto and build Config object
         try:
-            with open(cfg_path, "r") as f:
-                json_text = f.read()
-            cfg_proto = Parse(json_text, DeviceConfiguration())
-            config_obj = syn.Config.from_proto(cfg_proto)
+            config_obj = load_config(cfg_path, console)
         except Exception as e:
             console.print(
                 f"[bold red]Failed to parse configuration file[/bold red]: {e}"
