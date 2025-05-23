@@ -4,7 +4,6 @@ from datetime import datetime
 from typing import Optional
 
 import synapse as syn
-from synapse.api.synapse_pb2 import DeviceConfiguration
 from synapse.api.query_pb2 import QueryRequest, QueryResponse, StreamQueryRequest
 from synapse.api.status_pb2 import StatusCode
 
@@ -264,17 +263,19 @@ def configure(args):
         print("Configuration file must be a JSON file")
         return False
 
-    with open(args.config_file) as config_json:
-        console = Console()
-        config_proto = Parse(config_json.read(), DeviceConfiguration())
-        console.print("Configuring device with the following configuration:")
-        config = syn.Config.from_proto(config_proto)
-        console.print(config.to_proto())
+    console = Console()
+    config_obj = load_config(args.config_file, console)
+    if not config_obj:
+        console.print("[bold red]Failed to parse configuration file")
+        return
 
-        config_ret = syn.Device(args.uri, args.verbose).configure_with_status(config)
-        if not config_ret:
-            console.print("[bold red]Internal error configuring device")
-            return
+    console.print("Configuring device with the following configuration:")
+    console.print(config_obj.to_proto())
+
+    config_ret = syn.Device(args.uri, args.verbose).configure_with_status(config_obj)
+    if not config_ret:
+        console.print("[bold red]Internal error configuring device")
+        return
         if config_ret.code != StatusCode.kOk:
             console.print(f"[bold red]Error configuring\n{config_ret.message}")
             return
