@@ -196,6 +196,7 @@ def start(args):
         # Load the configuration proto and build Config object
         try:
             config_obj = load_config(cfg_path, console)
+            print(config_obj.nodes[0].name)
         except Exception as e:
             console.print(
                 f"[bold red]Failed to parse configuration file[/bold red]: {e}"

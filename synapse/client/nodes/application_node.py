@@ -6,12 +6,13 @@ from synapse.client.node import Node
 class ApplicationNode(Node):
     type = NodeType.kApplication
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, parameters):
         self.name = name
+        self.parameters = parameters
 
     def _to_proto(self):
         n = NodeConfig()
-        p = ApplicationNodeConfig(name=self.name)
+        p = ApplicationNodeConfig(name=self.name, parameters=self.parameters)
         n.application.CopyFrom(p)
         return n
 
@@ -22,4 +23,4 @@ class ApplicationNode(Node):
         if not isinstance(proto, ApplicationNodeConfig):
             raise ValueError("proto is not of type ApplicationNodeConfig")
 
-        return ApplicationNode(name=proto.name)
+        return ApplicationNode(name=proto.name, parameters=proto.parameters)
