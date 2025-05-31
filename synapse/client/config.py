@@ -1,4 +1,4 @@
-from synapse.api.synapse_pb2 import DeviceConfiguration
+from synapse.api.device_pb2 import DeviceConfiguration
 from synapse.api.node_pb2 import NodeConnection
 from synapse.client.nodes import NODE_TYPE_OBJECT_MAP
 

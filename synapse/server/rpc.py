@@ -10,7 +10,7 @@ from synapse.api.node_pb2 import NodeConnection, NodeType
 from synapse.api.logging_pb2 import LogLevel, LogQueryResponse
 from synapse.api.query_pb2 import QueryResponse
 from synapse.api.status_pb2 import DeviceState, Status, StatusCode
-from synapse.api.synapse_pb2 import DeviceConfiguration, DeviceInfo
+from synapse.api.device_pb2 import DeviceConfiguration, DeviceInfo
 from synapse.api.synapse_pb2_grpc import (
     SynapseDeviceServicer,
     add_SynapseDeviceServicer_to_server,

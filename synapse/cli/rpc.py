@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 import synapse as syn
-from synapse.api.synapse_pb2 import DeviceConfiguration
+from synapse.api.device_pb2 import DeviceConfiguration
 from synapse.api.query_pb2 import QueryRequest, QueryResponse, StreamQueryRequest
 from synapse.api.status_pb2 import StatusCode
 
@@ -12,7 +12,6 @@ from google.protobuf import text_format
 from google.protobuf.json_format import Parse
 
 from rich.console import Console
-from rich.pretty import pprint
 
 from synapse.cli.query import StreamingQueryClient
 from synapse.utils.log import log_entry_to_str
@@ -213,6 +212,7 @@ def start(args):
     # If we have a configuration, apply it first.
     if config_obj is not None:
         with console.status("Configuring device...", spinner="bouncingBall"):
+            print("Sending configuration")
             cfg_ret = device.configure_with_status(config_obj)
             if cfg_ret is None:
                 console.print("[bold red]Internal error configuring device")
