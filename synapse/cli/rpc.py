@@ -212,7 +212,6 @@ def start(args):
     # If we have a configuration, apply it first.
     if config_obj is not None:
         with console.status("Configuring device...", spinner="bouncingBall"):
-            print("Sending configuration")
             cfg_ret = device.configure_with_status(config_obj)
             if cfg_ret is None:
                 console.print("[bold red]Internal error configuring device")
