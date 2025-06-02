@@ -5,7 +5,6 @@ from rich.table import Table
 from rich.live import Live
 from rich.text import Text
 
-from google.protobuf.struct_pb2 import ListValue
 import time
 
 
@@ -83,10 +82,6 @@ def add_commands(subparsers):
     stream_parser.add_argument("tap_name", type=str)
     stream_parser.set_defaults(func=stream_taps)
 
-    send_parser = tap_subparsers.add_parser("send", help="Send a message to a tap")
-    send_parser.add_argument("tap_name", type=str)
-    send_parser.set_defaults(func=send_taps)
-
 
 def list_taps(args):
     tap = Tap(args.uri, args.verbose)
@@ -140,16 +135,3 @@ def stream_taps(args):
         pass
     finally:
         tap.disconnect()
-
-
-def send_taps(args):
-    tap = Tap(args.uri, args.verbose)
-    tap.connect(args.tap_name)
-    print(f"Connected to tap {args.tap_name}")
-
-    message = ListValue()
-    message.extend([1, 2, 5, 4])
-    print(f"Sending message: {message}")
-    tap.send(message.SerializeToString())
-
-    tap.disconnect()
