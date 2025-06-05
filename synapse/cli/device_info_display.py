@@ -1,37 +1,32 @@
-import time
 from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
 from rich.tree import Tree
 from google.protobuf.json_format import MessageToDict
 from synapse.client.device import Device
 
 
-def visualize_configuration(info_dict):
+def visualize_configuration(info_dict, status):
+    nodes_status = status.get("signal_chain", {}).get("nodes", {})
     config = info_dict.get("configuration", {})
     if config:
         tree = Tree("Configuration")
-        for node in config.get("nodes", []):
+        for index, node in enumerate(config.get("nodes", [])):
             node_type = node.get("type", "").replace("k", "")
-            node_name = node.get("name", "Unknown")
-            node_tree = tree.add(f"{node_name}")
+            node_tree = tree.add(f"{node_type}")
             node_tree.add(f"ID: {node.get('id', 'Unknown')}")
-            node_tree.add(f"Type: {node_type}")
-
             if node_type == "Application":
                 app = node.get("application", {})
                 name = app.get("name", "Unknown")
-                running = app.get("running", False)
-                status = "[green]Running[/green]" if running else "[red]Stopped[/red]"
+
+                application_status = nodes_status[index].get("application", None)
+                running = application_status.get("running", False)
+                error_logs = application_status.get(
+                    "error_logs", "Could not get error logs"
+                )
                 node_tree.add(f"Name: {name}")
-                node_tree.add(f"Status: {status}")
+                node_tree.add(f"Running: {running}")
+                node_tree.add(f"Error Logs:\n{error_logs}")
             elif node_type == "BroadbandSource":
                 source = node.get("broadband_source", {})
-                name = source.get("name", "Unknown")
-                running = source.get("running", False)
-                status = "[green]Running[/green]" if running else "[red]Stopped[/red]"
-                node_tree.add(f"Name: {name}")
-                node_tree.add(f"Status: {status}")
                 if "signal" in source and "electrode" in source["signal"]:
                     channels = source["signal"]["electrode"].get("channels", [])
                     electrode_ids = [
@@ -113,4 +108,4 @@ class DeviceInfoDisplay:
                 )
 
             self.console.print(visualize_peripherals(info_dict))
-            self.console.print(visualize_configuration(info_dict))
+            self.console.print(visualize_configuration(info_dict, status))

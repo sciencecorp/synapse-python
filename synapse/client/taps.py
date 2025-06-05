@@ -1,9 +1,11 @@
 import logging
+import time
 import zmq
 from typing import Optional, Generator
 
 from synapse.api.query_pb2 import QueryRequest
 from synapse.api.status_pb2 import StatusCode
+from synapse.api.tap_pb2 import TapType
 
 
 class Tap(object):
@@ -75,7 +77,14 @@ class Tap(object):
 
         # Initialize ZMQ context and socket
         self.zmq_context = zmq.Context()
-        self.zmq_socket = self.zmq_context.socket(zmq.SUB)
+
+        # Create appropriate socket type based on tap type from the selected tap
+        if selected_tap.tap_type == TapType.TAP_TYPE_CONSUMER:
+            # For consumer taps, we need to publish data TO the tap
+            self.zmq_socket = self.zmq_context.socket(zmq.PUB)
+        else:
+            # For producer taps (or unspecified), we need to subscribe and listen FROM the tap
+            self.zmq_socket = self.zmq_context.socket(zmq.SUB)
 
         # Replace the endpoint with our device URI if needed
         endpoint = selected_tap.endpoint
@@ -88,9 +97,17 @@ class Tap(object):
             endpoint = f"{protocol}://{self.uri.split(':')[0]}:{port}"
 
         try:
-            print(f"Connecting to tap '{name}' at {endpoint}")
             self.zmq_socket.connect(endpoint)
-            self.zmq_socket.setsockopt(zmq.SUBSCRIBE, b"")  # Subscribe to all messages
+
+            # Give the socket a chance to connect
+            self.logger.info("Waiting for socket to connect...")
+            time.sleep(1)
+
+            # Only set subscription options for subscriber sockets
+            if selected_tap.tap_type != TapType.TAP_TYPE_CONSUMER:
+                self.zmq_socket.setsockopt(zmq.SUBSCRIBE, b"")
+                print("Subscribed to all messages")
+
             return True
         except zmq.ZMQError as e:
             self.logger.error(f"Failed to connect to tap: {e}")
@@ -122,6 +139,33 @@ class Tap(object):
         except zmq.ZMQError as e:
             self.logger.error(f"Error receiving message: {e}")
             return None
+
+    def send(self, data: bytes) -> bool:
+        """Send raw data to the tap (only works for consumer taps with PUB socket).
+
+        Args:
+            data (bytes): Raw message data to send.
+
+        Returns:
+            bool: True if sent successfully, False otherwise.
+        """
+        if not self.zmq_socket:
+            self.logger.error("Not connected to any tap")
+            return False
+
+        if (
+            not self.connected_tap
+            or self.connected_tap.tap_type != TapType.TAP_TYPE_CONSUMER
+        ):
+            self.logger.error("Send is only available for consumer taps")
+            return False
+
+        try:
+            self.zmq_socket.send(data)
+            return True
+        except zmq.ZMQError as e:
+            self.logger.error(f"Error sending message: {e}")
+            return False
 
     def stream(self, timeout_ms: int = 1000) -> Generator[bytes, None, None]:
         """Stream raw data from the tap.

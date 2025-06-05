@@ -1,8 +1,72 @@
 from synapse.client.taps import Tap
 
 from rich.console import Console
-from rich.pretty import pprint
 from rich.table import Table
+from rich.live import Live
+from rich.text import Text
+
+import time
+
+
+class TapHealthMonitor:
+    """Health monitor for streaming tap data with real-time statistics display."""
+
+    def __init__(self, console: Console):
+        self.console = console
+        self.message_count = 0
+        self.total_bytes = 0
+        self.start_time = None
+
+    def start(self):
+        """Start the monitoring session."""
+        self.start_time = time.time()
+        self.message_count = 0
+        self.total_bytes = 0
+
+    def update(self, message_size: int) -> Text:
+        """Update statistics with a new message and return formatted display text."""
+        current_time = time.time()
+        self.message_count += 1
+        self.total_bytes += message_size
+
+        # Calculate stats
+        elapsed_time = current_time - self.start_time
+        msgs_per_sec = self.message_count / elapsed_time if elapsed_time > 0 else 0
+        bandwidth_bps = self.total_bytes / elapsed_time if elapsed_time > 0 else 0
+
+        # Format bandwidth
+        bandwidth_str = self._format_bandwidth(bandwidth_bps)
+
+        # Create formatted display text
+        return self._create_display_text(
+            self.message_count, msgs_per_sec, bandwidth_str, message_size
+        )
+
+    def _format_bandwidth(self, bandwidth_bps: float) -> str:
+        """Format bandwidth with appropriate units."""
+        if bandwidth_bps >= 1024 * 1024:
+            return f"{bandwidth_bps / (1024 * 1024):.2f} MB/s"
+        elif bandwidth_bps >= 1024:
+            return f"{bandwidth_bps / 1024:.2f} KB/s"
+        else:
+            return f"{bandwidth_bps:.1f} B/s"
+
+    def _create_display_text(
+        self, msg_count: int, rate: float, bandwidth: str, latest_size: int
+    ) -> Text:
+        """Create styled text for the live display."""
+        stats_text = Text()
+        stats_text.append("Messages: ", style="bold")
+        stats_text.append(f"{msg_count:,}", style="cyan")
+        stats_text.append(" | msgs/sec: ", style="bold")
+        stats_text.append(f"{rate:.1f}/s", style="green")
+        stats_text.append(" | Bandwidth: ", style="bold")
+        stats_text.append(bandwidth, style="yellow")
+        stats_text.append(" | Latest: ", style="bold")
+        stats_text.append(f"{latest_size:,} bytes", style="magenta")
+        stats_text.append(" | Runtime: ", style="bold")
+        stats_text.append(f"{time.time() - self.start_time:.1f}s", style="blue")
+        return stats_text
 
 
 def add_commands(subparsers):
@@ -48,9 +112,26 @@ def stream_taps(args):
 
     console = Console()
     console.print(f"[bold cyan]Streaming tap:[/] [green]{args.tap_name}[/]")
+    console.print("[dim]Press Ctrl+C to stop[/]\n")
 
-    for message in tap.stream():
-        message_size = len(str(message))
-        console.print(f"[bold]Message Size:[/] [cyan]{message_size} bytes[/]")
-        pprint(message, expand_all=False)
-        console.print("---")
+    # Initialize health monitor
+    monitor = TapHealthMonitor(console)
+    monitor.start()
+
+    # Create initial display
+    initial_text = Text("Waiting for messages...", style="dim")
+
+    try:
+        with Live(initial_text, console=console, refresh_per_second=10) as live:
+            for message in tap.stream():
+                message_size = len(message)
+
+                # Update statistics and get formatted display
+                stats_text = monitor.update(message_size)
+
+                # Update the live display
+                live.update(stats_text)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        tap.disconnect()

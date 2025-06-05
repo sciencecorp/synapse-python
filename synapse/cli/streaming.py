@@ -13,7 +13,7 @@ from google.protobuf.json_format import Parse, MessageToJson
 
 from synapse.api.node_pb2 import NodeType
 from synapse.api.status_pb2 import DeviceState, StatusCode
-from synapse.api.synapse_pb2 import DeviceConfiguration
+from synapse.api.device_pb2 import DeviceConfiguration
 import synapse as syn
 import synapse.client.channel as channel
 import synapse.utils.ndtp_types as ndtp_types

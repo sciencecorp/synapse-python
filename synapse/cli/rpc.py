@@ -4,7 +4,6 @@ from datetime import datetime
 from typing import Optional
 
 import synapse as syn
-from synapse.api.synapse_pb2 import DeviceConfiguration
 from synapse.api.query_pb2 import QueryRequest, QueryResponse, StreamQueryRequest
 from synapse.api.status_pb2 import StatusCode
 
@@ -12,11 +11,11 @@ from google.protobuf import text_format
 from google.protobuf.json_format import Parse
 
 from rich.console import Console
-from rich.pretty import pprint
 
 from synapse.cli.query import StreamingQueryClient
 from synapse.utils.log import log_entry_to_str
 from synapse.cli.device_info_display import DeviceInfoDisplay
+from synapse.utils.proto import load_device_config
 
 
 def add_commands(subparsers):
@@ -182,7 +181,7 @@ def start(args):
 
     console = Console()
 
-    config_obj = None  # syn.Config if we are provided a *.json* file
+    config_obj = None
     cfg_path = getattr(args, "config_file", None)
 
     if cfg_path:
@@ -196,10 +195,7 @@ def start(args):
 
         # Load the configuration proto and build Config object
         try:
-            with open(cfg_path, "r") as f:
-                json_text = f.read()
-            cfg_proto = Parse(json_text, DeviceConfiguration())
-            config_obj = syn.Config.from_proto(cfg_proto)
+            config_obj = load_device_config(cfg_path, console)
         except Exception as e:
             console.print(
                 f"[bold red]Failed to parse configuration file[/bold red]: {e}"
@@ -263,25 +259,23 @@ def stop(args):
 
 
 def configure(args):
+    console = Console()
     if Path(args.config_file).suffix != ".json":
-        print("Configuration file must be a JSON file")
+        console.print("[bold red]Configuration file must be a JSON file")
         return False
 
-    with open(args.config_file) as config_json:
-        console = Console()
-        config_proto = Parse(config_json.read(), DeviceConfiguration())
-        console.print("Configuring device with the following configuration:")
-        config = syn.Config.from_proto(config_proto)
-        console.print(config.to_proto())
+    config_obj = load_device_config(args.config_file, console)
+    console.print("Configuring device with the following configuration:")
+    console.print(config_obj.to_proto())
 
-        config_ret = syn.Device(args.uri, args.verbose).configure_with_status(config)
-        if not config_ret:
-            console.print("[bold red]Internal error configuring device")
-            return
-        if config_ret.code != StatusCode.kOk:
-            console.print(f"[bold red]Error configuring\n{config_ret.message}")
-            return
-        console.print("[green]Device configured")
+    config_ret = syn.Device(args.uri, args.verbose).configure_with_status(config_obj)
+    if not config_ret:
+        console.print("[bold red]Internal error configuring device")
+        return
+    if config_ret.code != StatusCode.kOk:
+        console.print(f"[bold red]Error configuring\n{config_ret.message}")
+        return
+    console.print("[green]Device configured")
 
 
 def get_logs(args):
