@@ -108,7 +108,6 @@ class Device(object):
             response = self.rpc.Configure(config.to_proto())
             return response
         except grpc.RpcError as e:
-            print(e)
             self.logger.error("Error: %s", e.details())
             return None
 
