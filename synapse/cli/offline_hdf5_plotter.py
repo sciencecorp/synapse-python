@@ -203,8 +203,9 @@ def plot(plot_data, console):
 
             progress.update(task, advance=1)
     end_time = time.time()
+    total_samples = plot_data.num_samples * plot_data.num_channels
     console.print(
-        f"Plotted {plot_data.num_channels} channels ({plot_data.num_samples:,} samples each channel) in {end_time - start_time:.2f} seconds"
+        f"Plotted {plot_data.num_channels} channels ({total_samples:,} total samples) in {end_time - start_time:.2f} seconds"
     )
     # Create a single plot for a single channel
     plot_single = single_channel_plot_widget.addPlot(
