@@ -8,7 +8,7 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtWidgets, QtCore
 from dataclasses import dataclass
 from typing import List
-
+import time
 import h5py
 from rich.console import Console
 from rich.table import Table
@@ -40,7 +40,7 @@ class PlotData:
         return np.arange(self.num_samples) / self.sample_rate
 
     def filter_channels(self, channel_ids: List[int]) -> "PlotData":
-        # THey come in as a list of strings deliminated by commas
+        # They come in as a list of strings delimited by commas
         channel_ids = [int(ch) for ch in channel_ids.split(",")]
         return PlotData(
             data=self.data.loc[:, channel_ids],
@@ -179,6 +179,7 @@ def plot(plot_data, console):
         console.print(
             "[yellow] Consider using the --channels flag to limit the number of channels [/yellow]"
         )
+    start_time = time.time()
     with Progress(console=console) as progress:
         task = progress.add_task("Creating curves...", total=len(plot_data.channel_ids))
 
@@ -201,7 +202,10 @@ def plot(plot_data, console):
             curves.append(curve)
 
             progress.update(task, advance=1)
-
+    end_time = time.time()
+    console.print(
+        f"Plotted {plot_data.num_channels} channels ({plot_data.num_samples:,} samples each channel) in {end_time - start_time:.2f} seconds"
+    )
     # Create a single plot for a single channel
     plot_single = single_channel_plot_widget.addPlot(
         row=1, col=0, title="Single Channel"
