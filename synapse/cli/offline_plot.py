@@ -163,9 +163,10 @@ def plot(args):
 
     # NOTE(gilbert): we want to support the previous plotting code but we are moving to hdf5 saving and plotting
     #                Short circuit for now and just use the hdf5 plotting code
-    _, file_extension = os.path.splitext(args.data)
-    if file_extension == ".h5":
-        return plot_h5(args)
+    if args.data is not None:
+        _, file_extension = os.path.splitext(args.data)
+        if file_extension == ".h5":
+            return plot_h5(args)
 
     console = Console()
     console.print(
