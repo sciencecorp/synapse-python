@@ -9,6 +9,10 @@ from pyqtgraph.Qt import QtWidgets, QtCore
 import logging
 import signal
 
+from offline_hdf5_plotter import plot_h5
+
+from rich.console import Console
+
 BACKGROUND_COLOR = "#253252250"
 
 
@@ -138,19 +142,6 @@ def load_config(json_path):
     raise ValueError("Invalid JSON: No 'kElectricalBroadband' node found")
 
 
-# Function to compute FFT
-# NOTE(gilbert): This is the previous implementation of the FFT
-# def compute_fft(data, sample_rate):
-#     fft_values = np.fft.fft(data)
-#     fft_freq = np.fft.fftfreq(len(data), d=1 / sample_rate)
-#     fft_values = np.abs(fft_values)[: len(fft_values) // 2]
-#     fft_freq = fft_freq[: len(fft_freq) // 2]
-#     fft_values /= max(fft_values)
-#     fft_values[1:] *= 2
-#     fft_values[0] = 0
-#     return fft_freq, fft_values
-
-
 def compute_fft(data, sample_rate):
     # Apply window function to reduce spectral leakage
     window = np.hanning(len(data))
@@ -169,6 +160,18 @@ def compute_fft(data, sample_rate):
 
 def plot(args):
     logger = setup_logging()
+
+    # NOTE(gilbert): we want to support the previous plotting code but we are moving to hdf5 saving and plotting
+    #                Short circuit for now and just use the hdf5 plotting code
+    if args.data is not None:
+        _, file_extension = os.path.splitext(args.data)
+        if file_extension == ".h5":
+            return plot_h5(args)
+
+    console = Console()
+    console.print(
+        "[yellow bold]Legacy plotting is deprecated, please use the hdf5 files going forward[/yellow bold]"
+    )
 
     app = QtWidgets.QApplication.instance()
     if not app:
@@ -264,11 +267,11 @@ def plot(args):
             sys.exit(1)
 
     full_time_arr = np.arange(len(data)) / sampling_freq
-    if end_time is not None:  # FIX: Ensure end_time=0 is valid
+    if end_time is not None:
         mask = (full_time_arr >= start_time) & (full_time_arr <= end_time)
 
-        if np.any(mask):  # FIX: Ensure non-empty selection
-            data = data.loc[mask]  # FIX: Use .loc instead of .iloc
+        if np.any(mask):
+            data = data.loc[mask]
             time_arr = full_time_arr[mask]
             logger.info(
                 f"Plotting {len(data)} samples from {time_arr[0]:.2f}s to {time_arr[-1]:.2f}s"
