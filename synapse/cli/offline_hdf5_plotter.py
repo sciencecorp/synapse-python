@@ -65,6 +65,29 @@ def compute_fft(data, sample_rate):
     return fft_freq, fft_magnitude_db
 
 
+def print_tree(group, console, prefix=""):
+    """Print group tree with attributes"""
+    items = list(group.items())
+    for i, (name, obj) in enumerate(items):
+        is_last = i == len(items) - 1
+        current_prefix = "└── " if is_last else "├── "
+
+        if isinstance(obj, h5py.Group):
+            console.print(f"{prefix}{current_prefix}📁 [blue]{name}/[/blue]")
+            # Show group attributes if any
+            if obj.attrs:
+                for attr_key, attr_val in obj.attrs.items():
+                    attr_prefix = prefix + ("    " if is_last else "│   ")
+                    console.print(f"{attr_prefix}  @{attr_key}: {attr_val}")
+            # Recurse into subgroups
+            next_prefix = prefix + ("    " if is_last else "│   ")
+            print_tree(obj, console, next_prefix)
+
+        elif isinstance(obj, h5py.Dataset):
+            info = f"shape={obj.shape}, dtype={obj.dtype}"
+            console.print(f"{prefix}{current_prefix}📄 [green]{name}[/green] ({info})")
+
+
 def load_h5_data(data_file, console, time_range=None):
     """Load HDF5 data and return PlotData object"""
     console.print(f"Loading h5 data from {data_file}")
@@ -79,8 +102,11 @@ def load_h5_data(data_file, console, time_range=None):
                 table.add_row(key, str(value))
             console.print(table)
 
+        # List immediate groups (top-level only)
+        print_tree(f, console)
+
         # Get channel information
-        channels = f["channels"]
+        channels = f["/general/extracellular_ephys/electrodes/"]
         channel_ids = channels["id"][:].tolist()
         number_of_channels = len(channel_ids)
 
@@ -89,7 +115,7 @@ def load_h5_data(data_file, console, time_range=None):
         console.print(f"Found {number_of_channels} channels")
 
         # Get frame data info
-        frame_data = f["frame_data"]
+        frame_data = f["/acquisition/ElectricalSeries"]
         total_samples = len(frame_data)
         samples_per_channel = total_samples // number_of_channels
 
