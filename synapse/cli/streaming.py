@@ -1,387 +1,319 @@
-import json
+import os
 import queue
 import threading
 import time
-import traceback
-import os
-import logging
-from typing import Optional
-from operator import itemgetter
-import copy
+import h5py
+from datetime import datetime
 
-from google.protobuf.json_format import Parse, MessageToJson
-
-from synapse.api.node_pb2 import NodeType
-from synapse.api.status_pb2 import DeviceState, StatusCode
-from synapse.api.device_pb2 import DeviceConfiguration
 import synapse as syn
-import synapse.client.channel as channel
-import synapse.utils.ndtp_types as ndtp_types
-import synapse.cli.synapse_plotter as plotter
-from synapse.utils.packet_monitor import PacketMonitor
+from synapse.api.status_pb2 import DeviceState, StatusCode
+from synapse.client.taps import Tap
+from synapse.utils.proto import load_device_config
+from synapse.api.datatype_pb2 import BroadbandFrame
 
 from rich.console import Console
-from rich.live import Live
-from rich.pretty import pprint
+
+
+class DiskWriter:
+    def __init__(self, output_dir: str, buffer_size: int = 1024 * 1024):
+        self.output_dir = output_dir
+        self.buffer_size = buffer_size
+        self.data_queue = queue.Queue(maxsize=1000)  # Prevent unbounded memory growth
+        self.stop_event = threading.Event()
+        self.writer_thread = None
+
+    def start(self):
+        """Start the writer thread"""
+        self.writer_thread = threading.Thread(target=self._write_loop)
+        self.writer_thread.start()
+
+    def stop(self):
+        """Stop the writer thread and wait for it to finish"""
+        self.stop_event.set()
+        if self.writer_thread:
+            self.writer_thread.join()
+
+    def put(self, data: BroadbandFrame):
+        """Add data to the write queue"""
+        try:
+            self.data_queue.put(data, block=False)
+        except queue.Full:
+            # If queue is full, we'll drop the oldest data
+            try:
+                self.data_queue.get_nowait()
+                self.data_queue.put(data, block=False)
+            except queue.Empty:
+                pass
+
+    def _write_loop(self):
+        """Main writing loop that consumes data from the queue"""
+        filename = os.path.join(self.output_dir, f"data_{int(time.time())}.dat")
+        with open(filename, "wb", buffering=self.buffer_size) as f:
+            while not self.stop_event.is_set() or not self.data_queue.empty():
+                try:
+                    data = self.data_queue.get(timeout=1)
+                    # Write binary data directly
+                    print(data)
+                except queue.Empty:
+                    continue
+                except Exception as e:
+                    print(f"Error writing data: {e}")
+                    continue
+
+
+class BroadbandFrameWriter:
+    def __init__(self, output_dir: str):
+        self.output_dir = output_dir
+        self.data_queue = queue.Queue(maxsize=1000)
+        self.stop_event = threading.Event()
+        self.writer_thread = None
+
+        # Create HDF5 file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.filename = os.path.join(output_dir, f"broadband_data_{timestamp}.h5")
+        self.file = h5py.File(self.filename, "w")
+
+        # Create datasets
+        self.timestamp_dataset = self.file.create_dataset(
+            "/acquisition/timestamp", shape=(0,), maxshape=(None,), dtype="uint64"
+        )
+        self.sequence_dataset = self.file.create_dataset(
+            "/acquisition/sequence_number", shape=(0,), maxshape=(None,), dtype="uint64"
+        )
+        # Create frame data dataset with correct shape for 256 samples
+        self.frame_data_dataset = self.file.create_dataset(
+            "/acquisition/ElectricalSeries",
+            shape=(0, 256),  # Each frame has 256 samples
+            maxshape=(None, 256),
+            dtype="int32",
+        )
+
+    def set_attributes(
+        self, sample_rate_hz: float, channels: list, session_description: str = ""
+    ):
+        """Set HDF5 attributes similar to C++ implementation"""
+        # Set basic attributes
+        self.file.attrs["sample_rate_hz"] = sample_rate_hz
+        if session_description:
+            self.file.attrs["session_description"] = session_description
+
+        # Set session start time
+        self.file.attrs["session_start_time"] = datetime.now().isoformat()
+
+        # Set device type
+        device_group = self.file.create_group("general/device")
+        device_group.attrs["device_type"] = "SciFi"
+
+        # Create electrodes group and write channel IDs
+        electrodes_group = self.file.create_group(
+            "general/extracellular_ephys/electrodes"
+        )
+        channel_ids = channels
+        electrodes_group.create_dataset("id", data=channel_ids, dtype="uint32")
+
+    def start(self):
+        """Start the writer thread"""
+        self.writer_thread = threading.Thread(target=self._write_loop)
+        self.writer_thread.start()
+
+    def stop(self):
+        """Stop the writer thread and wait for it to finish"""
+        self.stop_event.set()
+        if self.writer_thread:
+            self.writer_thread.join()
+        self.flush()
+        self.file.close()
+
+    def put(self, frame: BroadbandFrame):
+        """Add frame to the write queue"""
+        try:
+            self.data_queue.put(frame, block=False)
+        except queue.Full:
+            # If queue is full, we'll drop the oldest data
+            try:
+                self.data_queue.get_nowait()
+                self.data_queue.put(frame, block=False)
+            except queue.Empty:
+                pass
+
+    def _write_loop(self):
+        """Main writing loop that consumes data from the queue"""
+        while not self.stop_event.is_set() or not self.data_queue.empty():
+            try:
+                frame = self.data_queue.get(timeout=1)
+
+                # Resize datasets
+                current_size = self.timestamp_dataset.shape[0]
+                new_size = current_size + 1
+
+                self.timestamp_dataset.resize(new_size, axis=0)
+                self.sequence_dataset.resize(new_size, axis=0)
+                self.frame_data_dataset.resize(new_size, axis=0)
+
+                # Write data
+                self.timestamp_dataset[current_size] = frame.timestamp_ns
+                self.sequence_dataset[current_size] = frame.sequence_number
+                # Write frame data as a row in the 2D dataset
+                self.frame_data_dataset[current_size, :] = frame.frame_data
+
+                # Flush periodically
+                if new_size % 1000 == 0:
+                    print(f"Flushed {new_size} frames")
+                    self.flush()
+
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Error writing data: {e}")
+                continue
+
+    def flush(self):
+        """Flush all datasets to disk"""
+        self.timestamp_dataset.flush()
+        self.sequence_dataset.flush()
+        self.frame_data_dataset.flush()
+        self.file.flush()
 
 
 def add_commands(subparsers):
-    a = subparsers.add_parser("read", help="Read from a device's StreamOut node")
-    a.add_argument(
-        "--config",
-        type=str,
-        help="Configuration file",
+    read_parser = subparsers.add_parser(
+        "read", help="Read from a device's Broadband Tap"
     )
-    a.add_argument(
-        "--num_ch", type=int, help="Number of channels to read from, overrides config"
+
+    read_parser.add_argument(
+        "config", type=str, help="Device configuration or manifest file"
     )
-    a.add_argument("--bin", type=bool, help="Output binary format instead of JSON")
-    a.add_argument("--duration", type=int, help="Duration to read for in seconds")
-    a.add_argument("--node_id", type=int, help="ID of the StreamOut node to read from")
-    a.add_argument("--plot", action="store_true", help="Plot the data in real-time")
-    a.add_argument("--output", type=str, help="Name of the output directory and files")
-    a.add_argument(
-        "--overwrite",
-        action="store_true",
-        default=False,
-        help="Overwrite existing files",
+
+    # Output options, we will save as HDF5
+    read_parser.add_argument("--output", type=str, help="Output directory")
+    read_parser.add_argument(
+        "--overwrite", action="store_true", help="Overwrite existing files"
     )
-    a.set_defaults(func=read)
+
+    read_parser.set_defaults(func=read)
 
 
-def load_config_from_file(path):
-    with open(path, "r") as f:
-        data = f.read()
-        proto = Parse(data, DeviceConfiguration())
-        return syn.Config.from_proto(proto)
+def configure_device(device, config, console):
+    with console.status("Configuring device...", spinner="bouncingBall"):
+        # check if we are running
+        info = device.info()
+        if info.status.state == DeviceState.kRunning:
+            console.log(
+                "[bold yellow]Device is already running, reading from existing tap[/bold yellow]"
+            )
+            return True
+
+        # Apply the configuration to the device
+        configure_status = device.configure_with_status(config)
+        if configure_status.code != StatusCode.kOk:
+            console.print(
+                f"[bold red]Failed to configure device: {configure_status.message}[/bold red]"
+            )
+            return False
+        console.log("[green]Configured device[/green]")
+
+    return True
+
+
+def start_device(device, console):
+    info = device.info()
+    if info.status.state == DeviceState.kRunning:
+        return True
+
+    with console.status("Starting device...", spinner="bouncingBall"):
+        start_status = device.start_with_status()
+        if start_status.code != StatusCode.kOk:
+            console.print(
+                f"[bold red]Failed to start device: {start_status.message}[/bold red]"
+            )
+            return False
+    return True
+
+
+def setup_output(args, console):
+    if not args.output:
+        console.print("[bold red]No output directory specified[/bold red]")
+        return False
+
+    # Create the output directory if it doesn't exist
+    os.makedirs(args.output, exist_ok=True)
+    return True
+
+
+def get_broadband_tap(args, device, console):
+    read_tap = Tap(args.uri, args.verbose)
+    taps = read_tap.list_taps()
+
+    # Just get the first tap that has BroadbandFrame as the type
+    for t in taps:
+        if "BroadbandFrame" in t.message_type:
+            read_tap.connect(t.name)
+            return read_tap
+
+    console.print("[bold red]No BroadbandFrame tap found[/bold red]")
+    return None
 
 
 def read(args):
     console = Console()
-    if not args.config and not args.node_id:
-        console.print("[bold red]Either `--config` or `--node_id` must be specified.")
+
+    # Make sure we can actually get to this device
+    try:
+        config = load_device_config(args.config, console)
+    except Exception as e:
+        console.print(f"[bold red]Failed to load device configuration: {e}[/bold red]")
         return
 
-    output_base = args.output
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    if not output_base:
-        output_base = f"synapse_data_{timestamp}"
-    else:
-        output_base = f"{output_base}_{timestamp}"
-
-    # Check if the output directory exists, we will make the directory later after we know the config
-    if os.path.exists(output_base):
-        if not args.overwrite:
-            console.print(
-                f"[bold red]Output directory {output_base} already exists, please specify a different output directory or use `--overwrite` to overwrite existing files"
-            )
-            return
-        else:
-            console.print(f"[bold yellow]Overwriting existing files in {output_base}")
+    # Create the device object
     device = syn.Device(args.uri, args.verbose)
-    with console.status(
-        "Reading from Synapse Device", spinner="bouncingBall", spinner_style="green"
-    ) as status:
-        status.update("Requesting device info")
-        info = device.info()
-        if not info:
-            console.print(f"[bold red]Failed to get device info from {args.uri}")
-            return
+    device_name = device.get_name()
+    console.log(f"[green]Connected to {device_name}[/green]")
 
-    console.log(f"Got info from: {info.name}")
-    if args.verbose:
-        pprint(info)
-        console.print("\n")
-
-    status.update("Loading recording configuration")
-
-    if args.config:
-        config = load_config_from_file(args.config)
-        if not config:
-            console.print(f"[bold red]Failed to load config from {args.config}")
-            return
-        stream_out = next(
-            (n for n in config.nodes if n.type == NodeType.kStreamOut), None
-        )
-        if not stream_out:
-            console.print("[bold red]No StreamOut node found in config")
-            return
-        broadband = next(
-            (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
-        )
-        if not broadband:
-            console.print("[bold red]No BroadbandSource node found in config")
-            return
-        signal = broadband.signal
-        if not signal:
-            console.print("[bold red]No signal configured for BroadbandSource node")
-            return
-
-        if not signal.electrode:
-            console.print(
-                "[bold red]No electrode signal configured for BroadbandSource node"
-            )
-            return
-
-        num_ch = len(signal.electrode.channels)
-        if args.num_ch:
-            num_ch = args.num_ch
-            offset = 0
-            channels = []
-            for ch in range(offset, offset + num_ch):
-                channels.append(channel.Channel(ch, 2 * ch, 2 * ch + 1))
-
-            broadband.signal.electrode.channels = channels
-
-        with console.status(
-            "Configuring device", spinner="bouncingBall", spinner_style="green"
-        ) as status:
-            configure_status = device.configure_with_status(config)
-            if configure_status is None:
-                console.print(
-                    "[bold red]Failed to configure device. Run with `--verbose` for more information."
-                )
-                return
-            if configure_status.code == StatusCode.kInvalidConfiguration:
-                console.print("[bold red]Failed to configure device.")
-                console.print(f"[italic red]Why: {configure_status.message}")
-                console.print("[yellow]Is there a peripheral connected to the device?")
-                return
-            elif configure_status.code == StatusCode.kFailedPrecondition:
-                console.print("[bold red]Failed to configure device.")
-                console.print(f"[italic red]Why: {configure_status.message}")
-                console.print(
-                    f"[yellow]If the device is already running, run `synapsectl stop {args.uri}` to stop the device and try again."
-                )
-                return
-            console.print("[bold green]Device configured successfully")
-
-        if info.status.state != DeviceState.kRunning:
-            print("Starting device...")
-            if not device.start():
-                raise ValueError("Failed to start device")
-
-        # Get the sample rate from the device
-        # We need to look at the node configuration with type kBroadbandSource for the sample rate
-        broadband = next(
-            (n for n in config.nodes if n.type == NodeType.kBroadbandSource), None
-        )
-        assert broadband is not None, "No BroadbandSource node found in config"
-
-    else:
-        # TODO(gilbert): Get rid of this giant if-else block
-        node = next(
-            (
-                n
-                for n in info.configuration.nodes
-                if n.type == NodeType.kStreamOut and n.id == args.node_id
-            ),
-            None,
-        )
-        if node is None:
-            console.print(
-                "[bold red]No StreamOut node found in device configuration; please configure the device with a StreamOut node."
-            )
-            return
-
-        stream_out = syn.StreamOut.from_proto(node)
-        stream_out.device = device
-
-    # We are ready to start streaming, make the output directory
-    os.makedirs(output_base, exist_ok=True)
-
-    # Copy our config that was taken from the device to the output directory
-    device_info_after_config = device.info()
-    if not device_info_after_config:
-        console.print(f"[bold red]Failed to get device info from {args.uri}")
+    # Apply the configuration to the device
+    if not configure_device(device, config, console):
+        console.print("[bold red]Failed to configure device[/bold red]")
         return
-    runtime_config = device_info_after_config.configuration
-    runtime_config_json = MessageToJson(
-        runtime_config,
-        always_print_fields_with_no_presence=True,
-        preserving_proto_field_name=True,
-    )
-    output_config_path = os.path.join(output_base, "runtime_config.json")
-    with open(output_config_path, "w") as f:
-        f.write(runtime_config_json)
 
-    console.print(f"[bold green]Streaming data to {output_base}")
+    # If we got this far and they want to save things, we need to make sure they have a place to save
+    if args.output:
+        if not setup_output(args, console):
+            console.print("[bold red]Failed to setup output[/bold red]")
+            return
 
-    status_title = (
-        f"Streaming data for {args.duration} seconds"
-        if args.duration
-        else "Streaming data indefinitely"
-    )
-    console.print(status_title)
+    # Start the device
+    if not start_device(device, console):
+        console.print("[bold red]Failed to start device[/bold red]")
+        return
 
-    q = queue.Queue()
-    plot_q = queue.Queue() if args.plot else None
+    # With the device running, get the tap for us to connect to
+    broadband_tap = get_broadband_tap(args, device, console)
+    if not broadband_tap:
+        console.print("[bold red]Failed to get broadband tap[/bold red]")
+        return
 
-    threads = []
-    stop = threading.Event()
-    if args.bin:
-        threads.append(
-            threading.Thread(target=_binary_writer, args=(stop, q, num_ch, output_base))
-        )
-    else:
-        threads.append(
-            threading.Thread(target=_data_writer, args=(stop, q, output_base))
-        )
+    # Setup our HDF5 writer if output is requested
+    writer = None
+    if args.output:
+        writer = BroadbandFrameWriter(args.output)
+        # Get sample rate and channels from config
+        # broadband_node = next((n for n in config.nodes if n.type == NodeType.kBroadbandSource), None)
+        writer.set_attributes(sample_rate_hz=32000, channels=list(range(32)))
 
-    if args.plot:
-        threads.append(
-            threading.Thread(target=_plot_data, args=(stop, plot_q, runtime_config))
-        )
-
-    for thread in threads:
-        thread.start()
+        writer.start()
 
     try:
-        read_packets(stream_out, q, plot_q, stop, args.duration)
+        # Now we need to start the streaming
+        frame = BroadbandFrame()
+        with console.status("Streaming data...", spinner="bouncingBall"):
+            for message in broadband_tap.stream():
+                frame.ParseFromString(message)
+                if writer:
+                    writer.put(frame)
+                else:
+                    print(frame)
     except KeyboardInterrupt:
-        pass
+        console.print("\n[yellow]Stopping data collection...[/yellow]")
     finally:
-        console.print("Stopping read...")
-        stop.set()
-        for thread in threads:
-            thread.join()
-
-        if args.config:
-            console.print("Stopping device...")
-            if not device.stop():
-                console.print("[red]Failed to stop device")
-            console.print("Stopped")
-
-    console.print("[bold green]Streaming complete")
-    console.print("[cyan]================")
-    console.print(f"[cyan]Output directory: {output_base}/")
-    console.print(f"[cyan]Run `synapsectl plot --dir {output_base}/` to plot the data")
-    console.print("[cyan]================")
-
-
-def read_packets(
-    node: syn.StreamOut,
-    q: queue.Queue,
-    plot_q: queue.Queue,
-    stop: threading.Event,
-    duration: Optional[int] = None,
-    num_ch: int = 32,
-):
-    start = time.time()
-
-    # Keep track of our statistics
-    monitor = PacketMonitor()
-    monitor.start_monitoring()
-
-    with Live(monitor.generate_stat_table(), refresh_per_second=4) as live:
-        while not stop.is_set():
-            read_ret = node.read()
-            if read_ret is None:
-                logging.error("Could not get a valid read from the node")
-                continue
-
-            synapse_data, bytes_read = read_ret
-            if synapse_data is None or bytes_read == 0:
-                logging.error("Could not read data from node")
-                continue
-            header, data = synapse_data
-            monitor.process_packet(header, data, bytes_read)
-            live.update(monitor.generate_stat_table())
-
-            # Always add the data to the writer queues
-            q.put(data)
-            if plot_q:
-                plot_q.put(copy.deepcopy(data))
-
-            if duration and (time.time() - start) > duration:
-                break
-
-
-def _binary_writer(stop, q: queue.Queue, num_ch, output_base):
-    filename = f"{output_base}.dat"
-    full_path = os.path.join(output_base, filename)
-    if filename:
-        fd = open(full_path, "wb")
-
-    channel_data = []
-    while not stop.is_set() or not q.empty():
-        try:
-            data: ndtp_types.ElectricalBroadbandData = q.get(True, 1)
-        except queue.Empty:
-            continue
-
-        try:
-            for ch_id, samples in data.samples:
-                channel_data.append([ch_id, samples])
-                if len(channel_data) == num_ch:
-                    channel_data.sort(key=itemgetter(0))
-                    channel_samples = [ch_data[1] for ch_data in channel_data]
-                    frames = list(zip(*channel_samples))
-                    channel_data = []
-
-                    for frame in frames:
-                        for sample in frame:
-                            fd.write(
-                                int(sample).to_bytes(2, byteorder="little", signed=True)
-                            )
-
-        except Exception as e:
-            print(f"Error processing data: {e}")
-            traceback.print_exc()
-            continue
-
-
-def _data_writer(stop, q, output_base):
-    filename = f"{output_base}.jsonl"
-    full_path = os.path.join(output_base, filename)
-    if filename:
-        fd = open(full_path, "wb")
-
-    while not stop.is_set() or not q.empty():
-        try:
-            data = q.get(True, 1)
-        except queue.Empty:
-            continue
-
-        try:
-            fd.write(json.dumps(data.to_list()).encode("utf-8"))
-            fd.write(b"\n")
-
-        except Exception as e:
-            print(f"Error processing data: {e}")
-            traceback.print_exc()
-            continue
-
-
-def _plot_data(stop, q, runtime_config):
-    """Plot streaming data from the synapse device."""
-    # TODO(gilbert): Make these configurable
-    window_size_seconds = 3
-
-    # Find the first broadband source node
-    broadband_nodes = [
-        node for node in runtime_config.nodes if node.type == NodeType.kBroadbandSource
-    ]
-
-    # Make sure we have a broadband node
-    # TODO(gilbert): We should be able to support binned spikes here too
-    #                but will need a refactor
-    if not broadband_nodes:
-        print("Could not find broadband source config. Cannot plot")
-        return
-
-    broadband_source = broadband_nodes[0].broadband_source
-    electrode_config = broadband_source.signal.electrode
-
-    if not electrode_config:
-        print(
-            "Could not find an electrode configuration for broadband node. Cannot plot"
-        )
-        return
-
-    # Get configuration parameters
-    sample_rate_hz = broadband_source.sample_rate_hz
-    channel_ids = [ch.id for ch in electrode_config.channels]
-
-    # Start the plotter
-    plotter.plot_synapse_data(stop, q, sample_rate_hz, window_size_seconds, channel_ids)
+        if writer:
+            writer.stop()
+            console.print(f"[green]Data saved to {args.output}[/green]")
