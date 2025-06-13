@@ -4,6 +4,7 @@ import threading
 import time
 import h5py
 from datetime import datetime
+import numpy as np
 
 import synapse as syn
 from synapse.api.status_pb2 import DeviceState, StatusCode
@@ -67,12 +68,12 @@ class BroadbandFrameWriter:
         self.data_queue = queue.Queue(maxsize=1000)
         self.stop_event = threading.Event()
         self.writer_thread = None
-
+        
         # Create HDF5 file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.filename = os.path.join(output_dir, f"broadband_data_{timestamp}.h5")
         self.file = h5py.File(self.filename, "w")
-
+        
         # Create datasets
         self.timestamp_dataset = self.file.create_dataset(
             "/acquisition/timestamp", shape=(0,), maxshape=(None,), dtype="uint64"
@@ -80,14 +81,14 @@ class BroadbandFrameWriter:
         self.sequence_dataset = self.file.create_dataset(
             "/acquisition/sequence_number", shape=(0,), maxshape=(None,), dtype="uint64"
         )
-        # Create frame data dataset with correct shape for 256 samples
+        # Create frame data dataset as a 1D array of variable length arrays
         self.frame_data_dataset = self.file.create_dataset(
             "/acquisition/ElectricalSeries",
-            shape=(0, 256),  # Each frame has 256 samples
-            maxshape=(None, 256),
-            dtype="int32",
+            shape=(0,),
+            maxshape=(None,),
+            dtype=h5py.vlen_dtype(np.dtype('int32'))
         )
-
+        
     def set_attributes(
         self, sample_rate_hz: float, channels: list, session_description: str = ""
     ):
@@ -96,26 +97,26 @@ class BroadbandFrameWriter:
         self.file.attrs["sample_rate_hz"] = sample_rate_hz
         if session_description:
             self.file.attrs["session_description"] = session_description
-
+            
         # Set session start time
         self.file.attrs["session_start_time"] = datetime.now().isoformat()
-
+        
         # Set device type
         device_group = self.file.create_group("general/device")
         device_group.attrs["device_type"] = "SciFi"
-
+        
         # Create electrodes group and write channel IDs
         electrodes_group = self.file.create_group(
             "general/extracellular_ephys/electrodes"
         )
         channel_ids = channels
         electrodes_group.create_dataset("id", data=channel_ids, dtype="uint32")
-
+        
     def start(self):
         """Start the writer thread"""
         self.writer_thread = threading.Thread(target=self._write_loop)
         self.writer_thread.start()
-
+        
     def stop(self):
         """Stop the writer thread and wait for it to finish"""
         self.stop_event.set()
@@ -123,7 +124,7 @@ class BroadbandFrameWriter:
             self.writer_thread.join()
         self.flush()
         self.file.close()
-
+            
     def put(self, frame: BroadbandFrame):
         """Add frame to the write queue"""
         try:
@@ -135,38 +136,38 @@ class BroadbandFrameWriter:
                 self.data_queue.put(frame, block=False)
             except queue.Empty:
                 pass
-
+                
     def _write_loop(self):
         """Main writing loop that consumes data from the queue"""
         while not self.stop_event.is_set() or not self.data_queue.empty():
             try:
                 frame = self.data_queue.get(timeout=1)
-
+                
                 # Resize datasets
                 current_size = self.timestamp_dataset.shape[0]
                 new_size = current_size + 1
-
+                
                 self.timestamp_dataset.resize(new_size, axis=0)
                 self.sequence_dataset.resize(new_size, axis=0)
                 self.frame_data_dataset.resize(new_size, axis=0)
-
+                
                 # Write data
                 self.timestamp_dataset[current_size] = frame.timestamp_ns
                 self.sequence_dataset[current_size] = frame.sequence_number
-                # Write frame data as a row in the 2D dataset
-                self.frame_data_dataset[current_size, :] = frame.frame_data
-
+                # Write frame data as a variable length array
+                self.frame_data_dataset[current_size] = frame.frame_data
+                
                 # Flush periodically
                 if new_size % 1000 == 0:
                     print(f"Flushed {new_size} frames")
                     self.flush()
-
+                    
             except queue.Empty:
                 continue
             except Exception as e:
                 print(f"Error writing data: {e}")
                 continue
-
+                
     def flush(self):
         """Flush all datasets to disk"""
         self.timestamp_dataset.flush()
