@@ -297,7 +297,7 @@ def read(args):
         writer = BroadbandFrameWriter(args.output)
         # Get sample rate and channels from config
         # broadband_node = next((n for n in config.nodes if n.type == NodeType.kBroadbandSource), None)
-        writer.set_attributes(sample_rate_hz=32000, channels=list(range(32)))
+        writer.set_attributes(sample_rate_hz=32000, channels=list(range(256)))
 
         writer.start()
 
