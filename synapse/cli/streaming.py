@@ -426,13 +426,63 @@ def list_available_taps(args, device, console):
     console.print("\n[bold cyan]Available Taps:[/bold cyan]")
     console.print("=" * 50)
 
+    supported_count = 0
     for tap in taps:
-        console.print(f"[green]Name:[/green] {tap.name}")
+        is_supported = tap.message_type == "synapse.BroadbandFrame"
+        if is_supported:
+            supported_count += 1
+            console.print(
+                f"[green]Name:[/green] {tap.name} [bold green]✓ SUPPORTED[/bold green]"
+            )
+        else:
+            console.print(f"[green]Name:[/green] {tap.name}")
+
         console.print(f"[blue]Type:[/blue] {tap.message_type}")
         console.print(f"[yellow]Endpoint:[/yellow] {tap.endpoint}")
+
+        if not is_supported:
+            console.print(
+                "[dim red]Note: Only synapse.BroadbandFrame taps are supported[/dim red]"
+            )
         console.print("-" * 30)
 
-    console.print(f"\n[bold]Total: {len(taps)} taps available[/bold]")
+    console.print(
+        f"\n[bold]Total: {len(taps)} taps found, {supported_count} supported[/bold]"
+    )
+
+
+def detect_stream_parameters(broadband_tap, console):
+    """Detect sample rate and available channels from the first message"""
+    console.log("[cyan]Detecting stream parameters from first message...[/cyan]")
+
+    try:
+        # Get the first message to detect parameters
+        first_message = broadband_tap.read(timeout_ms=5000)  # 5 second timeout
+        if not first_message:
+            console.print(
+                "[bold red]Failed to receive first message for parameter detection[/bold red]"
+            )
+            return None, None, None
+
+        # Parse the first frame
+        first_frame = BroadbandFrame()
+        first_frame.ParseFromString(first_message)
+
+        # Extract parameters
+        sample_rate = first_frame.sample_rate_hz
+        num_channels = len(first_frame.frame_data)
+        available_channels = list(range(num_channels))
+
+        console.log(f"[green]Detected sample rate: {sample_rate} Hz[/green]")
+        console.log(
+            f"[green]Detected {num_channels} channels (0-{num_channels - 1})[/green]"
+        )
+
+        return sample_rate, available_channels, first_frame
+
+    except Exception as e:
+        console.print(f"[bold red]Error detecting stream parameters: {e}[/bold red]")
+        return None, None, None
 
 
 def get_broadband_tap(args, device, console):
@@ -447,6 +497,12 @@ def get_broadband_tap(args, device, console):
                 console.log(
                     f"[green]Found specified tap: {args.tap_name} (type: {t.message_type})[/green]"
                 )
+                # Check if it's the correct type
+                if t.message_type != "synapse.BroadbandFrame":
+                    console.print(
+                        f"[bold red]Error: Specified tap '{args.tap_name}' has type '{t.message_type}', but only 'synapse.BroadbandFrame' is supported[/bold red]"
+                    )
+                    return None
                 read_tap.connect(t.name)
                 return read_tap
 
@@ -454,15 +510,15 @@ def get_broadband_tap(args, device, console):
             f"[yellow]Warning: Specified tap '{args.tap_name}' not found, falling back to auto-selection[/yellow]"
         )
 
-    # Auto-select: get the first tap that has BroadbandFrame as the type
-    console.log("[cyan]Auto-selecting first BroadbandFrame tap[/cyan]")
+    # Auto-select: get the first tap that has exact synapse.BroadbandFrame type
+    console.log("[cyan]Auto-selecting first synapse.BroadbandFrame tap[/cyan]")
     for t in taps:
-        if "BroadbandFrame" in t.message_type:
-            console.log(f"[green]Found BroadbandFrame tap: {t.name}[/green]")
+        if t.message_type == "synapse.BroadbandFrame":
+            console.log(f"[green]Found synapse.BroadbandFrame tap: {t.name}[/green]")
             read_tap.connect(t.name)
             return read_tap
 
-    console.print("[bold red]No BroadbandFrame tap found[/bold red]")
+    console.print("[bold red]No synapse.BroadbandFrame tap found[/bold red]")
     return None
 
 
@@ -508,11 +564,19 @@ def read(args):
         console.print("[bold red]Failed to get broadband tap[/bold red]")
         return
 
+    # Detect stream parameters from the first message
+    sample_rate, available_channels, first_frame = detect_stream_parameters(
+        broadband_tap, console
+    )
+    if sample_rate is None:
+        console.print("[bold red]Failed to detect stream parameters[/bold red]")
+        return
+
     # Setup our HDF5 writer if output is requested
     writer = None
     if args.output:
         writer = BroadbandFrameWriter(args.output)
-        writer.set_attributes(sample_rate_hz=32000, channels=list(range(256)))
+        writer.set_attributes(sample_rate_hz=sample_rate, channels=available_channels)
         writer.start()
 
     # Setup plotter if requested
@@ -521,16 +585,14 @@ def read(args):
         try:
             from synapse.cli.synapse_plotter import create_broadband_plotter
 
-            # Always make all 256 channels available, but start with only 5 selected
-            available_channels = list(range(256))
             plotter = create_broadband_plotter(
-                sample_rate_hz=32000,
+                sample_rate_hz=sample_rate,
                 window_size_seconds=5,
                 channel_ids=available_channels,
             )
             plotter.start()
             console.log(
-                f"[green]Started real-time plotter with all {len(available_channels)} channels available[/green]"
+                f"[green]Started real-time plotter with {len(available_channels)} channels available[/green]"
             )
         except ImportError as e:
             console.print(
@@ -545,6 +607,15 @@ def read(args):
     try:
         # Use batch streaming for better throughput
         with Live(monitor.get_current_stats(), refresh_per_second=4) as live:
+            # Process the first frame that we already read for parameter detection
+            if first_frame:
+                if writer:
+                    writer.put(first_frame)
+                if plotter:
+                    plotter.put(first_frame)
+                monitor.put(first_frame)
+
+            # Continue with batch streaming for remaining frames
             for message_batch in broadband_tap.stream_batch(batch_size=10):
                 frames = []
                 for message in message_batch:
