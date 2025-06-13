@@ -86,6 +86,17 @@ class Tap(object):
             # For producer taps (or unspecified), we need to subscribe and listen FROM the tap
             self.zmq_socket = self.zmq_context.socket(zmq.SUB)
 
+        # Optimize ZMQ for high-throughput data
+        # Increase receive buffer size significantly for high-speed data
+        self.zmq_socket.setsockopt(
+            zmq.RCVHWM, 10000
+        )  # High water mark - buffer up to 10K messages
+        self.zmq_socket.setsockopt(zmq.RCVBUF, 16 * 1024 * 1024)  # 16MB receive buffer
+
+        # Set TCP keepalive for connection stability
+        self.zmq_socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
+        self.zmq_socket.setsockopt(zmq.TCP_KEEPALIVE_IDLE, 60)
+
         # Replace the endpoint with our device URI if needed
         endpoint = selected_tap.endpoint
         if "://" in endpoint:
@@ -99,14 +110,13 @@ class Tap(object):
         try:
             self.zmq_socket.connect(endpoint)
 
-            # Give the socket a chance to connect
-            self.logger.info("Waiting for socket to connect...")
-            time.sleep(1)
+            # Reduce connection wait time to minimize startup delay
+            self.logger.info("Connecting to tap...")
+            time.sleep(0.1)  # Reduced from 1 second
 
             # Only set subscription options for subscriber sockets
             if selected_tap.tap_type != TapType.TAP_TYPE_CONSUMER:
                 self.zmq_socket.setsockopt(zmq.SUBSCRIBE, b"")
-                print("Subscribed to all messages")
 
             return True
         except zmq.ZMQError as e:
@@ -167,11 +177,11 @@ class Tap(object):
             self.logger.error(f"Error sending message: {e}")
             return False
 
-    def stream(self, timeout_ms: int = 1000) -> Generator[bytes, None, None]:
-        """Stream raw data from the tap.
+    def stream(self, timeout_ms: int = 100) -> Generator[bytes, None, None]:
+        """Stream raw data from the tap with optimizations for high-throughput data.
 
         Args:
-            timeout_ms (int, optional): Timeout between messages in milliseconds. Defaults to 1000.
+            timeout_ms (int, optional): Timeout between messages in milliseconds. Defaults to 100.
 
         Yields:
             Generator[bytes, None, None]: Stream of raw message data.
@@ -180,16 +190,18 @@ class Tap(object):
             self.logger.error("Not connected to any tap")
             return
 
-        # Set socket timeout
+        # Set a shorter timeout for high-frequency data
         self.zmq_socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
 
         try:
             while True:
                 try:
-                    data = self.zmq_socket.recv()
+                    # Use non-blocking receive with DONTWAIT for maximum throughput
+                    data = self.zmq_socket.recv(zmq.DONTWAIT)
                     yield data
                 except zmq.Again:
-                    # Timeout occurred, continue to next iteration
+                    # No data available right now, yield control briefly
+                    time.sleep(0.0001)  # 0.1ms sleep to prevent busy waiting
                     continue
         except KeyboardInterrupt:
             self.logger.info("Stream interrupted")
@@ -198,6 +210,50 @@ class Tap(object):
         finally:
             # Don't close the socket here, let the user call disconnect()
             pass
+
+    def stream_batch(
+        self, batch_size: int = 10, timeout_ms: int = 100
+    ) -> Generator[list, None, None]:
+        """Stream data in batches for improved throughput.
+
+        Args:
+            batch_size (int, optional): Number of messages to batch together. Defaults to 10.
+            timeout_ms (int, optional): Timeout for each receive operation. Defaults to 100.
+
+        Yields:
+            Generator[list, None, None]: Batches of raw message data.
+        """
+        if not self.zmq_socket:
+            self.logger.error("Not connected to any tap")
+            return
+
+        self.zmq_socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
+
+        batch = []
+        try:
+            while True:
+                try:
+                    data = self.zmq_socket.recv(zmq.DONTWAIT)
+                    batch.append(data)
+
+                    if len(batch) >= batch_size:
+                        yield batch
+                        batch = []
+                except zmq.Again:
+                    # No data available, yield partial batch if any
+                    if batch:
+                        yield batch
+                        batch = []
+                    time.sleep(0.0001)
+                    continue
+        except KeyboardInterrupt:
+            self.logger.info("Stream interrupted")
+            if batch:
+                yield batch
+        except zmq.ZMQError as e:
+            self.logger.error(f"Error streaming messages: {e}")
+            if batch:
+                yield batch
 
     def disconnect(self):
         """Disconnect from the tap."""
