@@ -81,13 +81,17 @@ class BroadbandFrameWriter:
         self.sequence_dataset = self.file.create_dataset(
             "/acquisition/sequence_number", shape=(0,), maxshape=(None,), dtype="uint64"
         )
-        # Create frame data dataset as a 1D array of variable length arrays
+        # Create frame data dataset as a flat array of samples
         self.frame_data_dataset = self.file.create_dataset(
             "/acquisition/ElectricalSeries",
             shape=(0,),
             maxshape=(None,),
-            dtype=h5py.vlen_dtype(np.dtype('int32'))
+            dtype="int32"
         )
+        
+        # Buffer for collecting frames before writing
+        self.frame_buffer = []
+        self.buffer_size = 1000  # Number of frames to collect before writing
         
     def set_attributes(
         self, sample_rate_hz: float, channels: list, session_description: str = ""
@@ -142,25 +146,11 @@ class BroadbandFrameWriter:
         while not self.stop_event.is_set() or not self.data_queue.empty():
             try:
                 frame = self.data_queue.get(timeout=1)
+                self.frame_buffer.append(frame)
                 
-                # Resize datasets
-                current_size = self.timestamp_dataset.shape[0]
-                new_size = current_size + 1
-                
-                self.timestamp_dataset.resize(new_size, axis=0)
-                self.sequence_dataset.resize(new_size, axis=0)
-                self.frame_data_dataset.resize(new_size, axis=0)
-                
-                # Write data
-                self.timestamp_dataset[current_size] = frame.timestamp_ns
-                self.sequence_dataset[current_size] = frame.sequence_number
-                # Write frame data as a variable length array
-                self.frame_data_dataset[current_size] = frame.frame_data
-                
-                # Flush periodically
-                if new_size % 1000 == 0:
-                    print(f"Flushed {new_size} frames")
-                    self.flush()
+                # Write when buffer is full
+                if len(self.frame_buffer) >= self.buffer_size:
+                    self._write_buffer()
                     
             except queue.Empty:
                 continue
@@ -168,8 +158,46 @@ class BroadbandFrameWriter:
                 print(f"Error writing data: {e}")
                 continue
                 
+    def _write_buffer(self):
+        """Write the buffered frames to disk"""
+        if not self.frame_buffer:
+            return
+            
+        # Get current sizes
+        current_timestamp_size = self.timestamp_dataset.shape[0]
+        current_frame_size = self.frame_data_dataset.shape[0]
+        num_frames = len(self.frame_buffer)
+        
+        # Resize datasets
+        new_timestamp_size = current_timestamp_size + num_frames
+        new_frame_size = current_frame_size + (num_frames * len(self.frame_buffer[0].frame_data))
+        
+        self.timestamp_dataset.resize(new_timestamp_size, axis=0)
+        self.sequence_dataset.resize(new_timestamp_size, axis=0)
+        self.frame_data_dataset.resize(new_frame_size, axis=0)
+        
+        # Write data
+        for i, frame in enumerate(self.frame_buffer):
+            idx = current_timestamp_size + i
+            self.timestamp_dataset[idx] = frame.timestamp_ns
+            self.sequence_dataset[idx] = frame.sequence_number
+            
+            # Write frame data
+            frame_start = current_frame_size + (i * len(frame.frame_data))
+            frame_end = frame_start + len(frame.frame_data)
+            self.frame_data_dataset[frame_start:frame_end] = frame.frame_data
+            
+        # Clear buffer
+        self.frame_buffer = []
+        
+        # Flush to disk
+        self.flush()
+        print(f"Wrote {num_frames} frames")
+                
     def flush(self):
         """Flush all datasets to disk"""
+        if self.frame_buffer:
+            self._write_buffer()
         self.timestamp_dataset.flush()
         self.sequence_dataset.flush()
         self.frame_data_dataset.flush()
