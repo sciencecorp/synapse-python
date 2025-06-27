@@ -423,6 +423,11 @@ def add_commands(subparsers):
     read_parser.add_argument(
         "--list-taps", action="store_true", help="List all available taps and exit"
     )
+    read_parser.add_argument(
+        "--duration",
+        type=float,
+        help="Duration in seconds to stream data (if not specified, streams until Ctrl+C)",
+    )
 
     read_parser.set_defaults(func=read)
 
@@ -459,6 +464,17 @@ def start_device(device, console):
         if start_status.code != StatusCode.kOk:
             console.print(
                 f"[bold red]Failed to start device: {start_status.message}[/bold red]"
+            )
+            return False
+    return True
+
+
+def stop_device(device, console):
+    with console.status("Stopping device...", spinner="bouncingBall"):
+        stop_status = device.stop_with_status()
+        if stop_status.code != StatusCode.kOk:
+            console.print(
+                f"[bold red]Failed to stop device: {stop_status.message}[/bold red]"
             )
             return False
     return True
@@ -584,6 +600,9 @@ def get_broadband_tap(args, device, console):
 
 def stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, args):
     """Simple streaming function using threaded writer"""
+    duration_exceeded = False
+    start_time = time.time()
+
     try:
         # Use batch streaming for better throughput
         with Live(monitor.get_current_stats(), refresh_per_second=4) as live:
@@ -597,6 +616,16 @@ def stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, a
 
             # Continue with batch streaming for remaining frames
             for message_batch in broadband_tap.stream_batch(batch_size=50):
+                # Check if duration limit has been reached
+                if hasattr(args, "duration") and args.duration is not None:
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time >= args.duration:
+                        duration_exceeded = True
+                        console.print(
+                            f"\n[yellow]Duration limit of {args.duration:.1f} seconds reached. Stopping data collection...[/yellow]"
+                        )
+                        break
+
                 frames = []
                 for message in message_batch:
                     frame = BroadbandFrame()
@@ -628,6 +657,17 @@ def stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, a
             console.print(f"[green]Data saved to {args.output}[/green]")
         if args.plot:
             console.print("[green]Plotter stopped[/green]")
+
+        # Show final duration info
+        final_elapsed = time.time() - start_time
+        if duration_exceeded:
+            console.print(
+                f"[blue]Streaming completed after {final_elapsed:.1f} seconds (duration limit reached)[/blue]"
+            )
+        else:
+            console.print(
+                f"[blue]Total streaming time: {final_elapsed:.1f} seconds[/blue]"
+            )
 
 
 def read(args):
@@ -715,3 +755,12 @@ def read(args):
 
     # Run the streaming function
     stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, args)
+
+    # Stop the device after streaming is complete
+    console.log("[cyan]Stopping device...[/cyan]")
+    if not stop_device(device, console):
+        console.print(
+            "[bold yellow]Warning: Failed to stop device cleanly[/bold yellow]"
+        )
+    else:
+        console.log("[green]Device stopped successfully[/green]")
