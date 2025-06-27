@@ -58,7 +58,7 @@ jobs:
     needs: publish-testpypi
     steps:
       - name: wait for package to be available
-        run: sleep 30
+        run: sleep 60
 
       - name: install test pypi release
         run: |
