@@ -49,9 +49,18 @@ class SynapsePlotter:
         self.zoom_y_max = 4096
 
         self.signal_separation = 1000
+        self.downsample_factor = 4  # Default downsample factor for performance
+        self.center_data = (
+            True  # Whether to center data around zero by removing DC offset
+        )
 
         # Dictionary to store line series for plotted channels
         self.active_lines = {}
+
+        # Running statistics for centering data
+        self.running_means = [0.0] * self.num_channels
+        self.sample_counts = [0] * self.num_channels
+        self.alpha = 0.001  # Low-pass filter coefficient for running mean
 
         # Queue and threading for BroadbandFrame processing
         self.data_queue = queue.Queue(maxsize=2000)
@@ -120,19 +129,32 @@ class SynapsePlotter:
                 callback=self.set_signal_separation,
             )
 
-            # Zoomed Channel Y-range
-            dpg.add_text("Zoomed Y-Axis Range (Manual):")
-            dpg.add_input_float(
-                label="Min",
-                default_value=self.zoom_y_min,
-                callback=self.set_zoom_y_min,
-                tag="zoom_y_min_input",
+            dpg.add_text("Downsample Factor:")
+            dpg.add_input_int(
+                label="",
+                default_value=self.downsample_factor,
+                min_value=1,
+                max_value=20,
+                tag="downsample_factor_input",
+                callback=self.set_downsample_factor,
             )
+
+            dpg.add_separator()
+            dpg.add_checkbox(
+                label="Center Data Around Zero",
+                default_value=self.center_data,
+                callback=self.set_center_data,
+                tag="center_data_checkbox",
+            )
+
+            # Zoomed Channel Y-range
+            dpg.add_text("Zoomed Y-Axis Range (±):")
             dpg.add_input_float(
-                label="Max",
-                default_value=self.zoom_y_max,
-                callback=self.set_zoom_y_max,
-                tag="zoom_y_max_input",
+                label="Range",
+                default_value=abs(self.zoom_y_max),
+                callback=self.set_zoom_y_range,
+                tag="zoom_y_range_input",
+                min_value=1.0,
             )
 
         # -----------------------------
@@ -234,14 +256,25 @@ class SynapsePlotter:
             dpg.delete_item(line_tag)
             del self.active_lines[ch_id]
 
-    def set_zoom_y_min(self, sender, app_data):
-        self.zoom_y_min = app_data
-
-    def set_zoom_y_max(self, sender, app_data):
-        self.zoom_y_max = app_data
+    def set_zoom_y_range(self, sender, app_data):
+        # Ensure the range is centered around zero
+        abs_range = abs(app_data)
+        self.zoom_y_min = -abs_range
+        self.zoom_y_max = abs_range
 
     def set_signal_separation(self, sender, app_data):
         self.signal_separation = app_data
+
+    def set_downsample_factor(self, sender, app_data):
+        # Ensure the downsample factor is at least 1
+        self.downsample_factor = max(1, app_data)
+
+    def set_center_data(self, sender, app_data):
+        self.center_data = app_data
+        if not app_data:
+            # Reset running means when centering is disabled
+            self.running_means = [0.0] * self.num_channels
+            self.sample_counts = [0] * self.num_channels
 
     def put(self, frame: BroadbandFrame):
         """Add a BroadbandFrame to the processing queue"""
@@ -334,9 +367,8 @@ class SynapsePlotter:
         Update both the 'all channels' plot and the 'single channel' zoom plot.
         We 'roll' each channel's data so that the newest sample is on the right.
         """
-        # Downsample factor for performance
-        # Note(gilbert): we should probably make this configurable, it is arbitrary
-        ds_factor = 4
+        # Use configurable downsample factor for performance
+        ds_factor = self.downsample_factor
 
         # Get the current time window for x-axis limits based on latest data
         # Use latest data timestamp instead of wall clock for better sync
@@ -432,7 +464,23 @@ class SynapsePlotter:
         # Distribute data to each channel buffer
         for ch_idx, ch_id in enumerate(self.channel_ids):
             if ch_idx < len(frame_data):
-                sample = frame_data[ch_idx]
+                raw_sample = frame_data[ch_idx]
+
+                # Center data around zero if enabled
+                if self.center_data:
+                    # Update running mean with exponential moving average
+                    self.sample_counts[ch_idx] += 1
+                    if self.sample_counts[ch_idx] == 1:
+                        self.running_means[ch_idx] = raw_sample
+                    else:
+                        self.running_means[ch_idx] = (
+                            1 - self.alpha
+                        ) * self.running_means[ch_idx] + self.alpha * raw_sample
+
+                    # Subtract the running mean to center around zero
+                    sample = raw_sample - self.running_means[ch_idx]
+                else:
+                    sample = raw_sample
 
                 # Add sample to this channel's ring buffer
                 pos = self.buffer_positions[ch_idx]

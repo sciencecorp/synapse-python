@@ -25,7 +25,7 @@ class StreamMonitor:
         self.last_count = 0
         self.last_sequence = 0
         self.total_dropped = 0
-        self.queue = queue.Queue(maxsize=100)
+        self.queue = queue.Queue(maxsize=1000)  # Increased for high data rate
         self.stop_event = threading.Event()
         self.monitor_thread = None
 
@@ -54,6 +54,16 @@ class StreamMonitor:
         except queue.Full:
             # Drop frame if queue is full to prevent blocking
             pass
+
+    def put_batch(self, frames: list):
+        """Add multiple frames to monitoring queue efficiently (non-blocking)"""
+        for frame in frames:
+            try:
+                self.queue.put(frame, block=False)
+            except queue.Full:
+                # Drop frame if queue is full to prevent blocking
+                # Only break if queue is full to avoid flooding
+                break
 
     def _monitor_loop(self):
         """Process frames for monitoring in separate thread"""
@@ -116,9 +126,20 @@ class StreamMonitor:
 
 
 class BroadbandFrameWriter:
+    """
+    Threaded HDF5 writer for broadband data streams
+
+    Features:
+    - Single writer thread with bounded queue (prevents blocking the reader)
+    - Non-blocking puts with frame dropping if queue is full
+    - Batch writes to HDF5 for better I/O performance
+    - Compressed datasets to reduce disk space and I/O
+    - Periodic flushes for optimal performance
+    """
+
     def __init__(self, output_dir: str):
         self.output_dir = output_dir
-        self.data_queue = queue.Queue(maxsize=2000)  # Increased queue size
+        self.data_queue = queue.Queue(maxsize=1000)  # Simple bounded queue
         self.stop_event = threading.Event()
         self.writer_thread = None
 
@@ -134,21 +155,34 @@ class BroadbandFrameWriter:
         self.filename = os.path.join(output_dir, f"broadband_data_{timestamp}.h5")
         self.file = h5py.File(self.filename, "w")
 
-        # Create datasets
+        # Create datasets with chunking and compression for better performance
         self.timestamp_dataset = self.file.create_dataset(
-            "/acquisition/timestamp", shape=(0,), maxshape=(None,), dtype="uint64"
+            "/acquisition/timestamp",
+            shape=(0,),
+            maxshape=(None,),
+            dtype="uint64",
+            chunks=True,
+            compression="gzip",
+            compression_opts=1,  # Fast compression
         )
         self.sequence_dataset = self.file.create_dataset(
-            "/acquisition/sequence_number", shape=(0,), maxshape=(None,), dtype="uint64"
+            "/acquisition/sequence_number",
+            shape=(0,),
+            maxshape=(None,),
+            dtype="uint64",
+            chunks=True,
+            compression="gzip",
+            compression_opts=1,
         )
-        # Create frame data dataset as a flat array of samples
         self.frame_data_dataset = self.file.create_dataset(
-            "/acquisition/ElectricalSeries", shape=(0,), maxshape=(None,), dtype="int32"
+            "/acquisition/ElectricalSeries",
+            shape=(0,),
+            maxshape=(None,),
+            dtype="int32",
+            chunks=True,
+            compression="gzip",
+            compression_opts=1,
         )
-
-        # Buffer for collecting frames before writing
-        self.frame_buffer = []
-        self.buffer_size = 500  # Reduced buffer size for more frequent writes
 
     def get_stats(self):
         """Get current statistics"""
@@ -161,8 +195,12 @@ class BroadbandFrameWriter:
                 "total_samples": 0,
                 "dropped_frames": 0,
                 "last_sequence": 0,
+                "queue_size": 0,
+                "queue_utilization": 0.0,
+                "memory_pressure": "Low",
             }
 
+        queue_size = self.data_queue.qsize()
         return {
             "frames_per_sec": self.frames_received / elapsed,
             "samples_per_sec": self.samples_received / elapsed,
@@ -170,34 +208,38 @@ class BroadbandFrameWriter:
             "total_samples": self.samples_received,
             "dropped_frames": self.dropped_frames,
             "last_sequence": self.last_sequence,
+            "queue_size": queue_size,
+            "queue_utilization": queue_size / self.data_queue.maxsize,
+            "memory_pressure": "High"
+            if queue_size > 800
+            else "Medium"
+            if queue_size > 500
+            else "Low",
         }
 
     def set_attributes(
         self, sample_rate_hz: float, channels: list, session_description: str = ""
     ):
-        """Set HDF5 attributes similar to C++ implementation"""
-        # Set basic attributes
+        """Set HDF5 attributes"""
         self.file.attrs["sample_rate_hz"] = sample_rate_hz
         if session_description:
             self.file.attrs["session_description"] = session_description
-
-        # Set session start time
         self.file.attrs["session_start_time"] = datetime.now().isoformat()
 
-        # Set device type
         device_group = self.file.create_group("general/device")
         device_group.attrs["device_type"] = "SciFi"
 
-        # Create electrodes group and write channel IDs
         electrodes_group = self.file.create_group(
             "general/extracellular_ephys/electrodes"
         )
-        channel_ids = channels
-        electrodes_group.create_dataset("id", data=channel_ids, dtype="uint32")
+        electrodes_group.create_dataset("id", data=channels, dtype="uint32")
 
     def start(self):
         """Start the writer thread"""
-        self.writer_thread = threading.Thread(target=self._write_loop)
+        self.stop_event.clear()
+        self.writer_thread = threading.Thread(
+            target=self._write_loop, name="HDF5Writer"
+        )
         self.writer_thread.start()
 
     def stop(self):
@@ -205,11 +247,10 @@ class BroadbandFrameWriter:
         self.stop_event.set()
         if self.writer_thread:
             self.writer_thread.join()
-        self.flush()
         self.file.close()
 
     def put(self, frame: BroadbandFrame):
-        """Add frame to the write queue (non-blocking)"""
+        """Add frame to write queue (non-blocking)"""
         # Update stats
         self.frames_received += 1
         self.samples_received += len(frame.frame_data)
@@ -221,106 +262,102 @@ class BroadbandFrameWriter:
                 self.dropped_frames += frame.sequence_number - expected_sequence
         self.last_sequence = frame.sequence_number
 
+        # Try to put in queue, drop if full (non-blocking)
         try:
             self.data_queue.put(frame, block=False)
         except queue.Full:
-            # If queue is full, we'll drop the oldest data
-            try:
-                self.data_queue.get_nowait()
-                self.data_queue.put(frame, block=False)
-            except queue.Empty:
-                pass
+            # Queue is full, drop this frame to prevent blocking the reader
+            pass
 
     def put_batch(self, frames: list):
-        """Add multiple frames to the write queue efficiently"""
+        """Add multiple frames efficiently"""
         for frame in frames:
-            self.frames_received += 1
-            self.samples_received += len(frame.frame_data)
-
-            # Check for dropped frames
-            if self.last_sequence != 0:
-                expected_sequence = self.last_sequence + 1
-                if frame.sequence_number != expected_sequence:
-                    self.dropped_frames += frame.sequence_number - expected_sequence
-            self.last_sequence = frame.sequence_number
-
-        # Try to add all frames to queue
-        for frame in frames:
-            try:
-                self.data_queue.put(frame, block=False)
-            except queue.Full:
-                # If queue is full, drop oldest and try again
-                try:
-                    self.data_queue.get_nowait()
-                    self.data_queue.put(frame, block=False)
-                except queue.Empty:
-                    pass
+            self.put(frame)
 
     def _write_loop(self):
-        """Main writing loop that consumes data from the queue"""
+        """Simple writer thread loop - based on proven pattern"""
+        frame_buffer = []
+        buffer_size = 100  # Smaller, more frequent writes
+        last_flush_time = time.time()
+
         while not self.stop_event.is_set() or not self.data_queue.empty():
             try:
-                frame = self.data_queue.get(timeout=0.1)
-                self.frame_buffer.append(frame)
+                # Get frame from queue with timeout
+                frame = self.data_queue.get(timeout=0.5)
+                frame_buffer.append(frame)
 
-                # Write when buffer is full
-                if len(self.frame_buffer) >= self.buffer_size:
-                    self._write_buffer()
+                current_time = time.time()
+                # Write buffer if it's full or if enough time has passed
+                if len(frame_buffer) >= buffer_size or (
+                    frame_buffer and current_time - last_flush_time > 1.0
+                ):
+                    self._write_buffer(frame_buffer)
+                    frame_buffer = []
+                    last_flush_time = current_time
 
             except queue.Empty:
+                current_time = time.time()
+                # Flush any remaining data if timeout occurred
+                if frame_buffer and current_time - last_flush_time > 1.0:
+                    self._write_buffer(frame_buffer)
+                    frame_buffer = []
+                    last_flush_time = current_time
                 continue
             except Exception as e:
-                print(f"Error writing data: {e}")
+                print(f"Error in writer thread: {e}")
                 continue
 
-    def _write_buffer(self):
-        """Write the buffered frames to disk"""
-        if not self.frame_buffer:
+        # Write any remaining frames when stopping
+        if frame_buffer:
+            self._write_buffer(frame_buffer)
+
+    def _write_buffer(self, frame_buffer: list):
+        """Write buffered frames to HDF5"""
+        if not frame_buffer:
             return
 
-        # Get current sizes
-        current_timestamp_size = self.timestamp_dataset.shape[0]
-        current_frame_size = self.frame_data_dataset.shape[0]
-        num_frames = len(self.frame_buffer)
+        try:
+            # Get current dataset sizes
+            current_timestamp_size = self.timestamp_dataset.shape[0]
+            current_frame_size = self.frame_data_dataset.shape[0]
 
-        # Resize datasets
-        new_timestamp_size = current_timestamp_size + num_frames
-        new_frame_size = current_frame_size + (
-            num_frames * len(self.frame_buffer[0].frame_data)
-        )
+            num_frames = len(frame_buffer)
+            samples_per_frame = len(frame_buffer[0].frame_data)
 
-        self.timestamp_dataset.resize(new_timestamp_size, axis=0)
-        self.sequence_dataset.resize(new_timestamp_size, axis=0)
-        self.frame_data_dataset.resize(new_frame_size, axis=0)
+            # Resize datasets
+            new_timestamp_size = current_timestamp_size + num_frames
+            new_frame_size = current_frame_size + (num_frames * samples_per_frame)
 
-        # Write data
-        for i, frame in enumerate(self.frame_buffer):
-            idx = current_timestamp_size + i
-            self.timestamp_dataset[idx] = frame.timestamp_ns
-            self.sequence_dataset[idx] = frame.sequence_number
+            self.timestamp_dataset.resize(new_timestamp_size, axis=0)
+            self.sequence_dataset.resize(new_timestamp_size, axis=0)
+            self.frame_data_dataset.resize(new_frame_size, axis=0)
 
-            # Write frame data
-            frame_start = current_frame_size + (i * len(frame.frame_data))
-            frame_end = frame_start + len(frame.frame_data)
-            self.frame_data_dataset[frame_start:frame_end] = frame.frame_data
+            # Write data in batch
+            timestamps = []
+            sequences = []
+            all_frame_data = []
 
-        # Clear buffer
-        self.frame_buffer = []
+            for frame in frame_buffer:
+                timestamps.append(frame.timestamp_ns)
+                sequences.append(frame.sequence_number)
+                all_frame_data.extend(frame.frame_data)
 
-        # Flush to disk
-        self.flush()
+            # Write all data at once (more efficient)
+            self.timestamp_dataset[current_timestamp_size:new_timestamp_size] = (
+                timestamps
+            )
+            self.sequence_dataset[current_timestamp_size:new_timestamp_size] = sequences
+            self.frame_data_dataset[current_frame_size:new_frame_size] = all_frame_data
 
-    def flush(self):
-        """Flush all datasets to disk"""
-        if self.frame_buffer:
-            self._write_buffer()
-        self.timestamp_dataset.flush()
-        self.sequence_dataset.flush()
-        self.frame_data_dataset.flush()
-        self.file.flush()
+            # Flush to disk periodically (not every write)
+            if current_timestamp_size % 1000 == 0:  # Flush every 1000 frames
+                self.file.flush()
+
+        except Exception as e:
+            print(f"Error writing buffer to HDF5: {e}")
 
 
-def create_status_table(writer: BroadbandFrameWriter) -> Table:
+def create_status_table(writer) -> Table:
     """Create a status table for display"""
     stats = writer.get_stats()
     table = Table(title="Streaming Status")
@@ -335,12 +372,35 @@ def create_status_table(writer: BroadbandFrameWriter) -> Table:
     table.add_row("Dropped Frames", str(stats["dropped_frames"]))
     table.add_row("Last Sequence", str(stats["last_sequence"]))
 
+    # Add queue health information
+    utilization = stats["queue_utilization"]
+    util_color = (
+        "green" if utilization < 0.5 else "yellow" if utilization < 0.8 else "red"
+    )
+
+    max_size = writer.data_queue.maxsize
+    table.add_row(
+        "Queue Usage",
+        f"{stats['queue_size']}/{max_size} ({utilization:.1%})",
+        style=util_color,
+    )
+
+    # Add memory pressure indicator
+    pressure_color = (
+        "green"
+        if stats["memory_pressure"] == "Low"
+        else "yellow"
+        if stats["memory_pressure"] == "Medium"
+        else "red"
+    )
+    table.add_row("Memory Pressure", stats["memory_pressure"], style=pressure_color)
+
     return table
 
 
 def add_commands(subparsers):
     read_parser = subparsers.add_parser(
-        "read", help="Read from a device's Broadband Tap"
+        "read", help="Read from a device's Broadband Tap and save to HDF5"
     )
 
     read_parser.add_argument(
@@ -522,6 +582,54 @@ def get_broadband_tap(args, device, console):
     return None
 
 
+def stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, args):
+    """Simple streaming function using threaded writer"""
+    try:
+        # Use batch streaming for better throughput
+        with Live(monitor.get_current_stats(), refresh_per_second=4) as live:
+            # Process the first frame that we already read for parameter detection
+            if first_frame:
+                if writer:
+                    writer.put(first_frame)
+                if plotter:
+                    plotter.put(first_frame)
+                monitor.put(first_frame)
+
+            # Continue with batch streaming for remaining frames
+            for message_batch in broadband_tap.stream_batch(batch_size=50):
+                frames = []
+                for message in message_batch:
+                    frame = BroadbandFrame()
+                    frame.ParseFromString(message)
+                    frames.append(frame)
+
+                # Send batch to monitor and writer for better performance
+                monitor.put_batch(frames)
+                if writer and frames:
+                    writer.put_batch(frames)
+
+                # Send to plotter individually (plotter might need individual frames)
+                if plotter:
+                    for frame in frames:
+                        plotter.put(frame)
+
+                live.update(monitor.get_current_stats())
+
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopping data collection...[/yellow]")
+    finally:
+        if writer:
+            writer.stop()
+        if plotter:
+            plotter.stop()
+        if monitor:
+            monitor.stop()
+        if args.output:
+            console.print(f"[green]Data saved to {args.output}[/green]")
+        if args.plot:
+            console.print("[green]Plotter stopped[/green]")
+
+
 def read(args):
     console = Console()
 
@@ -578,6 +686,7 @@ def read(args):
         writer = BroadbandFrameWriter(args.output)
         writer.set_attributes(sample_rate_hz=sample_rate, channels=available_channels)
         writer.start()
+        console.log("[cyan]Using threaded writer for serializing data[/cyan]")
 
     # Setup plotter if requested
     plotter = None
@@ -604,46 +713,5 @@ def read(args):
     monitor = StreamMonitor(console)
     monitor.start()
 
-    try:
-        # Use batch streaming for better throughput
-        with Live(monitor.get_current_stats(), refresh_per_second=4) as live:
-            # Process the first frame that we already read for parameter detection
-            if first_frame:
-                if writer:
-                    writer.put(first_frame)
-                if plotter:
-                    plotter.put(first_frame)
-                monitor.put(first_frame)
-
-            # Continue with batch streaming for remaining frames
-            for message_batch in broadband_tap.stream_batch(batch_size=10):
-                frames = []
-                for message in message_batch:
-                    frame = BroadbandFrame()
-                    frame.ParseFromString(message)
-                    frames.append(frame)
-
-                    # Send to monitor (non-blocking)
-                    monitor.put(frame)
-                    if plotter:
-                        plotter.put(frame)
-
-                # Batch write for better performance
-                if writer and frames:
-                    writer.put_batch(frames)
-
-                live.update(monitor.get_current_stats())
-
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Stopping data collection...[/yellow]")
-    finally:
-        if writer:
-            writer.stop()
-        if plotter:
-            plotter.stop()
-        if monitor:
-            monitor.stop()
-        if args.output:
-            console.print(f"[green]Data saved to {args.output}[/green]")
-        if args.plot:
-            console.print("[green]Plotter stopped[/green]")
+    # Run the streaming function
+    stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, args)
