@@ -9,7 +9,7 @@ from pyqtgraph.Qt import QtWidgets, QtCore
 import logging
 import signal
 
-from offline_hdf5_plotter import plot_h5
+from synapse.cli.offline_hdf5_plotter import plot_h5
 
 from rich.console import Console
 
