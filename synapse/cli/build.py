@@ -109,7 +109,9 @@ def build_docker_image(app_dir: str, app_name: str | None = None) -> str:
     return image_tag
 
 
-def build_app(app_dir: str, app_name: str, force_rebuild: bool = False) -> bool:
+def build_app(
+    app_dir: str, app_name: str, force_rebuild: bool = False, clean: bool = False
+) -> bool:
     """Cross-compile *app_name* inside its SDK container."""
 
     console.print(f"[yellow]Building application: {app_name}...[/yellow]")
@@ -117,7 +119,7 @@ def build_app(app_dir: str, app_name: str, force_rebuild: bool = False) -> bool:
     binary_path = os.path.join(app_dir, "build/aarch64", app_name)
 
     # Skip if binary already exists unless a rebuild was requested
-    if (not force_rebuild) and os.path.exists(binary_path):
+    if (not force_rebuild) and (not clean) and os.path.exists(binary_path):
         console.print(
             f"[green]Binary already exists at: {binary_path} (skipping rebuild) [/green]"
         )
@@ -136,6 +138,31 @@ def build_app(app_dir: str, app_name: str, force_rebuild: bool = False) -> bool:
             f"[bold red]Error:[/bold red] Failed to build Docker image: {exc}"
         )
         return False
+
+    # Perform clean if requested - do this inside Docker container to avoid permission issues
+    if clean:
+        console.print(
+            "[yellow]Cleaning build directories in Docker container...[/yellow]"
+        )
+        clean_cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{os.path.abspath(app_dir)}:/home/workspace",
+            image_tag,
+            "/bin/bash",
+            "-c",
+            "cd /home/workspace && rm -rf build/ || true",
+        ]
+
+        try:
+            subprocess.run(clean_cmd, check=True, cwd=app_dir)
+            console.print("[green]Successfully cleaned build directories[/green]")
+        except subprocess.CalledProcessError:
+            console.print(
+                "[yellow]Warning: Failed to clean build directories. Continuing with build...[/yellow]"
+            )
 
     console.print("[blue]Installing dependencies...[/blue]")
     vcpkg_cmd = [
@@ -488,7 +515,7 @@ def build_cmd(args) -> None:
 
     # 1. Build phase (unless explicitly skipped)
     if not args.skip_build:
-        if not build_app(app_dir, app_name, force_rebuild=True):
+        if not build_app(app_dir, app_name, force_rebuild=True, clean=args.clean):
             console.print(
                 "[bold red]Error:[/bold red] Failed to build the application."
             )
@@ -535,5 +562,11 @@ def add_commands(subparsers) -> None:
         action="store_true",
         default=False,
         help="Skip compilation phase; assume the binary already exists and only build the .deb package.",
+    )
+    build_parser.add_argument(
+        "--clean",
+        action="store_true",
+        default=False,
+        help="Clean build directories and force a complete rebuild from scratch.",
     )
     build_parser.set_defaults(func=build_cmd)
