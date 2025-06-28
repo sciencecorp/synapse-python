@@ -2,6 +2,7 @@ import logging
 import time
 import zmq
 from typing import Optional, Generator
+import sys
 
 from synapse.api.query_pb2 import QueryRequest
 from synapse.api.status_pb2 import StatusCode
@@ -88,10 +89,14 @@ class Tap(object):
 
         # Optimize ZMQ for high-throughput data
         # Increase receive buffer size significantly for high-speed data
-        self.zmq_socket.setsockopt(
-            zmq.RCVHWM, 10000
-        )  # High water mark - buffer up to 10K messages
-        self.zmq_socket.setsockopt(zmq.RCVBUF, 16 * 1024 * 1024)  # 16MB receive buffer
+        if sys.platform == "win32":
+            # Use smaller, more achievable buffer sizes for Windows
+            self.zmq_socket.setsockopt(zmq.RCVBUF, 2 * 1024 * 1024)  # 2MB
+            self.zmq_socket.setsockopt(zmq.RCVHWM, 5000)  # Lower HWM
+        else:
+            # Linux can handle larger buffers
+            self.zmq_socket.setsockopt(zmq.RCVBUF, 16 * 1024 * 1024)
+            self.zmq_socket.setsockopt(zmq.RCVHWM, 10000)
 
         # Set TCP keepalive for connection stability
         self.zmq_socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
@@ -112,7 +117,10 @@ class Tap(object):
 
             # Reduce connection wait time to minimize startup delay
             self.logger.info("Connecting to tap...")
-            time.sleep(0.1)  # Reduced from 1 second
+            if sys.platform == "win32":
+                time.sleep(0.001)  # 1ms for Windows
+            else:
+                time.sleep(0.0001)  # 0.1ms for Linux
 
             # Only set subscription options for subscriber sockets
             if selected_tap.tap_type != TapType.TAP_TYPE_CONSUMER:
@@ -201,7 +209,10 @@ class Tap(object):
                     yield data
                 except zmq.Again:
                     # No data available right now, yield control briefly
-                    time.sleep(0.0001)  # 0.1ms sleep to prevent busy waiting
+                    if sys.platform == "win32":
+                        time.sleep(0.001)  # 1ms for Windows
+                    else:
+                        time.sleep(0.0001)  # 0.1ms for Linux
                     continue
         except KeyboardInterrupt:
             self.logger.info("Stream interrupted")
@@ -244,7 +255,10 @@ class Tap(object):
                     if batch:
                         yield batch
                         batch = []
-                    time.sleep(0.0001)
+                    if sys.platform == "win32":
+                        time.sleep(0.001)  # 1ms for Windows
+                    else:
+                        time.sleep(0.0001)  # 0.1ms for Linux
                     continue
         except KeyboardInterrupt:
             self.logger.info("Stream interrupted")
