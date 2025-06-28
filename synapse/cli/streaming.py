@@ -25,6 +25,7 @@ class StreamMonitor:
         self.last_count = 0
         self.last_sequence = 0
         self.total_dropped = 0
+        self.queue_overflow_drops = 0  # Track frames dropped due to queue being full
         self.queue = queue.Queue(maxsize=1000)  # Increased for high data rate
         self.stop_event = threading.Event()
         self.monitor_thread = None
@@ -37,6 +38,7 @@ class StreamMonitor:
         self.last_count = 0
         self.last_sequence = 0
         self.total_dropped = 0
+        self.queue_overflow_drops = 0
         self.stop_event.clear()
         self.monitor_thread = threading.Thread(target=self._monitor_loop)
         self.monitor_thread.start()
@@ -53,7 +55,7 @@ class StreamMonitor:
             self.queue.put(frame, block=False)
         except queue.Full:
             # Drop frame if queue is full to prevent blocking
-            pass
+            self.queue_overflow_drops += 1
 
     def put_batch(self, frames: list):
         """Add multiple frames to monitoring queue efficiently (non-blocking)"""
@@ -63,6 +65,7 @@ class StreamMonitor:
             except queue.Full:
                 # Drop frame if queue is full to prevent blocking
                 # Only break if queue is full to avoid flooding
+                self.queue_overflow_drops += 1
                 break
 
     def _monitor_loop(self):
@@ -117,6 +120,8 @@ class StreamMonitor:
         stats_text.append(f"{rate:.1f}/s", style="green")
         stats_text.append(" | Dropped: ", style="bold")
         stats_text.append(f"{self.total_dropped:,}", style="red")
+        stats_text.append(" | Queue Drops: ", style="bold")
+        stats_text.append(f"{self.queue_overflow_drops:,}", style="magenta")
         stats_text.append(" | Loss: ", style="bold")
         stats_text.append(f"{loss_percent:.2f}%", style="yellow")
         stats_text.append(" | Runtime: ", style="bold")
@@ -149,6 +154,7 @@ class BroadbandFrameWriter:
         self.samples_received = 0
         self.last_sequence = 0
         self.dropped_frames = 0
+        self.queue_overflow_drops = 0  # Track frames dropped due to queue being full
 
         # Create HDF5 file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -194,6 +200,7 @@ class BroadbandFrameWriter:
                 "total_frames": 0,
                 "total_samples": 0,
                 "dropped_frames": 0,
+                "queue_overflow_drops": 0,
                 "last_sequence": 0,
                 "queue_size": 0,
                 "queue_utilization": 0.0,
@@ -207,6 +214,7 @@ class BroadbandFrameWriter:
             "total_frames": self.frames_received,
             "total_samples": self.samples_received,
             "dropped_frames": self.dropped_frames,
+            "queue_overflow_drops": self.queue_overflow_drops,
             "last_sequence": self.last_sequence,
             "queue_size": queue_size,
             "queue_utilization": queue_size / self.data_queue.maxsize,
@@ -251,23 +259,25 @@ class BroadbandFrameWriter:
 
     def put(self, frame: BroadbandFrame):
         """Add frame to write queue (non-blocking)"""
-        # Update stats
-        self.frames_received += 1
-        self.samples_received += len(frame.frame_data)
-
-        # Check for dropped frames
-        if self.last_sequence != 0:
-            expected_sequence = self.last_sequence + 1
-            if frame.sequence_number != expected_sequence:
-                self.dropped_frames += frame.sequence_number - expected_sequence
-        self.last_sequence = frame.sequence_number
-
-        # Try to put in queue, drop if full (non-blocking)
+        # Try to put in queue first, drop if full (non-blocking)
         try:
             self.data_queue.put(frame, block=False)
+
+            # Only update stats for frames that actually made it into the queue
+            self.frames_received += 1
+            self.samples_received += len(frame.frame_data)
+
+            # Check for dropped frames in the data stream (not queue drops)
+            if self.last_sequence != 0:
+                expected_sequence = self.last_sequence + 1
+                if frame.sequence_number != expected_sequence:
+                    self.dropped_frames += frame.sequence_number - expected_sequence
+            self.last_sequence = frame.sequence_number
+
         except queue.Full:
             # Queue is full, drop this frame to prevent blocking the reader
-            pass
+            # Note: This is a queue overflow drop, not a network/source drop
+            self.queue_overflow_drops += 1
 
     def put_batch(self, frames: list):
         """Add multiple frames efficiently"""
@@ -370,6 +380,7 @@ def create_status_table(writer) -> Table:
     table.add_row("Total Frames", str(stats["total_frames"]))
     table.add_row("Total Samples", str(stats["total_samples"]))
     table.add_row("Dropped Frames", str(stats["dropped_frames"]))
+    table.add_row("Queue Overflow Drops", str(stats["queue_overflow_drops"]))
     table.add_row("Last Sequence", str(stats["last_sequence"]))
 
     # Add queue health information
