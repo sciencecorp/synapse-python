@@ -28,7 +28,7 @@ class StreamMonitor:
         self.last_sequence = 0
         self.total_dropped = 0
         self.queue_overflow_drops = 0  # Track frames dropped due to queue being full
-        self.queue = queue.Queue(maxsize=1000)  # Increased for high data rate
+        self.queue = queue.Queue(maxsize=10000)  # Increased for high data rate
         self.stop_event = threading.Event()
         self.monitor_thread = None
 
@@ -138,7 +138,7 @@ class BroadbandFrameWriter:
 
     def __init__(self, output_dir: str):
         self.output_dir = output_dir
-        self.data_queue = queue.Queue(maxsize=1000)  # Simple bounded queue
+        self.data_queue = queue.Queue(maxsize=10000)  # Simple bounded queue
         self.stop_event = threading.Event()
         self.writer_thread = None
 
