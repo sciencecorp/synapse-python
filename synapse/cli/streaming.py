@@ -8,6 +8,8 @@ from rich.live import Live
 from rich.table import Table
 from rich.console import Console
 from rich.text import Text
+from rich.layout import Layout
+from rich.panel import Panel
 
 import synapse as syn
 from synapse.api.status_pb2 import DeviceState, StatusCode
@@ -88,8 +90,8 @@ class StreamMonitor:
                 self.total_dropped += frame.sequence_number - expected_sequence
         self.last_sequence = frame.sequence_number
 
-    def get_current_stats(self) -> Text:
-        """Get current statistics as formatted text"""
+    def get_current_stats(self) -> dict:
+        """Get current statistics as dictionary"""
         current_time = time.time()
 
         # Calculate message rate
@@ -112,22 +114,14 @@ class StreamMonitor:
             (self.total_dropped / total_expected * 100) if total_expected > 0 else 0
         )
 
-        # Create styled text
-        stats_text = Text()
-        stats_text.append("Messages: ", style="bold")
-        stats_text.append(f"{self.message_count:,}", style="cyan")
-        stats_text.append(" | msgs/sec: ", style="bold")
-        stats_text.append(f"{rate:.1f}/s", style="green")
-        stats_text.append(" | Dropped: ", style="bold")
-        stats_text.append(f"{self.total_dropped:,}", style="red")
-        stats_text.append(" | Queue Drops: ", style="bold")
-        stats_text.append(f"{self.queue_overflow_drops:,}", style="magenta")
-        stats_text.append(" | Loss: ", style="bold")
-        stats_text.append(f"{loss_percent:.2f}%", style="yellow")
-        stats_text.append(" | Runtime: ", style="bold")
-        stats_text.append(f"{current_time - self.start_time:.1f}s", style="blue")
-
-        return stats_text
+        return {
+            "messages": self.message_count,
+            "rate": rate,
+            "dropped": self.total_dropped,
+            "queue_drops": self.queue_overflow_drops,
+            "loss_percent": loss_percent,
+            "runtime": current_time - self.start_time,
+        }
 
 
 class BroadbandFrameWriter:
@@ -148,13 +142,17 @@ class BroadbandFrameWriter:
         self.stop_event = threading.Event()
         self.writer_thread = None
 
-        # Stats tracking
+        # Stats tracking - separate queued vs actually written
         self.start_time = time.time()
-        self.frames_received = 0
-        self.samples_received = 0
+        self.frames_queued = 0  # Frames successfully added to queue
+        self.samples_queued = 0  # Samples successfully added to queue
+        self.frames_written = 0  # Frames actually written to disk
+        self.samples_written = 0  # Samples actually written to disk
         self.last_sequence = 0
-        self.dropped_frames = 0
-        self.queue_overflow_drops = 0  # Track frames dropped due to queue being full
+        self.dropped_frames = 0  # Missing sequence numbers in stream
+        self.queue_overflow_drops = 0  # Frames dropped due to queue being full
+        self.write_errors = 0  # Count of write errors
+        self.last_write_error = None  # Last write error message
 
         # Create HDF5 file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -195,26 +193,40 @@ class BroadbandFrameWriter:
         elapsed = time.time() - self.start_time
         if elapsed == 0:
             return {
-                "frames_per_sec": 0,
-                "samples_per_sec": 0,
-                "total_frames": 0,
-                "total_samples": 0,
+                "frames_queued_per_sec": 0,
+                "samples_queued_per_sec": 0,
+                "frames_written_per_sec": 0,
+                "samples_written_per_sec": 0,
+                "total_frames_queued": 0,
+                "total_samples_queued": 0,
+                "total_frames_written": 0,
+                "total_samples_written": 0,
                 "dropped_frames": 0,
                 "queue_overflow_drops": 0,
+                "write_errors": 0,
                 "last_sequence": 0,
                 "queue_size": 0,
                 "queue_utilization": 0.0,
                 "memory_pressure": "Low",
+                "write_lag": 0,
+                "last_write_error": None,
             }
 
         queue_size = self.data_queue.qsize()
+        write_lag = self.frames_queued - self.frames_written
+
         return {
-            "frames_per_sec": self.frames_received / elapsed,
-            "samples_per_sec": self.samples_received / elapsed,
-            "total_frames": self.frames_received,
-            "total_samples": self.samples_received,
+            "frames_queued_per_sec": self.frames_queued / elapsed,
+            "samples_queued_per_sec": self.samples_queued / elapsed,
+            "frames_written_per_sec": self.frames_written / elapsed,
+            "samples_written_per_sec": self.samples_written / elapsed,
+            "total_frames_queued": self.frames_queued,
+            "total_samples_queued": self.samples_queued,
+            "total_frames_written": self.frames_written,
+            "total_samples_written": self.samples_written,
             "dropped_frames": self.dropped_frames,
             "queue_overflow_drops": self.queue_overflow_drops,
+            "write_errors": self.write_errors,
             "last_sequence": self.last_sequence,
             "queue_size": queue_size,
             "queue_utilization": queue_size / self.data_queue.maxsize,
@@ -223,6 +235,8 @@ class BroadbandFrameWriter:
             else "Medium"
             if queue_size > 500
             else "Low",
+            "write_lag": write_lag,
+            "last_write_error": self.last_write_error,
         }
 
     def set_attributes(
@@ -264,8 +278,8 @@ class BroadbandFrameWriter:
             self.data_queue.put(frame, block=False)
 
             # Only update stats for frames that actually made it into the queue
-            self.frames_received += 1
-            self.samples_received += len(frame.frame_data)
+            self.frames_queued += 1
+            self.samples_queued += len(frame.frame_data)
 
             # Check for dropped frames in the data stream (not queue drops)
             if self.last_sequence != 0:
@@ -314,6 +328,8 @@ class BroadbandFrameWriter:
                     last_flush_time = current_time
                 continue
             except Exception as e:
+                self.write_errors += 1
+                self.last_write_error = str(e)
                 print(f"Error in writer thread: {e}")
                 continue
 
@@ -359,12 +375,114 @@ class BroadbandFrameWriter:
             self.sequence_dataset[current_timestamp_size:new_timestamp_size] = sequences
             self.frame_data_dataset[current_frame_size:new_frame_size] = all_frame_data
 
+            # Update written stats AFTER successful write
+            self.frames_written += num_frames
+            self.samples_written += len(all_frame_data)
+
             # Flush to disk periodically (not every write)
             if current_timestamp_size % 1000 == 0:  # Flush every 1000 frames
                 self.file.flush()
 
         except Exception as e:
+            self.write_errors += 1
+            self.last_write_error = str(e)
             print(f"Error writing buffer to HDF5: {e}")
+
+
+def create_combined_display(monitor, writer=None) -> Layout:
+    """Create a combined display showing both monitor and writer statistics"""
+    layout = Layout()
+
+    # Create monitor stats
+    monitor_stats = monitor.get_current_stats()
+    monitor_text = Text()
+    monitor_text.append("Stream Monitor\n", style="bold cyan")
+    monitor_text.append(f"Messages: {monitor_stats['messages']:,} ", style="cyan")
+    monitor_text.append(f"({monitor_stats['rate']:.1f}/s)\n", style="green")
+    monitor_text.append(f"Dropped: {monitor_stats['dropped']:,} ", style="red")
+    monitor_text.append(
+        f"Queue Drops: {monitor_stats['queue_drops']:,}\n", style="magenta"
+    )
+    monitor_text.append(f"Loss: {monitor_stats['loss_percent']:.2f}% ", style="yellow")
+    monitor_text.append(f"Runtime: {monitor_stats['runtime']:.1f}s", style="blue")
+
+    if writer:
+        writer_stats = writer.get_stats()
+        writer_text = Text()
+        writer_text.append("HDF5 Writer\n", style="bold yellow")
+
+        # Queue status
+        util_color = (
+            "green"
+            if writer_stats["queue_utilization"] < 0.5
+            else "yellow"
+            if writer_stats["queue_utilization"] < 0.8
+            else "red"
+        )
+        writer_text.append(
+            f"Queue: {writer_stats['queue_size']}/{writer.data_queue.maxsize} ",
+            style=util_color,
+        )
+        writer_text.append(
+            f"({writer_stats['queue_utilization']:.1%})\n", style=util_color
+        )
+
+        # Write performance
+        write_lag = writer_stats["write_lag"]
+        lag_color = (
+            "green" if write_lag < 50 else "yellow" if write_lag < 200 else "red"
+        )
+        writer_text.append(
+            f"Queued: {writer_stats['total_frames_queued']:,} frames\n", style="cyan"
+        )
+        writer_text.append(
+            f"Written: {writer_stats['total_frames_written']:,} frames\n", style="green"
+        )
+        writer_text.append(f"Write Lag: {write_lag:,} frames\n", style=lag_color)
+        writer_text.append(
+            f"Write Rate: {writer_stats['frames_written_per_sec']:.1f}/s\n",
+            style="green",
+        )
+
+        # Error tracking
+        if writer_stats["write_errors"] > 0:
+            writer_text.append(
+                f"Write Errors: {writer_stats['write_errors']}\n", style="bold red"
+            )
+            if writer_stats["last_write_error"]:
+                error_msg = (
+                    writer_stats["last_write_error"][:50] + "..."
+                    if len(writer_stats["last_write_error"]) > 50
+                    else writer_stats["last_write_error"]
+                )
+                writer_text.append(f"Last Error: {error_msg}\n", style="red")
+        else:
+            writer_text.append("Write Errors: 0\n", style="green")
+
+        # Memory pressure
+        pressure_color = (
+            "green"
+            if writer_stats["memory_pressure"] == "Low"
+            else "yellow"
+            if writer_stats["memory_pressure"] == "Medium"
+            else "red"
+        )
+        writer_text.append(
+            f"Memory: {writer_stats['memory_pressure']}", style=pressure_color
+        )
+
+        # Split layout to show both
+        layout.split_row(
+            Layout(Panel(monitor_text, title="Stream Monitor", border_style="cyan")),
+            Layout(Panel(writer_text, title="HDF5 Writer", border_style="yellow")),
+        )
+    else:
+        # Only monitor stats
+        layout.add_split(
+            Layout(Panel(monitor_text, title="Stream Monitor", border_style="cyan"))
+        )
+
+    return layout
 
 
 def create_status_table(writer) -> Table:
@@ -375,10 +493,10 @@ def create_status_table(writer) -> Table:
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green")
 
-    table.add_row("Frames/sec", f"{stats['frames_per_sec']:.1f}")
-    table.add_row("Samples/sec", f"{stats['samples_per_sec']:.1f}")
-    table.add_row("Total Frames", str(stats["total_frames"]))
-    table.add_row("Total Samples", str(stats["total_samples"]))
+    table.add_row("Frames/sec", f"{stats['frames_written_per_sec']:.1f}")
+    table.add_row("Samples/sec", f"{stats['samples_written_per_sec']:.1f}")
+    table.add_row("Total Frames", str(stats["total_frames_written"]))
+    table.add_row("Total Samples", str(stats["total_samples_written"]))
     table.add_row("Dropped Frames", str(stats["dropped_frames"]))
     table.add_row("Queue Overflow Drops", str(stats["queue_overflow_drops"]))
     table.add_row("Last Sequence", str(stats["last_sequence"]))
@@ -616,7 +734,9 @@ def stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, a
 
     try:
         # Use batch streaming for better throughput
-        with Live(monitor.get_current_stats(), refresh_per_second=4) as live:
+        # Create combined display showing both monitor and writer stats
+        initial_display = create_combined_display(monitor, writer)
+        with Live(initial_display, refresh_per_second=4) as live:
             # Process the first frame that we already read for parameter detection
             if first_frame:
                 if writer:
@@ -653,7 +773,8 @@ def stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, a
                     for frame in frames:
                         plotter.put(frame)
 
-                live.update(monitor.get_current_stats())
+                # Update the combined display
+                live.update(create_combined_display(monitor, writer))
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopping data collection...[/yellow]")
@@ -679,6 +800,33 @@ def stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, a
             console.print(
                 f"[blue]Total streaming time: {final_elapsed:.1f} seconds[/blue]"
             )
+
+        # Show final statistics summary
+        if writer:
+            final_stats = writer.get_stats()
+            console.print("\n[bold cyan]Final Statistics:[/bold cyan]")
+            console.print(
+                f"[green]Frames Written to Disk: {final_stats['total_frames_written']:,}[/green]"
+            )
+            console.print(
+                f"[green]Samples Written to Disk: {final_stats['total_samples_written']:,}[/green]"
+            )
+            console.print(
+                f"[cyan]Frames Queued: {final_stats['total_frames_queued']:,}[/cyan]"
+            )
+            if final_stats["write_errors"] > 0:
+                console.print(f"[red]Write Errors: {final_stats['write_errors']}[/red]")
+                if final_stats["last_write_error"]:
+                    console.print(
+                        f"[red]Last Error: {final_stats['last_write_error']}[/red]"
+                    )
+            final_lag = final_stats["write_lag"]
+            if final_lag > 0:
+                console.print(
+                    f"[yellow]Unwritten Frames in Queue: {final_lag:,}[/yellow]"
+                )
+            else:
+                console.print("[green]All queued frames written to disk[/green]")
 
 
 def read(args):
