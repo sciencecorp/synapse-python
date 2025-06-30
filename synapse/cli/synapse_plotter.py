@@ -22,17 +22,18 @@ class SynapsePlotter:
         # Track which channels are selected for plotting (start with first 5)
         self.selected_channels = set(self.channel_ids[:5])
 
-        # Optimized ring buffers - use circular indexing instead of rolling
-        self.data_buffers = np.zeros(
-            (self.num_channels, self.buffer_size), dtype=np.float32
-        )
-        self.timestamp_buffers = np.zeros(
-            (self.num_channels, self.buffer_size), dtype=np.float64
-        )
+        # One ring buffer (of length BUFFER_SIZE) per channel
+        self.data_buffers = [
+            np.zeros(self.buffer_size) for _ in range(self.num_channels)
+        ]
 
-        # Single shared write position for all channels (assuming synchronized data)
-        self.write_position = 0
-        self.buffer_filled = False  # Track if we've wrapped around once
+        # Timestamp buffer for each channel (in seconds, relative to start)
+        self.timestamp_buffers = [
+            np.zeros(self.buffer_size) for _ in range(self.num_channels)
+        ]
+
+        # A separate ring-buffer pointer for each channel
+        self.buffer_positions = [0] * self.num_channels
 
         # Track which channel to display in the "zoom" (single channel) plot
         self.selected_channel_idx = 0
@@ -44,39 +45,16 @@ class SynapsePlotter:
         self.latest_data_time = 0  # Track the most recent data timestamp in seconds
 
         # Defaults for the zoomed channel plot
-        self.zoom_y_min = -4096
-        self.zoom_y_max = 4096
+        self.zoom_y_min = -1000
+        self.zoom_y_max = 1000
 
         self.signal_separation = 1000
-        self.downsample_factor = 4  # Default downsample factor for performance
-        self.center_data = (
-            True  # Whether to center data around zero by removing DC offset
-        )
 
         # Dictionary to store line series for plotted channels
         self.active_lines = {}
 
-        # Optimized running statistics for centering data
-        self.running_means = np.zeros(self.num_channels, dtype=np.float32)
-        self.sample_counts = np.zeros(self.num_channels, dtype=np.int64)
-        self.alpha = 0.001  # Low-pass filter coefficient for running mean
-
-        # Pre-allocated arrays for plotting to avoid memory allocations
-        self.plot_x_buffer = np.zeros(
-            self.buffer_size // self.downsample_factor, dtype=np.float64
-        )
-        self.plot_y_buffer = np.zeros(
-            self.buffer_size // self.downsample_factor, dtype=np.float32
-        )
-
-        # Adaptive update frequency
-        self.last_update_time = 0
-        self.min_update_interval = 1.0 / 60.0  # Max 60 FPS
-        self.frames_since_update = 0
-        self.update_every_n_frames = 5  # Update every N frames by default
-
         # Queue and threading for BroadbandFrame processing
-        self.data_queue = queue.Queue(maxsize=5000)  # Larger queue
+        self.data_queue = queue.Queue(maxsize=32000)
         self.stop_event = Event()
         self.plot_thread = None
         self.running = False
@@ -142,32 +120,19 @@ class SynapsePlotter:
                 callback=self.set_signal_separation,
             )
 
-            dpg.add_text("Downsample Factor:")
-            dpg.add_input_int(
-                label="",
-                default_value=self.downsample_factor,
-                min_value=1,
-                max_value=20,
-                tag="downsample_factor_input",
-                callback=self.set_downsample_factor,
-            )
-
-            dpg.add_separator()
-            dpg.add_checkbox(
-                label="Center Data Around Zero",
-                default_value=self.center_data,
-                callback=self.set_center_data,
-                tag="center_data_checkbox",
-            )
-
             # Zoomed Channel Y-range
-            dpg.add_text("Zoomed Y-Axis Range (±):")
+            dpg.add_text("Zoomed Y-Axis Range (Manual):")
             dpg.add_input_float(
-                label="Range",
-                default_value=abs(self.zoom_y_max),
-                callback=self.set_zoom_y_range,
-                tag="zoom_y_range_input",
-                min_value=1.0,
+                label="Min",
+                default_value=self.zoom_y_min,
+                callback=self.set_zoom_y_min,
+                tag="zoom_y_min_input",
+            )
+            dpg.add_input_float(
+                label="Max",
+                default_value=self.zoom_y_max,
+                callback=self.set_zoom_y_max,
+                tag="zoom_y_max_input",
             )
 
         # -----------------------------
@@ -199,7 +164,7 @@ class SynapsePlotter:
                         self.y_axis_all = dpg.add_plot_axis(
                             dpg.mvYAxis, label="Amplitude", tag="y_axis_all"
                         )
-                        dpg.set_axis_limits("y_axis_all", -4096, 4096 * 10)
+                        dpg.set_axis_limits("y_axis_all", -1096, 4096 * 10)
 
                         # Create line series for initially selected channels
                         for ch_id in self.selected_channels:
@@ -269,30 +234,14 @@ class SynapsePlotter:
             dpg.delete_item(line_tag)
             del self.active_lines[ch_id]
 
-    def set_zoom_y_range(self, sender, app_data):
-        # Ensure the range is centered around zero
-        abs_range = abs(app_data)
-        self.zoom_y_min = -abs_range
-        self.zoom_y_max = abs_range
+    def set_zoom_y_min(self, sender, app_data):
+        self.zoom_y_min = app_data
+
+    def set_zoom_y_max(self, sender, app_data):
+        self.zoom_y_max = app_data
 
     def set_signal_separation(self, sender, app_data):
         self.signal_separation = app_data
-
-    def set_downsample_factor(self, sender, app_data):
-        # Ensure the downsample factor is at least 1
-        self.downsample_factor = max(1, app_data)
-        # Reallocate plot buffers if needed
-        new_size = self.buffer_size // self.downsample_factor
-        if len(self.plot_x_buffer) != new_size:
-            self.plot_x_buffer = np.zeros(new_size, dtype=np.float64)
-            self.plot_y_buffer = np.zeros(new_size, dtype=np.float32)
-
-    def set_center_data(self, sender, app_data):
-        self.center_data = app_data
-        if not app_data:
-            # Reset running means when centering is disabled
-            self.running_means.fill(0.0)
-            self.sample_counts.fill(0)
 
     def put(self, frame: BroadbandFrame):
         """Add a BroadbandFrame to the processing queue"""
@@ -301,7 +250,8 @@ class SynapsePlotter:
         except queue.Full:
             # If queue is full, drop multiple old frames and add the new one
             dropped = 0
-            while dropped < 10:  # Drop up to 10 old frames
+            while dropped < 5:  # Drop up to 5 old frames
+                print(f"Dropping frame {dropped}")
                 try:
                     self.data_queue.get_nowait()
                     dropped += 1
@@ -353,11 +303,15 @@ class SynapsePlotter:
         # Record start time
         self.start_time = time.time()
 
-        while dpg.is_dearpygui_running() and not self.stop_event.is_set():
-            # Process ALL available frames per iteration for maximum throughput
-            frames_processed = 0
-            max_frames_per_iter = 50  # Increased batch size
+        # Main loop
+        fps_limit = 10
+        frame_duration = 1.0 / fps_limit
+        last_time = time.time()
 
+        while dpg.is_dearpygui_running() and not self.stop_event.is_set():
+            # Process multiple frames per iteration for better throughput
+            frames_processed = 0
+            max_frames_per_iter = 10
             while frames_processed < max_frames_per_iter:
                 try:
                     frame = self.data_queue.get_nowait()
@@ -366,77 +320,26 @@ class SynapsePlotter:
                 except queue.Empty:
                     break
 
-            self.frames_since_update += frames_processed
-
-            # Adaptive update frequency - only update when necessary
+            # Throttle rendering to the fps limit
             now = time.time()
-            should_update = (
-                (now - self.last_update_time) >= self.min_update_interval
-                and self.frames_since_update >= self.update_every_n_frames
-            )
-
-            if should_update or frames_processed == 0:
+            if (now - last_time) >= frame_duration:
                 self.update_plot()
                 dpg.render_dearpygui_frame()
-                self.last_update_time = now
-                self.frames_since_update = 0
-
-                # Adaptive update frequency based on processing load
-                if frames_processed > 30:
-                    self.update_every_n_frames = min(20, self.update_every_n_frames + 1)
-                elif frames_processed < 5:
-                    self.update_every_n_frames = max(1, self.update_every_n_frames - 1)
-            else:
-                # Still need to render DearPyGui even if not updating plots
-                dpg.render_dearpygui_frame()
+                last_time = now
 
         dpg.destroy_context()
-
-    def _get_circular_data(self, channel_idx, downsample=True):
-        """Efficiently get data from circular buffer without copying the entire array"""
-        # Get the data and timestamp buffers for this channel
-        data_buf = self.data_buffers[channel_idx]
-        time_buf = self.timestamp_buffers[channel_idx]
-
-        if not self.buffer_filled:
-            # Buffer hasn't wrapped yet, just use data from 0 to write_position
-            end_idx = self.write_position
-            if downsample:
-                step = self.downsample_factor
-                data_slice = data_buf[:end_idx:step]
-                time_slice = time_buf[:end_idx:step]
-            else:
-                data_slice = data_buf[:end_idx]
-                time_slice = time_buf[:end_idx]
-        else:
-            # Buffer has wrapped, need to get data in correct time order
-            if downsample:
-                step = self.downsample_factor
-                # Get newer data (from write_position to end)
-                newer_data = data_buf[self.write_position :: step]
-                newer_time = time_buf[self.write_position :: step]
-                # Get older data (from start to write_position)
-                older_data = data_buf[: self.write_position : step]
-                older_time = time_buf[: self.write_position : step]
-                # Concatenate in chronological order
-                data_slice = np.concatenate([newer_data, older_data])
-                time_slice = np.concatenate([newer_time, older_time])
-            else:
-                newer_data = data_buf[self.write_position :]
-                newer_time = time_buf[self.write_position :]
-                older_data = data_buf[: self.write_position]
-                older_time = time_buf[: self.write_position]
-                data_slice = np.concatenate([newer_data, older_data])
-                time_slice = np.concatenate([newer_time, older_time])
-
-        return time_slice, data_slice
 
     def update_plot(self):
         """
         Update both the 'all channels' plot and the 'single channel' zoom plot.
-        Optimized to avoid expensive operations.
+        We 'roll' each channel's data so that the newest sample is on the right.
         """
+        # Downsample factor for performance
+        # Note(gilbert): we should probably make this configurable, it is arbitrary
+        ds_factor = 4
+
         # Get the current time window for x-axis limits based on latest data
+        # Use latest data timestamp instead of wall clock for better sync
         current_data_time = self.latest_data_time
         x_min = max(0, current_data_time - self.window_size_seconds)
         x_max = current_data_time
@@ -450,20 +353,23 @@ class SynapsePlotter:
                 continue
 
             idx = self.channel_to_index[ch_id]
+            pos = self.buffer_positions[idx]
 
-            # Get data efficiently using circular buffer indexing
-            time_data, signal_data = self._get_circular_data(idx, downsample=True)
+            # Roll data so that index -1 corresponds to the newest sample
+            rolled_y = np.roll(self.data_buffers[idx], -pos)
+            rolled_x = np.roll(self.timestamp_buffers[idx], -pos)
 
-            if len(signal_data) == 0:
-                continue
+            # Downsample
+            ds_x = rolled_x[::ds_factor]
+            ds_y = rolled_y[::ds_factor]
 
             # Apply vertical offset for each active channel to avoid overlap
             offset = active_channel_idx * self.signal_separation
-            signal_data_offset = signal_data + offset
+            ds_y_offset = ds_y + offset
 
             # Update the line series for this channel
             line_tag = self.active_lines[ch_id]
-            dpg.set_value(line_tag, [time_data.tolist(), signal_data_offset.tolist()])
+            dpg.set_value(line_tag, [ds_x.tolist(), ds_y_offset.tolist()])
 
             active_channel_idx += 1
 
@@ -481,13 +387,20 @@ class SynapsePlotter:
         # Update Zoomed Channel Plot
         # -----------------------------
         idx = self.selected_channel_idx
-        time_data_zoom, signal_data_zoom = self._get_circular_data(idx, downsample=True)
+        pos = self.buffer_positions[idx]
 
-        if len(signal_data_zoom) > 0:
-            # Update the single "zoomed_line" series
-            dpg.set_value(
-                "zoomed_line", [time_data_zoom.tolist(), signal_data_zoom.tolist()]
-            )
+        rolled_y_ch = np.roll(self.data_buffers[idx], -pos)
+        rolled_x_ch = np.roll(self.timestamp_buffers[idx], -pos)
+
+        ds_x_ch = rolled_x_ch[::ds_factor]
+        ds_y_ch = rolled_y_ch[::ds_factor]
+
+        # Remove DC offset by subtracting the mean
+        if len(ds_y_ch) > 0:
+            ds_y_ch = ds_y_ch - np.mean(ds_y_ch)
+
+        # Update the single "zoomed_line" series
+        dpg.set_value("zoomed_line", [ds_x_ch.tolist(), ds_y_ch.tolist()])
 
         # Set axis limits for both plots
         dpg.set_axis_limits("x_axis_zoom", x_min, x_max)
@@ -503,7 +416,7 @@ class SynapsePlotter:
     def process_broadband_frame(self, frame: BroadbandFrame):
         """
         Process a BroadbandFrame and distribute the data to channel buffers.
-        Optimized for high throughput.
+        Uses actual timestamps from the frame for proper time synchronization.
         """
         # Set start timestamp on first frame
         if self.start_timestamp_ns is None:
@@ -517,41 +430,22 @@ class SynapsePlotter:
         self.latest_data_time = relative_time_s
 
         # frame_data is a flat array with one sample per channel
+        # We assume the data is organized as: [ch0_sample, ch1_sample, ch2_sample, ...]
         frame_data = frame.frame_data
-        num_samples = min(len(frame_data), self.num_channels)
 
-        if num_samples == 0:
-            return
+        # Distribute data to each channel buffer
+        for ch_idx, ch_id in enumerate(self.channel_ids):
+            if ch_idx < len(frame_data):
+                sample = frame_data[ch_idx]
 
-        # Vectorized processing for all channels at once
-        raw_samples = np.array(frame_data[:num_samples], dtype=np.float32)
+                # Add sample to this channel's ring buffer
+                pos = self.buffer_positions[ch_idx]
+                self.data_buffers[ch_idx][pos] = sample
 
-        # Center data around zero if enabled - vectorized operation
-        if self.center_data:
-            # Update running means with exponential moving average - vectorized
-            mask = self.sample_counts[:num_samples] == 0
-            self.running_means[:num_samples][mask] = raw_samples[mask]
-            self.running_means[:num_samples][~mask] = (
-                1 - self.alpha
-            ) * self.running_means[:num_samples][~mask] + self.alpha * raw_samples[
-                ~mask
-            ]
-            self.sample_counts[:num_samples] += 1
+                # Add actual timestamp to this channel's timestamp buffer
+                self.timestamp_buffers[ch_idx][pos] = relative_time_s
 
-            # Subtract the running mean to center around zero - vectorized
-            processed_samples = raw_samples - self.running_means[:num_samples]
-        else:
-            processed_samples = raw_samples
-
-        # Add samples to ring buffers - vectorized write
-        pos = self.write_position
-        self.data_buffers[:num_samples, pos] = processed_samples
-        self.timestamp_buffers[:num_samples, pos] = relative_time_s
-
-        # Update write position
-        self.write_position = (pos + 1) % self.buffer_size
-        if pos + 1 >= self.buffer_size:
-            self.buffer_filled = True
+                self.buffer_positions[ch_idx] = (pos + 1) % self.buffer_size
 
     def select_all_channels(self):
         """Select all channels for plotting."""
