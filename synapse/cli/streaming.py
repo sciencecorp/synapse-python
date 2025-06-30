@@ -28,7 +28,7 @@ class StreamMonitor:
         self.last_sequence = 0
         self.total_dropped = 0
         self.queue_overflow_drops = 0  # Track frames dropped due to queue being full
-        self.queue = queue.Queue(maxsize=10000)  # Increased for high data rate
+        self.queue = queue.Queue(maxsize=10000)
         self.stop_event = threading.Event()
         self.monitor_thread = None
 
@@ -138,7 +138,7 @@ class BroadbandFrameWriter:
 
     def __init__(self, output_dir: str):
         self.output_dir = output_dir
-        self.data_queue = queue.Queue(maxsize=10000)  # Simple bounded queue
+        self.data_queue = queue.Queue(maxsize=32000)
         self.stop_event = threading.Event()
         self.writer_thread = None
 
@@ -299,9 +299,8 @@ class BroadbandFrameWriter:
             self.put(frame)
 
     def _write_loop(self):
-        """Simple writer thread loop - based on proven pattern"""
         frame_buffer = []
-        buffer_size = 100  # Smaller, more frequent writes
+        buffer_size = 1000
         last_flush_time = time.time()
 
         while not self.stop_event.is_set() or not self.data_queue.empty():
@@ -379,8 +378,8 @@ class BroadbandFrameWriter:
             self.frames_written += num_frames
             self.samples_written += len(all_frame_data)
 
-            # Flush to disk periodically (not every write)
-            if current_timestamp_size % 1000 == 0:  # Flush every 1000 frames
+            # Flush to disk periodically
+            if current_timestamp_size % 10000 == 0:
                 self.file.flush()
 
         except Exception as e:
@@ -662,7 +661,7 @@ def detect_stream_parameters(broadband_tap, console):
 
     try:
         # Get the first message to detect parameters
-        first_message = broadband_tap.read(timeout_ms=5000)  # 5 second timeout
+        first_message = broadband_tap.read(timeout_ms=5000)
         if not first_message:
             console.print(
                 "[bold red]Failed to receive first message for parameter detection[/bold red]"
@@ -727,26 +726,54 @@ def get_broadband_tap(args, device, console):
     return None
 
 
+def create_status_line(monitor, writer=None) -> Text:
+    """Create a single status line with all the important metrics"""
+    monitor_stats = monitor.get_current_stats()
+
+    # Stream monitor stats
+    text = Text()
+    text.append(f"Messages: {monitor_stats['messages']:,} ", style="cyan")
+    text.append(f"({monitor_stats['rate']:.1f}/s) ", style="green")
+    text.append(f"Dropped: {monitor_stats['dropped']:,} ", style="red")
+    text.append(f"Queue Drops: {monitor_stats['queue_drops']:,} ", style="magenta")
+    text.append(f"Loss: {monitor_stats['loss_percent']:.2f}% ", style="yellow")
+    text.append(f"Runtime: {monitor_stats['runtime']:.1f}s", style="blue")
+
+    if writer:
+        writer_stats = writer.get_stats()
+        text.append(" | ", style="dim")
+        text.append(
+            f"Written: {writer_stats['total_frames_written']:,} ", style="yellow"
+        )
+        text.append(f"({writer_stats['frames_written_per_sec']:.1f}/s) ", style="green")
+        text.append(
+            f"Queue: {writer_stats['queue_size']}/{writer.data_queue.maxsize}",
+            style="cyan",
+        )
+
+    return text
+
+
 def stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, args):
     """Simple streaming function using threaded writer"""
     duration_exceeded = False
     start_time = time.time()
 
     try:
-        # Use batch streaming for better throughput
-        # Create combined display showing both monitor and writer stats
-        initial_display = create_combined_display(monitor, writer)
-        with Live(initial_display, refresh_per_second=4) as live:
-            # Process the first frame that we already read for parameter detection
-            if first_frame:
-                if writer:
-                    writer.put(first_frame)
-                if plotter:
-                    plotter.put(first_frame)
-                monitor.put(first_frame)
+        console.print("[cyan]Starting data streaming... (Ctrl+C to stop)[/cyan]")
 
+        # Process the first frame that we already read for parameter detection
+        if first_frame:
+            if writer:
+                writer.put(first_frame)
+            if plotter:
+                plotter.put(first_frame)
+            monitor.put(first_frame)
+
+        # Use live display for updating status line
+        with Live(create_status_line(monitor, writer), refresh_per_second=4) as live:
             # Continue with batch streaming for remaining frames
-            for message_batch in broadband_tap.stream_batch(batch_size=50):
+            for message_batch in broadband_tap.stream_batch(batch_size=500):
                 # Check if duration limit has been reached
                 if hasattr(args, "duration") and args.duration is not None:
                     elapsed_time = time.time() - start_time
@@ -773,8 +800,8 @@ def stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, a
                     for frame in frames:
                         plotter.put(frame)
 
-                # Update the combined display
-                live.update(create_combined_display(monitor, writer))
+                # Update the live status line
+                live.update(create_status_line(monitor, writer))
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopping data collection...[/yellow]")
