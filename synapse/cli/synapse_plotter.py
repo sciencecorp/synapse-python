@@ -250,8 +250,7 @@ class SynapsePlotter:
         except queue.Full:
             # If queue is full, drop multiple old frames and add the new one
             dropped = 0
-            while dropped < 5:  # Drop up to 5 old frames
-                print(f"Dropping frame {dropped}")
+            while dropped < 100:
                 try:
                     self.data_queue.get_nowait()
                     dropped += 1
