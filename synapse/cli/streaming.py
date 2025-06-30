@@ -855,6 +855,14 @@ def stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, a
             else:
                 console.print("[green]All queued frames written to disk[/green]")
 
+            # Make the plot command more prominent
+            console.print("\n" + "=" * 60)
+            console.print("[bold green]Plot the data with:[/bold green]")
+            console.print(
+                f"[bold yellow]synapsectl plot --data {writer.filename}[/bold yellow]"
+            )
+            console.print("=" * 60)
+
 
 def read(args):
     console = Console()
