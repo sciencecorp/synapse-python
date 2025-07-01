@@ -172,6 +172,9 @@ def plot(args):
     console.print(
         "[yellow bold]Legacy plotting is deprecated, please use the hdf5 files going forward[/yellow bold]"
     )
+    console.print(
+        "[yellow bold]Use --data <path_to_hdf5_file> to plot hdf5 files[/yellow bold]"
+    )
 
     app = QtWidgets.QApplication.instance()
     if not app:

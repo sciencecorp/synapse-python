@@ -45,8 +45,8 @@ class SynapsePlotter:
         self.latest_data_time = 0  # Track the most recent data timestamp in seconds
 
         # Defaults for the zoomed channel plot
-        self.zoom_y_min = -4096
-        self.zoom_y_max = 4096
+        self.zoom_y_min = -1000
+        self.zoom_y_max = 1000
 
         self.signal_separation = 1000
 
@@ -54,7 +54,7 @@ class SynapsePlotter:
         self.active_lines = {}
 
         # Queue and threading for BroadbandFrame processing
-        self.data_queue = queue.Queue(maxsize=2000)
+        self.data_queue = queue.Queue(maxsize=32000)
         self.stop_event = Event()
         self.plot_thread = None
         self.running = False
@@ -164,7 +164,7 @@ class SynapsePlotter:
                         self.y_axis_all = dpg.add_plot_axis(
                             dpg.mvYAxis, label="Amplitude", tag="y_axis_all"
                         )
-                        dpg.set_axis_limits("y_axis_all", -4096, 4096 * 10)
+                        dpg.set_axis_limits("y_axis_all", -1096, 4096 * 10)
 
                         # Create line series for initially selected channels
                         for ch_id in self.selected_channels:
@@ -250,7 +250,7 @@ class SynapsePlotter:
         except queue.Full:
             # If queue is full, drop multiple old frames and add the new one
             dropped = 0
-            while dropped < 5:  # Drop up to 5 old frames
+            while dropped < 100:
                 try:
                     self.data_queue.get_nowait()
                     dropped += 1
@@ -303,7 +303,7 @@ class SynapsePlotter:
         self.start_time = time.time()
 
         # Main loop
-        fps_limit = 30
+        fps_limit = 10
         frame_duration = 1.0 / fps_limit
         last_time = time.time()
 
@@ -311,7 +311,6 @@ class SynapsePlotter:
             # Process multiple frames per iteration for better throughput
             frames_processed = 0
             max_frames_per_iter = 10
-
             while frames_processed < max_frames_per_iter:
                 try:
                     frame = self.data_queue.get_nowait()
@@ -394,6 +393,10 @@ class SynapsePlotter:
 
         ds_x_ch = rolled_x_ch[::ds_factor]
         ds_y_ch = rolled_y_ch[::ds_factor]
+
+        # Remove DC offset by subtracting the mean
+        if len(ds_y_ch) > 0:
+            ds_y_ch = ds_y_ch - np.mean(ds_y_ch)
 
         # Update the single "zoomed_line" series
         dpg.set_value("zoomed_line", [ds_x_ch.tolist(), ds_y_ch.tolist()])

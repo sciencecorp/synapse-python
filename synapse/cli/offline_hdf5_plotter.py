@@ -242,9 +242,11 @@ def plot(plot_data, console):
     plot_single.showGrid(x=True, y=True)
 
     # Create a curve for the single channel
+    initial_data = plot_data.data.iloc[:, 0].to_numpy()
+    initial_data_centered = initial_data - np.mean(initial_data)
     curve_single = plot_single.plot(
         time_arr,
-        plot_data.data.iloc[:, 0].to_numpy(),
+        initial_data_centered,
         pen=pg.intColor(0, hues=plot_data.num_channels),
         name=f"Ch {plot_data.channel_ids[0]}",
     )
@@ -280,13 +282,15 @@ def plot(plot_data, console):
             return
 
         # Update time domain plot
-        curve_single.setData(time_arr, plot_data.data.iloc[:, channel_index].to_numpy())
+        channel_data = plot_data.data.iloc[:, channel_index].to_numpy()
+        channel_data_centered = channel_data - np.mean(channel_data)
+        curve_single.setData(time_arr, channel_data_centered)
         curve_single.setPen(pg.intColor(channel_index, hues=plot_data.num_channels))
 
         # Update FFT plot
         fft_plot.clear()
         fft_freq, fft_magnitude = compute_fft(
-            plot_data.data.iloc[:, channel_index].to_numpy(), plot_data.sample_rate
+            channel_data_centered, plot_data.sample_rate
         )
 
         # Plot FFT with improved visibility
