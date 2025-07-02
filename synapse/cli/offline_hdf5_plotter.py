@@ -117,11 +117,60 @@ def load_h5_data(data_file, console, time_range=None):
         # Get frame data info
         frame_data = f["/acquisition/ElectricalSeries"]
         total_samples = len(frame_data)
-        samples_per_channel = total_samples // number_of_channels
 
-        console.print(
-            f"Total duration: {samples_per_channel / sample_rate:.2f} seconds"
-        )
+        timestamps_ns = f["/acquisition/timestamp_ns"]
+        total_duration = timestamps_ns[-1] - timestamps_ns[0]
+        console.print(f"Total duration: {total_duration / 1e9:.2f} seconds")
+
+        sequence_number = f["/acquisition/sequence_number"]
+
+        # Check for gaps in sequence numbers with progress bar
+        gaps_found = []
+
+        with Progress(console=console) as progress:
+            task = progress.add_task(
+                "Checking sequence numbers...", total=len(sequence_number)
+            )
+
+            # Convert to numpy array for faster processing
+            seq_array = sequence_number[:]
+
+            # Start with the first sequence number as the expected value
+            expected_sequence = seq_array[0]
+
+            for i in range(len(seq_array)):
+                current_seq = seq_array[i]
+                if current_seq != expected_sequence:
+                    gaps_found.append(
+                        {
+                            "index": i,
+                            "expected": expected_sequence,
+                            "actual": current_seq,
+                            "gap_size": current_seq - expected_sequence,
+                        }
+                    )
+                expected_sequence = current_seq + 1
+                progress.update(task, advance=1)
+
+        if gaps_found:
+            console.print(
+                f"[red]⚠️  Found {len(gaps_found)} gaps in sequence numbers:[/red]"
+            )
+            for gap in gaps_found:
+                console.print(
+                    f"[red]  Index {gap['index']}: Expected {gap['expected']}, got {gap['actual']} (gap of {gap['gap_size']})[/red]"
+                )
+        else:
+            console.print(
+                f"[green]✓ Sequence numbers are continuous ({seq_array[0]} to {seq_array[-1]})[/green]"
+            )
+
+        # Print first few and last few sequence numbers for reference
+        if len(seq_array) > 10:
+            console.print(f"First 5 sequence numbers: {seq_array[:5].tolist()}")
+            console.print(f"Last 5 sequence numbers: {seq_array[-5:].tolist()}")
+        else:
+            console.print(f"All sequence numbers: {seq_array[:].tolist()}")
 
         # Determine time range to load
         start_index = 0
