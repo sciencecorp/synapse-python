@@ -161,7 +161,16 @@ class BroadbandFrameWriter:
 
         # Create datasets with chunking and compression for better performance
         self.timestamp_dataset = self.file.create_dataset(
-            "/acquisition/timestamp",
+            "/acquisition/timestamp_ns",
+            shape=(0,),
+            maxshape=(None,),
+            dtype="uint64",
+            chunks=True,
+            compression="gzip",
+            compression_opts=1,  # Fast compression
+        )
+        self.unix_timestamp_dataset = self.file.create_dataset(
+            "/acquisition/unix_timestamp_ns",
             shape=(0,),
             maxshape=(None,),
             dtype="uint64",
@@ -354,6 +363,7 @@ class BroadbandFrameWriter:
             new_frame_size = current_frame_size + (num_frames * samples_per_frame)
 
             self.timestamp_dataset.resize(new_timestamp_size, axis=0)
+            self.unix_timestamp_dataset.resize(new_timestamp_size, axis=0)
             self.sequence_dataset.resize(new_timestamp_size, axis=0)
             self.frame_data_dataset.resize(new_frame_size, axis=0)
 
@@ -361,15 +371,20 @@ class BroadbandFrameWriter:
             timestamps = []
             sequences = []
             all_frame_data = []
+            unix_timestamps = []
 
             for frame in frame_buffer:
                 timestamps.append(frame.timestamp_ns)
                 sequences.append(frame.sequence_number)
                 all_frame_data.extend(frame.frame_data)
+                unix_timestamps.append(frame.unix_timestamp_ns)
 
             # Write all data at once (more efficient)
             self.timestamp_dataset[current_timestamp_size:new_timestamp_size] = (
                 timestamps
+            )
+            self.unix_timestamp_dataset[current_timestamp_size:new_timestamp_size] = (
+                unix_timestamps
             )
             self.sequence_dataset[current_timestamp_size:new_timestamp_size] = sequences
             self.frame_data_dataset[current_frame_size:new_frame_size] = all_frame_data
