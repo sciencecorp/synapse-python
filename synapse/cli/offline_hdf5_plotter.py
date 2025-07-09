@@ -157,8 +157,9 @@ def load_h5_data(data_file, console, time_range=None):
                 f"[red]⚠️  Found {len(gaps_found)} gaps in sequence numbers:[/red]"
             )
             for gap in gaps_found:
+                gap_in_seconds = gap["gap_size"] / sample_rate
                 console.print(
-                    f"[red]  Index {gap['index']}: Expected {gap['expected']}, got {gap['actual']} (gap of {gap['gap_size']})[/red]"
+                    f"[red]  Index {gap['index']}: Expected {gap['expected']}, got {gap['actual']} (gap of {gap_in_seconds:.2f}s)[/red]"
                 )
         else:
             console.print(
