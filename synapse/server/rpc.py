@@ -9,6 +9,7 @@ import grpc
 from synapse.api.node_pb2 import NodeConnection, NodeType
 from synapse.api.logging_pb2 import LogLevel, LogQueryResponse
 from synapse.api.query_pb2 import QueryResponse
+from synapse.api.tap_pb2 import ListTapsResponse
 from synapse.api.status_pb2 import DeviceState, Status, StatusCode
 from synapse.api.device_pb2 import DeviceConfiguration, DeviceInfo
 from synapse.api.synapse_pb2_grpc import (
@@ -168,6 +169,10 @@ class SynapseServicer(SynapseDeviceServicer):
 
         # handle query
 
+        taps = []
+        for node in self.nodes:
+            taps.extend(node.tap_connections())
+
         return QueryResponse(
             data=[1, 2, 3, 4, 5],
             status=Status(
@@ -176,6 +181,7 @@ class SynapseServicer(SynapseDeviceServicer):
                 sockets=self._sockets_status_info(),
                 state=self.state,
             ),
+            list_taps_response=ListTapsResponse(taps=taps),
         )
 
     async def GetLogs(self, request, context):
