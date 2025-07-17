@@ -23,6 +23,7 @@ class BroadbandSource(BaseNode):
         self.context = None
         self.zmq_socket = None
         self.seq_number = 0
+        self.iface_ip = None
 
     def config(self):
         c = super().config()
@@ -59,7 +60,7 @@ class BroadbandSource(BaseNode):
         if not self.context:
             self.context = zmq.Context()
             self.zmq_socket = self.context.socket(zmq.PUB)
-            self.zmq_socket.bind(f"tcp://127.0.0.1:5555")
+            self.port = self.zmq_socket.bind_to_random_port(f"tcp://{self.iface_ip}")
 
         channels = e.channels
         bit_width = c.bit_width if c.bit_width else 4
@@ -113,12 +114,16 @@ class BroadbandSource(BaseNode):
             self.context.destroy()
         return Status()
 
+    def configure_iface_ip(self, iface_ip):
+        self.iface_ip = iface_ip
+
     def tap_connections(self):
         return [
             TapConnection(
                 name="broadband_source_sim",
-                endpoint="tcp://127.0.0.1:5555",
+                endpoint=f"tcp://{self.iface_ip}:{self.port}",
                 message_type="synapse.BroadbandFrame",
                 tap_type=TapType.TAP_TYPE_PRODUCER,
             )
         ]
+

@@ -70,6 +70,7 @@ class SynapseServicer(SynapseDeviceServicer):
     def __init__(self, name, serial, iface_ip, node_object_map, peripherals):
         self.name = name
         self.serial = serial
+        self.iface_ip = iface_ip
         self.node_object_map = node_object_map
         self.peripherals = peripherals
         self.logger = logging.getLogger("server")
@@ -326,7 +327,7 @@ class SynapseServicer(SynapseDeviceServicer):
                 "Creating %s node(%d)" % (NodeType.Name(node.type), node.id)
             )
             node = self.node_object_map[node.type](node.id)
-            if node.type in [NodeType.kStreamIn]:
+            if node.type in [NodeType.kStreamIn, NodeType.kBroadbandSource]:
                 node.configure_iface_ip(self.iface_ip)
 
             status = node.configure(config)
