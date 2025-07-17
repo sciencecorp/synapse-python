@@ -43,6 +43,13 @@ if __name__ == "__main__":
     config.add_node(broadband)
 
     device.configure(config)
+
+    # export the config to a json file for using with CLI
+    # from google.protobuf.json_format import MessageToJson
+    # with open("device_config.json", "w") as f:
+    #     f.write(MessageToJson(config.to_proto()))
+    # print("Config written to device_config.json")
+
     device.start()
 
     info = device.info()

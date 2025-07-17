@@ -8,6 +8,7 @@ from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.broadband_source_pb2 import BroadbandSourceConfig
 from synapse.server.nodes.base import BaseNode
 from synapse.api.tap_pb2 import TapConnection, TapType
+from synapse.api.datatype_pb2 import BroadbandFrame
 from synapse.server.status import Status
 from synapse.utils.ndtp_types import ElectricalBroadbandData
 
@@ -74,6 +75,7 @@ class BroadbandSource(BaseNode):
             samples = [[ch.id, [r_sample(bit_width) for _ in range(n_samples)]] for ch in channels]
 
             try:
+                # for backwards compatibility
                 data = ElectricalBroadbandData(
                     bit_width=bit_width,
                     is_signed=False,
@@ -81,13 +83,23 @@ class BroadbandSource(BaseNode):
                     t0=t_last_ns,
                     samples=samples
                 )
-                await self.emit_data(data) # for backward compatibility
-                t_last_ns = now
+                await self.emit_data(data)
 
                 # send data over tap
-                packets, self.seq_number = data.pack(self.seq_number)
-                for packet in packets:
-                    self.zmq_socket.send(packet)
+                for i in range(n_samples):
+                    frame = BroadbandFrame(
+                        timestamp_ns = t_last_ns + int(i * 1e9 / sample_rate_hz),
+                        sequence_number = self.seq_number,
+                        frame_data = [chan_samples[i] for _, chan_samples in samples],
+                        sample_rate_hz = sample_rate_hz,
+                    )
+                    try:
+                        self.zmq_socket.send(frame.SerializeToString())
+                        self.seq_number = (self.seq_number + 1) % 2**16
+                    except Exception as e:
+                        print(f"Error sending data: {e}")
+
+                t_last_ns = now
             except Exception as e:
                 print(f"Error sending data: {e}")
 
@@ -106,7 +118,7 @@ class BroadbandSource(BaseNode):
             TapConnection(
                 name="broadband_source_sim",
                 endpoint="tcp://127.0.0.1:5555",
-                    message_type="synapse.utils.ndtp_types.ElectricalBroadbandData",
-                    tap_type=TapType.TAP_TYPE_PRODUCER,
-                )
+                message_type="synapse.BroadbandFrame",
+                tap_type=TapType.TAP_TYPE_PRODUCER,
+            )
         ]
