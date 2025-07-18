@@ -48,6 +48,28 @@ class PlotData:
             channel_ids=channel_ids,
         )
 
+    def save_channel_to_csv(self, channel_id: int, filename: str) -> bool:
+        """Save a specific channel's data (timestamp, sample) to CSV"""
+        try:
+            # Get the index of the channel_id in channel_ids list
+            channel_index = self.channel_ids.index(channel_id)
+
+            # Get timestamp and sample data
+            timestamps = self.time_array
+            samples = self.data.iloc[:, channel_index].to_numpy()
+
+            # Create DataFrame for export
+            export_df = pd.DataFrame(
+                {"timestamp_s": timestamps, "sample_value": samples}
+            )
+
+            # Save to CSV
+            export_df.to_csv(filename, index=False)
+            return True
+
+        except (ValueError, Exception):
+            return False
+
 
 def compute_fft(data, sample_rate):
     # Apply window function to reduce spectral leakage
@@ -369,9 +391,63 @@ def plot(plot_data, console):
     )
     combo.setFixedWidth(100)
 
+    # Function to save current channel to CSV
+    def save_channel_csv():
+        current_channel_id = int(combo.currentText())
+
+        # Open file dialog
+        options = QtWidgets.QFileDialog.Options()
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            main_widget,
+            f"Save Channel {current_channel_id} Data",
+            f"channel_{current_channel_id}_data.csv",
+            "CSV Files (*.csv);;All Files (*)",
+            options=options,
+        )
+
+        if filename:
+            success = plot_data.save_channel_to_csv(current_channel_id, filename)
+            if success:
+                console.print(
+                    f"[green]✓ Channel {current_channel_id} data saved to {filename}[/green]"
+                )
+                # Show success message in GUI
+                msg = QtWidgets.QMessageBox()
+                msg.setIcon(QtWidgets.QMessageBox.Information)
+                msg.setWindowTitle("Export Successful")
+                msg.setText(
+                    f"Channel {current_channel_id} data successfully saved to:\n{filename}"
+                )
+                msg.exec_()
+            else:
+                console.print(
+                    f"[red]✗ Failed to save channel {current_channel_id} data[/red]"
+                )
+                # Show error message in GUI
+                msg = QtWidgets.QMessageBox()
+                msg.setIcon(QtWidgets.QMessageBox.Critical)
+                msg.setWindowTitle("Export Failed")
+                msg.setText(f"Failed to save channel {current_channel_id} data")
+                msg.exec_()
+
+    # Create save button
+    save_button = QtWidgets.QPushButton("Save Channel to CSV")
+    save_button.clicked.connect(save_channel_csv)
+    save_button.setFixedWidth(150)
+
+    # Create a horizontal layout for controls
+    controls_layout = QtWidgets.QHBoxLayout()
+    controls_layout.addWidget(QtWidgets.QLabel("Channel:"))
+    controls_layout.addWidget(combo)
+    controls_layout.addWidget(save_button)
+    controls_layout.addStretch()  # Add stretch to push everything to the left
+
+    controls_widget = QtWidgets.QWidget()
+    controls_widget.setLayout(controls_layout)
+
     # Create a layout for our plot, fft, and controls
     main_layout = QtWidgets.QVBoxLayout()
-    main_layout.addWidget(combo)
+    main_layout.addWidget(controls_widget)
     main_layout.addWidget(main_splitter)
 
     # And finally our main widget to show

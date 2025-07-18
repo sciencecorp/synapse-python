@@ -48,6 +48,14 @@ class SynapsePlotter:
         self.zoom_y_min = -1000
         self.zoom_y_max = 1000
 
+        # DC offset removal toggle for zoomed channel
+        self.remove_dc_offset = True
+
+        # Binary range toggle state and stored previous range
+        self.is_binary_range = False
+        self.stored_y_min = -1000
+        self.stored_y_max = 1000
+
         self.signal_separation = 1000
 
         # Dictionary to store line series for plotted channels
@@ -133,6 +141,23 @@ class SynapsePlotter:
                 default_value=self.zoom_y_max,
                 callback=self.set_zoom_y_max,
                 tag="zoom_y_max_input",
+            )
+
+            dpg.add_separator()
+
+            # DC Offset Removal Toggle
+            dpg.add_checkbox(
+                label="Remove DC Offset",
+                default_value=self.remove_dc_offset,
+                callback=self.toggle_remove_dc_offset,
+                tag="remove_dc_offset_checkbox",
+            )
+
+            # Quick Y-axis range button for binary signals
+            dpg.add_button(
+                label="Binary Range (-1 to 3)",
+                callback=self.set_binary_range,
+                tag="set_binary_range_button",
             )
 
         # -----------------------------
@@ -236,12 +261,44 @@ class SynapsePlotter:
 
     def set_zoom_y_min(self, sender, app_data):
         self.zoom_y_min = app_data
+        # If not in binary range mode, update stored range
+        if not self.is_binary_range:
+            self.stored_y_min = app_data
 
     def set_zoom_y_max(self, sender, app_data):
         self.zoom_y_max = app_data
+        # If not in binary range mode, update stored range
+        if not self.is_binary_range:
+            self.stored_y_max = app_data
 
     def set_signal_separation(self, sender, app_data):
         self.signal_separation = app_data
+
+    def toggle_remove_dc_offset(self, sender, app_data):
+        self.remove_dc_offset = app_data
+
+    def set_binary_range(self, sender, app_data):
+        if self.is_binary_range:
+            # Currently in binary range, switch back to stored range
+            self.zoom_y_min = self.stored_y_min
+            self.zoom_y_max = self.stored_y_max
+            self.is_binary_range = False
+            button_text = "Binary Range (-1 to 3)"
+        else:
+            # Currently in normal range, switch to binary range
+            self.stored_y_min = self.zoom_y_min
+            self.stored_y_max = self.zoom_y_max
+            self.zoom_y_min = -1
+            self.zoom_y_max = 3
+            self.is_binary_range = True
+            button_text = (
+                f"Restore Range ({self.stored_y_min:.0f} to {self.stored_y_max:.0f})"
+            )
+
+        # Update the GUI input fields and button text
+        dpg.set_value("zoom_y_min_input", self.zoom_y_min)
+        dpg.set_value("zoom_y_max_input", self.zoom_y_max)
+        dpg.set_item_label("set_binary_range_button", button_text)
 
     def put(self, frame: BroadbandFrame):
         """Add a BroadbandFrame to the processing queue"""
@@ -394,8 +451,8 @@ class SynapsePlotter:
         ds_x_ch = rolled_x_ch[::ds_factor]
         ds_y_ch = rolled_y_ch[::ds_factor]
 
-        # Remove DC offset by subtracting the mean
-        if len(ds_y_ch) > 0:
+        # Remove DC offset by subtracting the mean if enabled
+        if self.remove_dc_offset and len(ds_y_ch) > 0:
             ds_y_ch = ds_y_ch - np.mean(ds_y_ch)
 
         # Update the single "zoomed_line" series
