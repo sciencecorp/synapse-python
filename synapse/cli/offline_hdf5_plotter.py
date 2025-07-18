@@ -363,7 +363,7 @@ def plot(plot_data, console):
 
     # Create a dropdown for channel selection
     combo = QtWidgets.QComboBox()
-    combo.addItems([str(ch) for ch in plot_data.channel_ids])
+    combo.addItems([str(ch) for ch in sorted(plot_data.channel_ids)])
     combo.currentIndexChanged.connect(
         lambda: update_single_channel(int(combo.currentText()))
     )
