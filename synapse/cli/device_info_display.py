@@ -27,6 +27,21 @@ def visualize_configuration(info_dict, status):
                 node_tree.add(f"Error Logs:\n{error_logs}")
             elif node_type == "BroadbandSource":
                 source = node.get("broadband_source", {})
+                # Get the peripheral id and name
+                peripheral_id = source.get("peripheral_id", "Unknown")
+                peripherals = info_dict.get("peripherals", [])
+                peripheral_name = next(
+                    (
+                        p.get("name", "Unknown")
+                        for p in peripherals
+                        if p.get("peripheral_id") == peripheral_id
+                    ),
+                    "Unknown",
+                )
+                node_tree.add(f"Connected to: {peripheral_name} (id: {peripheral_id})")
+                # Get the sample rate and bit width
+                node_tree.add(f"Sample Rate: {source.get('sample_rate_hz', 'Unknown')}")
+                node_tree.add(f"Bit Width: {source.get('bit_width', 'Unknown')}")
                 if "signal" in source and "electrode" in source["signal"]:
                     channels = source["signal"]["electrode"].get("channels", [])
                     electrode_ids = [
