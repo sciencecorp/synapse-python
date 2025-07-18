@@ -13,6 +13,7 @@ from rich.panel import Panel
 
 import synapse as syn
 from synapse.api.status_pb2 import DeviceState, StatusCode
+from synapse.api.node_pb2 import NodeType
 from synapse.client.taps import Tap
 from synapse.utils.proto import load_device_config
 from synapse.api.datatype_pb2 import BroadbandFrame
@@ -249,13 +250,18 @@ class BroadbandFrameWriter:
         }
 
     def set_attributes(
-        self, sample_rate_hz: float, channels: list, session_description: str = ""
+        self,
+        sample_rate_hz: float,
+        channels: list,
+        broadband_lsb_uv: float,
+        session_description: str = "",
     ):
         """Set HDF5 attributes"""
         self.file.attrs["sample_rate_hz"] = sample_rate_hz
         if session_description:
             self.file.attrs["session_description"] = session_description
         self.file.attrs["session_start_time"] = datetime.now().isoformat()
+        self.file.attrs["lsb_uv"] = broadband_lsb_uv
 
         device_group = self.file.create_group("general/device")
         device_group.attrs["device_type"] = "SciFi"
@@ -879,6 +885,14 @@ def stream_data(broadband_tap, writer, plotter, monitor, first_frame, console, a
             console.print("=" * 60)
 
 
+def get_broadband_node_status(device_info):
+    """Get the broadband node status from the device info"""
+    for node in device_info.status.signal_chain.nodes:
+        if node.type == NodeType.kBroadbandSource:
+            return node.broadband_source.status
+    return None
+
+
 def read(args):
     console = Console()
 
@@ -932,8 +946,21 @@ def read(args):
     # Setup our HDF5 writer if output is requested
     writer = None
     if args.output:
+        # Get the latest info on the device
+        device_info = device.info()
+        broadband_node = get_broadband_node_status(device_info)
+        if broadband_node is None:
+            console.print(
+                "[bold red]Failed to get broadband node, cannot save data[/bold red]"
+            )
+            return
+        broadband_lsb_uv = broadband_node.electrode.lsb_uV
         writer = BroadbandFrameWriter(args.output)
-        writer.set_attributes(sample_rate_hz=sample_rate, channels=available_channels)
+        writer.set_attributes(
+            sample_rate_hz=sample_rate,
+            channels=available_channels,
+            broadband_lsb_uv=broadband_lsb_uv,
+        )
         writer.start()
         console.log("[cyan]Using threaded writer for serializing data[/cyan]")
 
