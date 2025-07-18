@@ -369,18 +369,9 @@ def plot(plot_data, console):
     )
     combo.setFixedWidth(100)
 
-    # Create a horizontal layout for controls
-    controls_layout = QtWidgets.QHBoxLayout()
-    controls_layout.addWidget(QtWidgets.QLabel("Channel:"))
-    controls_layout.addWidget(combo)
-    controls_layout.addStretch()  # Add stretch to push everything to the left
-
-    controls_widget = QtWidgets.QWidget()
-    controls_widget.setLayout(controls_layout)
-
     # Create a layout for our plot, fft, and controls
     main_layout = QtWidgets.QVBoxLayout()
-    main_layout.addWidget(controls_widget)
+    main_layout.addWidget(combo)
     main_layout.addWidget(main_splitter)
 
     # And finally our main widget to show
