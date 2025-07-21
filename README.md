@@ -17,7 +17,7 @@ Includes `synapsectl` command line utility:
     --verbose, -v         Enable verbose output
 
     Commands:
-    {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy}
+    {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy,build}
         discover            Discover Synapse devices on the network
         info                Get device information
         query               Execute a query on the device
@@ -30,6 +30,7 @@ Includes `synapsectl` command line utility:
         file                File commands
         taps                Interact with taps on the network
         deploy              Deploy an application to a Synapse device
+        build               Cross-compile and package an application into a .deb without deploying
 
 As well as the base for a device implementation (`synapse/server`),
 
@@ -52,6 +53,8 @@ And a toy device `synapse-sim` for local development,
     --name NAME           Device name
     --serial SERIAL       Device serial number
     -v, --verbose         Enable verbose output
+
+For more information on deploy and build, visit [synapse-example-app](https://github.com/sciencecorp/synapse-example-app)
 
 ## A Note on Streaming
 
