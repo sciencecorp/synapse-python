@@ -3,7 +3,6 @@
 from synapse.client.node import Node
 from synapse.client.config import Config
 from synapse.client.device import Device
-from synapse.client.settings import settings
 
 from synapse.client.channel import Channel
 from synapse.client.signal_config import SignalConfig, ElectrodeConfig, PixelConfig
