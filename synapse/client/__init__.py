@@ -1,6 +1,9 @@
+# linter doesn't know about the imports, so ignore this
+# ruff: noqa: F401
 from synapse.client.node import Node
 from synapse.client.config import Config
 from synapse.client.device import Device
+from synapse.client.settings import settings
 
 from synapse.client.channel import Channel
 from synapse.client.signal_config import SignalConfig, ElectrodeConfig, PixelConfig
