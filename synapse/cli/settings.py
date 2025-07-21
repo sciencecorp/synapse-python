@@ -1,5 +1,6 @@
 import synapse as syn
 from synapse.api.query_pb2 import QueryRequest
+from synapse.api.device_pb2 import DeviceSettings, UpdateDeviceSettingsRequest
 
 
 from rich.console import Console
@@ -11,12 +12,17 @@ def add_commands(subparsers):
         "settings", help="Manage the persistent device settings"
     )
 
-    setting_subparsers = parser.add_subparsers(title="Settings")
+    settings_subparsers = parser.add_subparsers(title="Settings")
 
-    get_parser = setting_subparsers.add_parser(
+    get_parser = settings_subparsers.add_parser(
         "get", help="Get the current settings for a device"
     )
     get_parser.set_defaults(func=get_settings)
+
+    set_parser = settings_subparsers.add_parser(
+        "set", help="Set a setting key to a value"
+    )
+    set_parser.set_defaults(func=set_setting)
 
 
 def get_settings(args):
@@ -41,3 +47,13 @@ def get_settings(args):
     settings_table.add_column("value", style="green")
     settings_table.add_row("Device Name", settings.name)
     console.print(settings_table)
+
+
+def set_setting(args):
+    # console = Console()
+
+    device = syn.Device(args.uri, args.verbose)
+    request = UpdateDeviceSettingsRequest(settings=DeviceSettings(name="Wowza"))
+    print(request)
+    response = device.update_device_settings(request)
+    print(response)
