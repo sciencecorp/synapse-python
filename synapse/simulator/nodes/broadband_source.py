@@ -20,7 +20,7 @@ class BroadbandSource(BaseNode):
     def __init__(self, id):
         super().__init__(id, NodeType.kBroadbandSource)
         self.__config: BroadbandSourceConfig = None
-        self.context = None
+        self.zmq_context = None
         self.zmq_socket = None
         self.seq_number = 0
         self.iface_ip = None
@@ -57,9 +57,9 @@ class BroadbandSource(BaseNode):
             self.logger.error("node signal electrode channels not configured")
             return
 
-        if not self.context:
-            self.context = zmq.Context()
-            self.zmq_socket = self.context.socket(zmq.PUB)
+        if not self.zmq_context:
+            self.zmq_context = zmq.Context()
+            self.zmq_socket = self.zmq_context.socket(zmq.PUB)
             self.port = self.zmq_socket.bind_to_random_port(f"tcp://{self.iface_ip}")
 
         channels = e.channels
@@ -105,14 +105,16 @@ class BroadbandSource(BaseNode):
                 print(f"Error sending data: {e}")
 
     def stop(self):
-        status = super().stop()
-        if not status.ok():
-            return status
+        """Clean up ZMQ resources."""
         if self.zmq_socket:
             self.zmq_socket.close()
-        if self.context:
-            self.context.destroy()
-        return Status()
+            self.zmq_socket = None
+
+        if self.zmq_context:
+            self.zmq_context.destroy()
+            self.zmq_context = None
+
+        return super().stop()
 
     def configure_iface_ip(self, iface_ip):
         self.iface_ip = iface_ip
