@@ -17,6 +17,7 @@ from synapse.cli import (
     rpc,
     streaming,
     taps,
+    settings,
 )
 from synapse.utils.discover import find_device_by_name
 
@@ -77,6 +78,7 @@ def main():
     taps.add_commands(subparsers)
     deploy.add_commands(subparsers)
     build.add_commands(subparsers)
+    settings.add_commands(subparsers)
     args = parser.parse_args()
 
     # If we need to setup the device URI, do that now

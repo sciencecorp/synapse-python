@@ -14,6 +14,10 @@ from synapse.api.logging_pb2 import (
 from synapse.api.query_pb2 import StreamQueryRequest, StreamQueryResponse
 from synapse.api.status_pb2 import StatusCode, Status
 from synapse.api.synapse_pb2_grpc import SynapseDeviceStub
+from synapse.api.device_pb2 import (
+    UpdateDeviceSettingsRequest,
+    UpdateDeviceSettingsResponse,
+)
 from synapse.client.config import Config
 from synapse.utils.log import log_level_to_pb
 
@@ -184,6 +188,16 @@ class Device(object):
         except Exception as e:
             self.logger.error(f"Error during StreamQuery: {str(e)}")
             yield StreamQueryResponse(code=StatusCode.kQueryFailed)
+
+    def update_device_settings(
+        self, request: UpdateDeviceSettingsRequest
+    ) -> Optional[UpdateDeviceSettingsResponse]:
+        try:
+            return self.rpc.UpdateDeviceSettings(request)
+
+        except Exception as e:
+            self.logger.error(f"Error during update settings: {str(e)}")
+            return None
 
     def _handle_status_response(self, status):
         if status.code != StatusCode.kOk:
