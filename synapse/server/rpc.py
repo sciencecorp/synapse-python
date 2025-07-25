@@ -9,6 +9,7 @@ import grpc
 from synapse.api.node_pb2 import NodeConnection, NodeType
 from synapse.api.logging_pb2 import LogLevel, LogQueryResponse
 from synapse.api.query_pb2 import QueryResponse
+from synapse.api.tap_pb2 import ListTapsResponse
 from synapse.api.status_pb2 import DeviceState, Status, StatusCode
 from synapse.api.device_pb2 import DeviceConfiguration, DeviceInfo
 from synapse.api.synapse_pb2_grpc import (
@@ -69,6 +70,7 @@ class SynapseServicer(SynapseDeviceServicer):
     def __init__(self, name, serial, iface_ip, node_object_map, peripherals):
         self.name = name
         self.serial = serial
+        self.iface_ip = iface_ip
         self.node_object_map = node_object_map
         self.peripherals = peripherals
         self.logger = logging.getLogger("server")
@@ -168,6 +170,10 @@ class SynapseServicer(SynapseDeviceServicer):
 
         # handle query
 
+        taps = []
+        for node in self.nodes:
+            taps.extend(node.tap_connections())
+
         return QueryResponse(
             data=[1, 2, 3, 4, 5],
             status=Status(
@@ -176,6 +182,7 @@ class SynapseServicer(SynapseDeviceServicer):
                 sockets=self._sockets_status_info(),
                 state=self.state,
             ),
+            list_taps_response=ListTapsResponse(taps=taps),
         )
 
     async def GetLogs(self, request, context):
@@ -320,7 +327,7 @@ class SynapseServicer(SynapseDeviceServicer):
                 "Creating %s node(%d)" % (NodeType.Name(node.type), node.id)
             )
             node = self.node_object_map[node.type](node.id)
-            if node.type in [NodeType.kStreamIn]:
+            if node.type in [NodeType.kStreamIn, NodeType.kBroadbandSource]:
                 node.configure_iface_ip(self.iface_ip)
 
             status = node.configure(config)
