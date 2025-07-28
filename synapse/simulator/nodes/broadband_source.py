@@ -24,6 +24,7 @@ class BroadbandSource(BaseNode):
         self.zmq_socket = None
         self.seq_number = 0
         self.iface_ip = None
+        self.port = None
 
     def config(self):
         c = super().config()
@@ -58,6 +59,10 @@ class BroadbandSource(BaseNode):
             return
 
         if not self.zmq_context:
+            if not self.iface_ip:
+                self.logger.error("iface_ip not configured")
+                return
+
             self.zmq_context = zmq.Context()
             self.zmq_socket = self.zmq_context.socket(zmq.PUB)
             self.port = self.zmq_socket.bind_to_random_port(f"tcp://{self.iface_ip}")
@@ -96,9 +101,9 @@ class BroadbandSource(BaseNode):
                     )
                     try:
                         self.zmq_socket.send(frame.SerializeToString())
-                        self.seq_number = (self.seq_number + 1) % 2**16
+                        self.seq_number += 1
                     except Exception as e:
-                        print(f"Error sending data: {e}")
+                        self.logger.error(f"Error sending data: {e}")
 
                 t_last_ns = now
             except Exception as e:

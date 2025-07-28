@@ -10,7 +10,9 @@ if __name__ == "__main__":
     uri = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1:647"
     device = syn.Device(uri)
     info = device.info()
-    assert info is not None, "Couldn't get device info"
+    if info is None:
+        print("Couldn't get device info")
+        sys.exit(1)
 
     print("Device info:")
     print(info)
@@ -53,7 +55,9 @@ if __name__ == "__main__":
     device.start()
 
     info = device.info()
-    assert info is not None, "Couldn't get device info"
+    if info is None:
+        print("Couldn't get device info")
+        sys.exit(1)
     print("Configured device info:")
     print(info)
 
