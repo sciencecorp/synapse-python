@@ -52,7 +52,6 @@ def visualize_configuration(info_dict, status):
                     )
             elif node_type == "OpticalStimulation":
                 source = node.get("optical_stimulation", {})
-                print(source)
                 # Get the peripheral id and name
                 peripheral_id = source.get("peripheral_id", "Unknown")
                 peripherals = info_dict.get("peripherals", [])
