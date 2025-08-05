@@ -37,7 +37,7 @@ def setup_device_uri(args):
     if not is_valid_ip(args.uri):
         # User passed in a name
         console = Console()
-        device_ip = find_device_by_name(args.uri, console)
+        device_ip = find_device_by_name(args.uri, console, False, 60)
         if not device_ip:
             return None
         args.uri = device_ip
