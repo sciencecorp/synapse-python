@@ -57,16 +57,19 @@ def discover(timeout_sec=DISCOVERY_TIMEOUT_SEC):
     return list(discover_iter(timeout_sec))
 
 
-def find_device_by_name(name, console, include_rpc_port=False):
+def find_device_by_name(
+    name,
+    console,
+    include_rpc_port=False,
+    discovery_timeout_sec=5,
+):
     """Find a device by name using the discovery process."""
     with console.status(
         f"Searching for device with name {name}...", spinner="bouncingBall"
     ):
         # We are broadcasting data every 1 second
-        socket_timeout_sec = 1
-        discovery_timeout_sec = 5
         found_devices = []
-        devices = discover_iter(socket_timeout_sec, discovery_timeout_sec)
+        devices = discover_iter(1, discovery_timeout_sec)
         for device in devices:
             if device.name.lower() == name.lower():
                 if include_rpc_port:
