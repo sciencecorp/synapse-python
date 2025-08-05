@@ -71,3 +71,6 @@ class BaseNode(object):
             bind=f"{self.socket[0]}:{self.socket[1]}",
             type=self.type,
         )
+
+    def tap_connections(self):
+        return []
