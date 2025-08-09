@@ -40,6 +40,6 @@ jobs:
 
           sleep 5
 
-          python synapse/examples/stream_out.py 127.0.0.1:50051
+          python synapse/examples/tap_example.py 127.0.0.1:50051
 
           kill $(jobs -p)
