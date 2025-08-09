@@ -15,5 +15,3 @@ from synapse.client.nodes.spike_source import SpikeSource
 from synapse.client.nodes.spike_binner import SpikeBinner
 from synapse.client.nodes.spike_detector import SpikeDetector
 from synapse.client.nodes.spectral_filter import SpectralFilter
-from synapse.client.nodes.stream_in import StreamIn
-from synapse.client.nodes.stream_out import StreamOut

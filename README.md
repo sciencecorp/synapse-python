@@ -6,7 +6,7 @@ Includes `synapsectl` command line utility:
 
     % synapsectl --help
     usage: synapsectl [-h] [--uri URI] [--version] [--verbose]
-                  {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy} ...
+                    {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy,build,settings} ...
 
     Synapse Device Manager
 
@@ -17,7 +17,7 @@ Includes `synapsectl` command line utility:
     --verbose, -v         Enable verbose output
 
     Commands:
-    {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy,build}
+    {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy,build,settings}
         discover            Discover Synapse devices on the network
         info                Get device information
         query               Execute a query on the device
@@ -25,12 +25,13 @@ Includes `synapsectl` command line utility:
         stop                Stop the device or an application
         configure           Write a configuration to the device
         logs                Get logs from the device
-        read                Read from a device's StreamOut node
+        read                Read from a device's Broadband Tap and save to HDF5
         plot                Plot recorded synapse data
         file                File commands
         taps                Interact with taps on the network
         deploy              Deploy an application to a Synapse device
         build               Cross-compile and package an application into a .deb without deploying
+        settings            Manage the persistent device settings
 
 As well as the base for a device implementation (`synapse/server`),
 
@@ -119,8 +120,6 @@ info = device.info()
 
 print("Device info: ", device.info())
 
-stream_out = syn.StreamOut(label="my broadband", multicast_group="224.0.0.1")
-
 channels = [
     syn.Channel(
         id=channel_num,
@@ -144,9 +143,7 @@ broadband = syn.BroadbandSource(
 )
 
 config = syn.Config()
-config.add_node(stream_out)
 config.add_node(broadband)
-config.connect(broadband, stream_out)
 
 device.configure(config)
 device.start()

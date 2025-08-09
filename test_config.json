@@ -1,14 +1,8 @@
 {
   "nodes": [
     {
-      "type": "kStreamOut",
-      "id": 1,
-      "stream_out": {
-      }
-    },
-    {
       "type": "kBroadbandSource",
-      "id": 2,
+      "id": 1,
       "broadband_source": {
         "peripheral_id": 1,
         "sample_rate_hz": 32000,
@@ -26,12 +20,6 @@
           }
         }
       }
-    }
-  ],
-  "connections": [
-    {
-      "src_node_id": 2,
-      "dst_node_id": 1
     }
   ]
 }
