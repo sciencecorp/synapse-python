@@ -25,8 +25,6 @@ DEFAULT_SYNAPSE_PORT = 647
 
 
 class Device(object):
-    sockets = None
-
     def __init__(self, uri, verbose=False):
         if not uri:
             raise ValueError("URI cannot be empty or none")
@@ -204,5 +202,4 @@ class Device(object):
             self.logger.error("Error %d: %s", status.code, status.message)
             return False
         else:
-            self.sockets = status.sockets
             return True

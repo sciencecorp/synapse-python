@@ -96,7 +96,6 @@ class SynapseServicer(SynapseDeviceServicer):
             status=Status(
                 message=None,
                 code=StatusCode.kOk,
-                sockets=self._sockets_status_info(),
                 state=self.state,
             ),
             peripherals=self.peripherals,
@@ -111,14 +110,12 @@ class SynapseServicer(SynapseDeviceServicer):
             return Status(
                 message="Failed to configure",
                 code=StatusCode.kUndefinedError,
-                sockets=self._sockets_status_info(),
                 state=self.state,
             )
 
         return Status(
             message=None,
             code=StatusCode.kOk,
-            sockets=self._sockets_status_info(),
             state=self.state,
         )
 
@@ -128,13 +125,11 @@ class SynapseServicer(SynapseDeviceServicer):
             return Status(
                 message="Failed to start streaming",
                 code=StatusCode.kUndefinedError,
-                sockets=self._sockets_status_info(),
                 state=self.state,
             )
         return Status(
             message=None,
             code=StatusCode.kOk,
-            sockets=self._sockets_status_info(),
             state=self.state,
         )
 
@@ -144,13 +139,11 @@ class SynapseServicer(SynapseDeviceServicer):
             return Status(
                 message="Failed to stop streaming",
                 code=StatusCode.kUndefinedError,
-                sockets=self._sockets_status_info(),
                 state=self.state,
             )
         return Status(
             message=None,
             code=StatusCode.kOk,
-            sockets=self._sockets_status_info(),
             state=self.state,
         )
 
@@ -163,7 +156,6 @@ class SynapseServicer(SynapseDeviceServicer):
                 status=Status(
                     message="Device is not running",
                     code=StatusCode.kUndefinedError,
-                    sockets=self._sockets_status_info(),
                     state=self.state,
                 ),
             )
@@ -179,7 +171,6 @@ class SynapseServicer(SynapseDeviceServicer):
             status=Status(
                 message=None,
                 code=StatusCode.kOk,
-                sockets=self._sockets_status_info(),
                 state=self.state,
             ),
             list_taps_response=ListTapsResponse(taps=taps),
