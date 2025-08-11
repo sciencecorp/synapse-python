@@ -1,0 +1,53 @@
+name: CLA Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  cla-check:
+    runs-on: ubuntu-latest
+    name: Check CLA Status
+
+    steps:
+      - name: Check CLA Status
+        id: cla-check
+        run: |
+          # Get PR author username
+          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
+          echo "Checking CLA status for user: $PR_AUTHOR"
+
+          # Fetch the CLA list
+          CLA_RESPONSE=$(curl -s "https://cla.science.xyz/list")
+
+          # Check if the response is valid JSON and contains the user
+          if echo "$CLA_RESPONSE" | jq -e ".submissions[] | select(.github == \"$PR_AUTHOR\")" > /dev/null 2>&1; then
+            echo "✅ CLA signed by $PR_AUTHOR"
+            echo "cla_signed=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ CLA not signed by $PR_AUTHOR"
+            echo "cla_signed=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "pr_author=$PR_AUTHOR" >> $GITHUB_OUTPUT
+
+      - name: CLA Check Failed
+        if: steps.cla-check.outputs.cla_signed == 'false'
+        run: |
+          echo "::error title=CLA Required::@${{ steps.cla-check.outputs.pr_author }} needs to sign the Contributor License Agreement (CLA) at https://cla.science.xyz/ before this PR can be merged."
+          echo ""
+          echo "Once you've signed the CLA, you can re-run this check by:"
+          echo "- Pushing a new commit to this PR, or"
+          echo "- Closing and reopening this PR"
+          echo ""
+          echo "❌ CLA not signed by ${{ steps.cla-check.outputs.pr_author }}"
+          exit 1
+
+      - name: CLA Check Passed
+        if: steps.cla-check.outputs.cla_signed == 'true'
+        run: |
+          echo "CLA check passed for ${{ steps.cla-check.outputs.pr_author }}"
+
