@@ -2,8 +2,7 @@ import asyncio
 import logging
 from typing import List, Tuple
 
-from synapse.api.datatype_pb2 import DataType
-from synapse.api.node_pb2 import NodeConfig, NodeSocket, NodeType
+from synapse.api.node_pb2 import NodeConfig, NodeType
 from synapse.server.status import Status
 from synapse.utils.ndtp_types import SynapseData
 
@@ -60,17 +59,6 @@ class BaseNode(object):
     async def emit_data(self, data):
         for node in self.downstream_nodes:
             asyncio.create_task(node.on_data_received(data))
-
-    def node_socket(self):
-        if self.socket is None:
-            return False
-
-        return NodeSocket(
-            node_id=self.id,
-            data_type=DataType.kAny,
-            bind=f"{self.socket[0]}:{self.socket[1]}",
-            type=self.type,
-        )
 
     def tap_connections(self):
         return []

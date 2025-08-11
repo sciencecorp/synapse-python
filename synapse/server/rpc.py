@@ -387,9 +387,6 @@ class SynapseServicer(SynapseDeviceServicer):
         self.logger.info("Streaming stopped.")
         return True
 
-    def _sockets_status_info(self):
-        return [node.node_socket() for node in self.nodes if node.socket]
-
     def _synapse_api_version(self):
         if self.synapse_api_version is None:
             return 0
