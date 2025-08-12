@@ -1,4 +1,3 @@
-import queue
 from collections import defaultdict
 
 import numpy as np
@@ -10,7 +9,7 @@ from synapse.api.nodes.spectral_filter_pb2 import (
     SpectralFilterConfig,
     SpectralFilterMethod,
 )
-from synapse.server.nodes import BaseNode
+from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status
 from synapse.utils.ndtp_types import ElectricalBroadbandData, SynapseData
 
