@@ -8,7 +8,7 @@ pyzmq
 build
 scipy
 cython
-rich
+rich==14.0.0
 pre-commit
 pytest
 pytest-asyncio
