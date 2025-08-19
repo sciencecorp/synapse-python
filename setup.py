@@ -26,7 +26,7 @@ extensions = [
 
 setup(
     name="science-synapse",
-    version="2.3.0",
+    version="2.3.1",
     description="Client library and CLI for the Synapse API",
     author="Science Team",
     author_email="team@science.xyz",
@@ -53,7 +53,7 @@ setup(
         "pyserial",
         "pyyaml",
         "pyzmq",
-        "rich",
+        "rich==14.0.0",
         "scipy",
         "h5py",
     ],
