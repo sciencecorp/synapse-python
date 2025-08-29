@@ -15,6 +15,7 @@ class DeviceInfo:
     capability: str
     name: str
     serial: str
+    device_type: str
 
 
 def discover_iter(socket_timeout_sec=1, discovery_timeout_sec=DISCOVERY_TIMEOUT_SEC):
@@ -40,11 +41,11 @@ def discover_iter(socket_timeout_sec=1, discovery_timeout_sec=DISCOVERY_TIMEOUT_
             else:
                 data = data.decode("ascii").split()
                 if data[0] == "ID":
-                    if len(data) != 5:
+                    if len(data) != 6:
                         continue
-                    _, serial, capability, port, name = data
+                    _, serial, capability, port, name, device_type = data
                     dev_info = DeviceInfo(
-                        server[0], int(port), capability, name, serial
+                        server[0], int(port), capability, name, serial, device_type
                     )
                     if dev_info not in devices:
                         devices.append(dev_info)
