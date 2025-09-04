@@ -23,9 +23,8 @@ class DeviceTable:
 
 def generate_layout(device_table):
     device_count = len(device_table.devices)
-    platform_info = "⌘C to stop" if sys.platform == "darwin" else "Ctrl-C to stop"
     spinner_text = (
-        f"Discovering Synapse devices... Found {device_count} so far ({platform_info})"
+        f"Discovering Synapse devices... Found {device_count} so far (Ctrl-C to stop)"
     )
     device_table.table.title.text = spinner_text
     return device_table.table
