@@ -17,7 +17,10 @@ def upload(args):
     file_size_mb = file_size / (1024 * 1024)
 
     uri = args.uri
-    remote_path = f"scifi@{uri}:/home/scifi/replay"
+    remote_host = f"scifi@{uri}"
+    remote_dir = "~/replay"
+    remote_path = f"{remote_host}:{remote_dir}"
+    mkdir_command = ["ssh", remote_host, f"mkdir -p {remote_dir}"]
     scp_command = ["scp", args.filename, remote_path]
 
     console.print(f"[cyan]Uploading file:[/cyan] {args.filename}")
@@ -25,12 +28,15 @@ def upload(args):
     console.print(f"[cyan]Destination:[/cyan] {remote_path}")
 
     try:
+        # Ensure ~/replay directory exists
+        console.print(f"\n[cyan]Ensuring directory exists: {remote_dir}[/cyan]")
+        subprocess.run(mkdir_command, check=True, capture_output=True, text=True)
+        console.print(f"[green]✓ Directory ready[/green]")
+
+        # Copy over the file
         console.print(f"\n[cyan]Uploading to {remote_path}...[/cyan]")
         console.print("[dim]You may be prompted for a password[/dim]\n")
-        
-        # This allows SCP to interact with the terminal directly
         result = subprocess.run(scp_command, check=True)
-        
         console.print(f"\n[bold green]✓ Successfully uploaded {args.filename}[/bold green]")
         
     except subprocess.CalledProcessError as e:
