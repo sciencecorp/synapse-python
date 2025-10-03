@@ -37,6 +37,6 @@ def upload(args):
         console.print(f"\n[bold red]✗ Upload failed[/bold red]")
 
 def add_commands(subparsers):
-    upload_parser = subparsers.add_parser("upload", help="Upload HDF5 recordings to the Axon Terminal")
+    upload_parser = subparsers.add_parser("upload", help="Upload HDF5 recordings to your Synapse device")
     upload_parser.add_argument("filename", type=str, help="Path to the file to upload")
     upload_parser.set_defaults(func=upload)
