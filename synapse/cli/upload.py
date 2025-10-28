@@ -1,5 +1,6 @@
 import os
 import csv
+import json
 import subprocess
 from pathlib import Path
 import numpy as np
@@ -62,6 +63,48 @@ def validate_hdf5_structure(filename, console):
     except Exception as e:
         console.print(f"[bold red]Error validating HDF5 file: {e}[/bold red]")
         return False
+
+def extract_metadata(filename, console):
+    """
+    Extract metadata from HDF5 file and compute derived values.
+    Returns a dictionary with duration_s and num_channels.
+    """
+    console.print(f"\n[cyan]Extracting metadata...[/cyan]")
+    
+    try:
+        with h5py.File(filename, 'r') as f:
+            # Read sample_rate_hz from root attributes
+            sample_rate_hz = f.attrs['sample_rate_hz']
+            
+            # Get number of elements in timestamp_ns
+            timestamp_ns = f['acquisition']['timestamp_ns']
+            num_timestamps = len(timestamp_ns)
+            
+            # Get number of channel IDs
+            channel_ids = f['general']['extracellular_ephys']['electrodes']['id']
+            num_channels = len(channel_ids)
+            
+            # Calculate duration in seconds
+            duration_s = num_timestamps / 32000
+            
+            console.print(f"[dim]Sample rate: {sample_rate_hz} Hz[/dim]")
+            console.print(f"[dim]Number of timestamps: {num_timestamps:,}[/dim]")
+            console.print(f"[dim]Number of channels: {num_channels}[/dim]")
+            console.print(f"[dim]Calculated duration: {duration_s:.2f} s[/dim]")
+            
+            metadata = {
+                "duration_s": duration_s,
+                "num_channels": int(num_channels)
+            }
+            
+            console.print("[green]✓ Metadata extracted[/green]")
+            return metadata
+            
+    except Exception as e:
+        console.print(f"[bold red]Error extracting metadata: {e}[/bold red]")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        return None
 
 def compute_spike_statistics(filename, console, num_chunks=128, threshold_std=3.0):
     """
@@ -219,6 +262,23 @@ def upload(args):
         console.print("[bold red]HDF5 validation failed. Upload aborted.[/bold red]")
         return
 
+    # Extract metadata and write to JSON
+    metadata = extract_metadata(args.filename, console)
+    json_path = None
+    
+    if metadata is None:
+        console.print("[bold yellow]Warning: Could not extract metadata[/bold yellow]")
+    else:
+        # Write metadata to JSON file
+        json_path = file_path.with_suffix('.json')
+        try:
+            with open(json_path, 'w') as json_file:
+                json.dump(metadata, json_file, indent=2)
+            console.print(f"[green]✓ Metadata written to {json_path}[/green]")
+        except Exception as e:
+            console.print(f"[bold red]Error writing JSON file: {e}[/bold red]")
+            json_path = None
+
     # Compute spike statistics
     spike_distribution = compute_spike_statistics(args.filename, console)
     csv_path = None
@@ -262,6 +322,13 @@ def upload(args):
         scp_command = ["scp", args.filename, remote_path]
         subprocess.run(scp_command, check=True)
         console.print(f"[bold green]✓ Successfully uploaded {args.filename}[/bold green]")
+        
+        # Upload JSON file if it exists
+        if json_path and os.path.exists(json_path):
+            console.print(f"\n[cyan]Uploading {json_path.name} to {remote_path}...[/cyan]")
+            json_scp_command = ["scp", str(json_path), remote_path]
+            subprocess.run(json_scp_command, check=True)
+            console.print(f"[bold green]✓ Successfully uploaded {json_path.name}[/bold green]")
         
         # Upload CSV file if it exists
         if csv_path and os.path.exists(csv_path):
