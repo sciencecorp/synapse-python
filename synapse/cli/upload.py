@@ -270,7 +270,7 @@ def upload(args):
         console.print("[bold yellow]Warning: Could not extract metadata[/bold yellow]")
     else:
         # Write metadata to JSON file
-        json_path = file_path.with_suffix('.json')
+        json_path = Path(str(file_path) + '.json')
         try:
             with open(json_path, 'w') as json_file:
                 json.dump(metadata, json_file, indent=2)
