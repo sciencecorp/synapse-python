@@ -12,7 +12,7 @@ def validate_hdf5_structure(filename, console):
     try:
         with h5py.File(filename, 'r') as f:
             # Check root attributes
-            required_root_attrs = ['lsb_uv', 'sample_rate_hz', 'session_description', 'session_start_time']
+            required_root_attrs = ['lsb_uv', 'sample_rate_hz', 'session_start_time']
             for attr in required_root_attrs:
                 if attr not in f.attrs:
                     console.print(f"[bold red]Missing root attribute: {attr}[/bold red]")
@@ -26,9 +26,6 @@ def validate_hdf5_structure(filename, console):
             acq = f['acquisition']
             required_datasets = [
                 'ElectricalSeries',
-                'channel_range_count',
-                'channel_range_start',
-                'channel_range_type',
                 'sequence_number',
                 'timestamp_ns',
                 'unix_timestamp_ns'
