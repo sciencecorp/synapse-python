@@ -85,7 +85,7 @@ def extract_metadata(filename, console):
             num_channels = len(channel_ids)
             
             # Calculate duration in seconds
-            duration_s = num_timestamps / 32000
+            duration_s = num_timestamps / sample_rate_hz
             
             console.print(f"[dim]Sample rate: {sample_rate_hz} Hz[/dim]")
             console.print(f"[dim]Number of timestamps: {num_timestamps:,}[/dim]")
@@ -111,7 +111,7 @@ def compute_spike_statistics(filename, console, num_chunks=128, threshold_std=3.
     Compute aggregate spike statistics across all channels.
     Returns total spike distribution across time chunks with squaring transformation.
     """
-    console.print(f"\n[cyan]Computing spike distribution with {num_chunks} time chunks...[/cyan]")
+    console.print(f"\n[cyan]Computing spike distribution with {num_chunks} time chunks for UI visualization...[/cyan]")
     
     try:
         with h5py.File(filename, 'r') as f:
@@ -128,7 +128,6 @@ def compute_spike_statistics(filename, console, num_chunks=128, threshold_std=3.
             # Determine data layout
             if len(electrical_series.shape) == 1:
                 # Data is 1D - likely interleaved channels
-                console.print("[yellow]Warning: 1D data detected. Assuming interleaved channel format.[/yellow]")
                 samples_per_channel = total_samples // num_channels
                 is_interleaved = True
             else:
@@ -316,26 +315,19 @@ def upload(args):
         subprocess.run(mkdir_command, check=True, capture_output=True, text=True)
         console.print(f"[green]✓ Directory ready[/green]")
 
-        # Copy over the HDF5 file
-        console.print(f"\n[cyan]Uploading {args.filename} to {remote_path}...[/cyan]")
-        console.print("[dim]You may be prompted for a password[/dim]\n")
-        scp_command = ["scp", args.filename, remote_path]
-        subprocess.run(scp_command, check=True)
-        console.print(f"[bold green]✓ Successfully uploaded {args.filename}[/bold green]")
-        
-        # Upload JSON file if it exists
+        # Collect all files to upload
+        files_to_upload = [args.filename]
         if json_path and os.path.exists(json_path):
-            console.print(f"\n[cyan]Uploading {json_path.name} to {remote_path}...[/cyan]")
-            json_scp_command = ["scp", str(json_path), remote_path]
-            subprocess.run(json_scp_command, check=True)
-            console.print(f"[bold green]✓ Successfully uploaded {json_path.name}[/bold green]")
-        
-        # Upload CSV file if it exists
+            files_to_upload.append(str(json_path))
         if csv_path and os.path.exists(csv_path):
-            console.print(f"\n[cyan]Uploading {csv_path.name} to {remote_path}...[/cyan]")
-            csv_scp_command = ["scp", str(csv_path), remote_path]
-            subprocess.run(csv_scp_command, check=True)
-            console.print(f"[bold green]✓ Successfully uploaded {csv_path.name}[/bold green]")
+            files_to_upload.append(str(csv_path))
+        
+        # Upload all files in a single SCP command
+        console.print(f"\n[cyan]Uploading {len(files_to_upload)} file(s) to {remote_path}...[/cyan]")
+        console.print("[dim]You may be prompted for a password[/dim]\n")
+        scp_command = ["scp"] + files_to_upload + [remote_path]
+        subprocess.run(scp_command, check=True)
+        console.print(f"[bold green]✓ Successfully uploaded all files[/bold green]")
         
     except subprocess.CalledProcessError as e:
         console.print(f"\n[bold red]✗ Upload failed[/bold red]")
