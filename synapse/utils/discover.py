@@ -41,9 +41,18 @@ def discover_iter(socket_timeout_sec=1, discovery_timeout_sec=DISCOVERY_TIMEOUT_
             else:
                 data = data.decode("ascii").split()
                 if data[0] == "ID":
-                    if len(data) < 6:
-                        continue
-                    _, serial, capability, port, name, device_type, *_ = data
+                    # Backward compatability
+                    serial = "unknown_serial"
+                    capability = "unknown_capability"
+                    port = 0
+                    name = "unknown_name"
+                    device_type = "unknown_device"
+                    
+                    if len(data) == 5:
+                        _, serial, capability, port, name = data
+                    elif len(data) >= 6:
+                        _, serial, capability, port, name, device_type, *_ = data
+
                     dev_info = DeviceInfo(
                         server[0], int(port), capability, name, serial, device_type
                     )
