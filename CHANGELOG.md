@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.0.0](https://github.com/sciencecorp/synapse-python/compare/v1.0.1...v2.0.0) (2025-12-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* add SpikeDetector, SpikeBinner nodes to client; remove SpikeDetect node from client and server
+
+### Features
+
+* add `get_last_sync_time_ns` to TimeSyncClient ([#102](https://github.com/sciencecorp/synapse-python/issues/102)) ([90a7ffc](https://github.com/sciencecorp/synapse-python/commit/90a7ffcb4e889d79a0d2fbe1127a6f2fa2186f82))
+* add SpikeDetector, SpikeBinner nodes; remove SpikeDetect node ([#99](https://github.com/sciencecorp/synapse-python/issues/99)) ([2a6c029](https://github.com/sciencecorp/synapse-python/commit/2a6c02919dc87e96d410a41f8761919922d6604b))
+* add TimeSyncClient ([#101](https://github.com/sciencecorp/synapse-python/issues/101)) ([9f89ee3](https://github.com/sciencecorp/synapse-python/commit/9f89ee33a37cd18447aced3d2b023ec738be803b))
+* Fix issue where uri is forgotten ([#104](https://github.com/sciencecorp/synapse-python/issues/104)) ([c84a88a](https://github.com/sciencecorp/synapse-python/commit/c84a88a949bec74c57f532696148b952de6434f7))
+* populate synapse_api_version DeviceInfo field in server ([#94](https://github.com/sciencecorp/synapse-python/issues/94)) ([20b0aea](https://github.com/sciencecorp/synapse-python/commit/20b0aeaf37776c9aebdca9420172cca13f87184f))
+
+
+### Bug Fixes
+
+* configure iface ip for local test ([#148](https://github.com/sciencecorp/synapse-python/issues/148)) ([be02b14](https://github.com/sciencecorp/synapse-python/commit/be02b14818a779cd04acd0413e35d6b969a50fe3))
+* fix issue with LogLevel type annotation on certain client device methods ([#105](https://github.com/sciencecorp/synapse-python/issues/105)) ([e0bc439](https://github.com/sciencecorp/synapse-python/commit/e0bc439b7df613abbad87e7039ce18636a501170))
+* increase timeout for discovery ([#149](https://github.com/sciencecorp/synapse-python/issues/149)) ([6228713](https://github.com/sciencecorp/synapse-python/commit/62287135098fc7de7c64957a157688611c66ae05))
+* synapsectl deploy issues with dependency: rich ([#154](https://github.com/sciencecorp/synapse-python/issues/154)) ([c1201db](https://github.com/sciencecorp/synapse-python/commit/c1201db781d8dc635c6266237563983a99b5c18d))
+* Update paths for NWB compatibility ([#123](https://github.com/sciencecorp/synapse-python/issues/123)) ([3ae1970](https://github.com/sciencecorp/synapse-python/commit/3ae1970be69e238054f06c4c6407334216e478d8))
+
 ## [2.2.0](https://github.com/sciencecorp/synapse-python/compare/v2.1.0...v2.2.0) (2025-05-01)
 
 
