@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define variables
-PROTOC="python3 -m grpc_tools.protoc"
+PROTOC="python -m grpc_tools.protoc"
 PROTO_DIR_SYNAPSE_API="./synapse-api"
 PROTO_OUT_SYNAPSE_API="./synapse"
 
