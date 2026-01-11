@@ -18,6 +18,10 @@ from synapse.api.device_pb2 import (
     UpdateDeviceSettingsRequest,
     UpdateDeviceSettingsResponse,
 )
+from synapse.api.app_pb2 import (
+    ListAppsRequest,
+    ListAppsResponse,
+)
 from synapse.client.config import Config
 from synapse.utils.log import log_level_to_pb
 
@@ -195,6 +199,15 @@ class Device(object):
 
         except Exception as e:
             self.logger.error(f"Error during update settings: {str(e)}")
+            return None
+
+    def list_apps(self) -> Optional[ListAppsResponse]:
+        """List installed applications on the device."""
+        try:
+            response = self.rpc.ListApps(ListAppsRequest())
+            return response
+        except grpc.RpcError as e:
+            self.logger.error("Error listing apps: %s", e.details())
             return None
 
     def _handle_status_response(self, status):

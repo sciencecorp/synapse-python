@@ -97,6 +97,9 @@ def add_commands(subparsers):
     )
     f.set_defaults(func=get_logs)
 
+    g = subparsers.add_parser("list-apps", help="List installed applications on the device")
+    g.set_defaults(func=list_apps)
+
 
 def info(args):
     device = syn.Device(args.uri, args.verbose)
@@ -338,3 +341,23 @@ def get_logs(args):
     finally:
         if output_file:
             output_file.close()
+
+
+def list_apps(args):
+    console = Console()
+    with console.status("Listing installed applications...", spinner="bouncingBall"):
+        device = syn.Device(args.uri, args.verbose)
+        response = device.list_apps()
+
+        if not response:
+            console.print("[bold red]Failed to list applications")
+            return
+
+        if not response.apps:
+            console.print("[yellow]No applications installed on the device")
+            return
+
+        console.print("[bold]Installed Applications:[/bold]")
+        for app in response.apps:
+            version_str = f" (v{app.version})" if app.version else ""
+            console.print(f"  • {app.name}{version_str}")
