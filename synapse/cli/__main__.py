@@ -9,8 +9,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from synapse.cli import (
-    build,
-    deploy,
+    apps,
     discover,
     files,
     offline_plot,
@@ -76,8 +75,7 @@ def main():
     offline_plot.add_commands(subparsers)
     files.add_commands(subparsers)
     taps.add_commands(subparsers)
-    deploy.add_commands(subparsers)
-    build.add_commands(subparsers)
+    apps.add_commands(subparsers)
     settings.add_commands(subparsers)
     args = parser.parse_args()
 

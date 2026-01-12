@@ -260,21 +260,3 @@ def deploy_cmd(args):
             "[yellow]No URI provided. Package created but not deployed.[/yellow]"
         )
         console.print(f"[green]Package available at:[/green] {deb_package}")
-
-
-def add_commands(subparsers):
-    """Add deploy commands to the CLI"""
-    deploy_parser = subparsers.add_parser(
-        "deploy", help="Deploy an application to a Synapse device"
-    )
-    deploy_parser.add_argument(
-        "app_dir", nargs="?", default=".", help="Path to the application directory"
-    )
-    deploy_parser.add_argument(
-        "--package",
-        "-p",
-        help="Path to a pre-built .deb to deploy (skips local build and package steps)",
-        type=str,
-        default=None,
-    )
-    deploy_parser.set_defaults(func=deploy_cmd)

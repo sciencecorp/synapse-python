@@ -544,31 +544,3 @@ def build_cmd(args) -> None:
             box=box.DOUBLE,
         )
     )
-
-
-def add_commands(subparsers) -> None:
-    """Register the *build* command with the top-level CLI parser."""
-
-    build_parser = subparsers.add_parser(
-        "build",
-        help="Cross-compile and package an application into a .deb without deploying",
-    )
-    build_parser.add_argument(
-        "app_dir",
-        nargs="?",
-        default=".",
-        help="Path to the application directory (defaults to current working directory)",
-    )
-    build_parser.add_argument(
-        "--skip-build",
-        action="store_true",
-        default=False,
-        help="Skip compilation phase; assume the binary already exists and only build the .deb package.",
-    )
-    build_parser.add_argument(
-        "--clean",
-        action="store_true",
-        default=False,
-        help="Clean build directories and force a complete rebuild from scratch.",
-    )
-    build_parser.set_defaults(func=build_cmd)
