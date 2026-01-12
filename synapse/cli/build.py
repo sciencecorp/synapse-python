@@ -401,6 +401,8 @@ WantedBy=multi-user.target
             "Synapse Application",
             "--architecture",
             "arm64",
+            "--category",
+            "synapse-apps",
         ]
 
         # Attach lifecycle scripts
