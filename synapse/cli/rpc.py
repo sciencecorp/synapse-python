@@ -97,9 +97,6 @@ def add_commands(subparsers):
     )
     f.set_defaults(func=get_logs)
 
-    g = subparsers.add_parser("list-apps", help="List installed applications on the device")
-    g.set_defaults(func=list_apps)
-
 
 def info(args):
     device = syn.Device(args.uri, args.verbose)
