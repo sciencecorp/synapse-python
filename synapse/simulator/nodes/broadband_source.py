@@ -10,7 +10,7 @@ from synapse.server.nodes.base import BaseNode
 from synapse.api.tap_pb2 import TapConnection, TapType
 from synapse.api.datatype_pb2 import BroadbandFrame
 from synapse.server.status import Status
-from synapse.utils.ndtp_types import ElectricalBroadbandData
+from synapse.utils.types import ElectricalBroadbandData
 
 def r_sample(bit_width: int):
     return random.randint(0, 2**bit_width - 1)
