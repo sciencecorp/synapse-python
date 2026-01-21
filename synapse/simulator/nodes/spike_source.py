@@ -6,7 +6,7 @@ from synapse.api.node_pb2 import NodeType
 from synapse.api.nodes.spike_source_pb2 import SpikeSourceConfig
 from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status
-from synapse.utils.ndtp_types import SpiketrainData
+from synapse.utils.types import SpiketrainData
 
 def r_sample(bit_width: int):
     return random.randint(0, 2**bit_width - 1)

@@ -11,7 +11,7 @@ from synapse.api.nodes.spectral_filter_pb2 import (
 )
 from synapse.server.nodes.base import BaseNode
 from synapse.server.status import Status
-from synapse.utils.ndtp_types import ElectricalBroadbandData, SynapseData
+from synapse.utils.types import ElectricalBroadbandData, SynapseData
 
 
 def get_filter_coefficients(method, low_cutoff_hz, high_cutoff_hz, sample_rate):

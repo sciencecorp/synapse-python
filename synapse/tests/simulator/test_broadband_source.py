@@ -4,7 +4,7 @@ from synapse.api.nodes.broadband_source_pb2 import BroadbandSourceConfig
 from synapse.simulator.nodes.broadband_source import BroadbandSource
 from synapse.api.nodes.signal_config_pb2 import SignalConfig, ElectrodeConfig
 from synapse.api.channel_pb2 import Channel
-from synapse.utils.ndtp_types import ElectricalBroadbandData
+from synapse.utils.types import ElectricalBroadbandData
 
 
 @pytest.mark.asyncio

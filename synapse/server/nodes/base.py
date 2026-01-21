@@ -4,7 +4,7 @@ from typing import List, Tuple
 
 from synapse.api.node_pb2 import NodeConfig, NodeType
 from synapse.server.status import Status
-from synapse.utils.ndtp_types import SynapseData
+from synapse.utils.types import SynapseData
 
 
 class BaseNode(object):
