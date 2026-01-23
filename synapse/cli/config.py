@@ -9,7 +9,7 @@ from synapse.api.device_pb2 import DeviceConfiguration
 from synapse.client.config import Config
 from synapse.cli.files import find_password
 
-SCIFI_DEFAULT_SFTP_USER = "root"
+SCIFI_DEFAULT_SFTP_USER = "scifi-sftp"
 
 
 def add_user_arguments(parser: argparse.ArgumentParser):
@@ -17,7 +17,7 @@ def add_user_arguments(parser: argparse.ArgumentParser):
         "--username",
         type=str,
         default=SCIFI_DEFAULT_SFTP_USER,
-        help="Username for SSH/SFTP connection (default: root)",
+        help="Username for SSH/SFTP connection (default: scifi-sftp)",
     )
     parser.add_argument(
         "--env-file",

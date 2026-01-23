@@ -224,7 +224,7 @@ class Device(object):
     def save_default_config(
         self,
         config: Config,
-        username: str = "root",
+        username: str = "scifi-sftp",
         password: Optional[str] = None,
         key_filename: Optional[str] = None,
     ) -> bool:
@@ -236,7 +236,7 @@ class Device(object):
 
         Args:
             config: The configuration to save as default
-            username: SSH username (default: "root")
+            username: SSH username (default: "scifi-sftp")
             password: SSH password (optional if using key)
             key_filename: Path to SSH private key file (optional if using password)
 
@@ -257,13 +257,14 @@ class Device(object):
                 self.logger.error("Failed to connect via SFTP")
                 return False
 
-            remote_path = "/root/.scifi/default_config.json"
+            remote_dir = "/root/.scifi"
+            remote_path = f"{remote_dir}/default_config.json"
 
-            # Ensure the directory exists
+            # Ensure the directory exists (paramiko raises IOError, not FileNotFoundError)
             try:
-                sftp_conn.stat("/root/.scifi")
-            except FileNotFoundError:
-                sftp_conn.mkdir("/root/.scifi")
+                sftp_conn.stat(remote_dir)
+            except IOError:
+                sftp_conn.mkdir(remote_dir)
 
             sftp_conn.putfo(io.BytesIO(json_bytes), remote_path)
             sftp.close_sftp(ssh, sftp_conn)
@@ -276,7 +277,7 @@ class Device(object):
 
     def clear_default_config(
         self,
-        username: str = "root",
+        username: str = "scifi-sftp",
         password: Optional[str] = None,
         key_filename: Optional[str] = None,
     ) -> bool:
@@ -284,7 +285,7 @@ class Device(object):
         Clear the default configuration from the device.
 
         Args:
-            username: SSH username (default: "root")
+            username: SSH username (default: "scifi-sftp")
             password: SSH password (optional if using key)
             key_filename: Path to SSH private key file (optional if using password)
 
@@ -306,10 +307,9 @@ class Device(object):
             try:
                 sftp_conn.remove(remote_path)
                 self.logger.info("Successfully cleared default config from device")
-            except FileNotFoundError:
-                self.logger.info("Default config file does not exist, nothing to clear")
             except IOError as e:
-                self.logger.info(f"Default config file could not be removed: {e}")
+                # File doesn't exist or other IO error - either way, consider it cleared
+                self.logger.info(f"Default config file not present or could not be removed: {e}")
 
             sftp.close_sftp(ssh, sftp_conn)
             return True
