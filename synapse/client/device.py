@@ -257,19 +257,8 @@ class Device(object):
                 self.logger.error("Failed to connect via SFTP")
                 return False
 
-            remote_dir = "/opt/scifi/config"
-            remote_path = f"{remote_dir}/default_config.json"
-
-            # Ensure the directory exists (paramiko raises IOError, not FileNotFoundError)
-            try:
-                sftp_conn.stat(remote_dir)
-            except IOError:
-                # Create parent dirs if needed
-                try:
-                    sftp_conn.stat("/opt/scifi")
-                except IOError:
-                    sftp_conn.mkdir("/opt/scifi")
-                sftp_conn.mkdir(remote_dir)
+            # Use /opt/scifi/data/ which scifi-sftp has write access to
+            remote_path = "/opt/scifi/data/default_config.json"
 
             sftp_conn.putfo(io.BytesIO(json_bytes), remote_path)
             sftp.close_sftp(ssh, sftp_conn)
@@ -307,7 +296,7 @@ class Device(object):
                 self.logger.error("Failed to connect via SFTP")
                 return False
 
-            remote_path = "/opt/scifi/config/default_config.json"
+            remote_path = "/opt/scifi/data/default_config.json"
 
             try:
                 sftp_conn.remove(remote_path)
