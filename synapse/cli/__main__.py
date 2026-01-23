@@ -10,6 +10,7 @@ from rich.logging import RichHandler
 
 from synapse.cli import (
     apps,
+    config,
     discover,
     files,
     offline_plot,
@@ -69,6 +70,7 @@ def main():
         help="Enable verbose output",
     )
     subparsers = parser.add_subparsers(title="Commands")
+    config.add_commands(subparsers)
     discover.add_commands(subparsers)
     rpc.add_commands(subparsers)
     streaming.add_commands(subparsers)

@@ -2,8 +2,12 @@ from __future__ import annotations
 from typing import AsyncGenerator, Optional, Union
 import grpc
 from google.protobuf.empty_pb2 import Empty
+from google.protobuf.json_format import MessageToJson
+import io
 import logging
 from datetime import datetime
+
+from synapse.client import sftp
 
 from synapse.api.logging_pb2 import (
     LogQueryResponse,
@@ -216,3 +220,100 @@ class Device(object):
             return False
         else:
             return True
+
+    def save_default_config(
+        self,
+        config: Config,
+        username: str = "root",
+        password: Optional[str] = None,
+        key_filename: Optional[str] = None,
+    ) -> bool:
+        """
+        Save a configuration as the default config on the device.
+
+        The device will automatically apply this configuration when it's stopped
+        and has no existing configuration.
+
+        Args:
+            config: The configuration to save as default
+            username: SSH username (default: "root")
+            password: SSH password (optional if using key)
+            key_filename: Path to SSH private key file (optional if using password)
+
+        Returns:
+            True on success, False on failure
+        """
+        assert isinstance(config, Config), "config must be an instance of Config"
+
+        try:
+            hostname = self.uri.split(":")[0]
+            json_str = MessageToJson(config.to_proto())
+            json_bytes = json_str.encode("utf-8")
+
+            ssh, sftp_conn = sftp.connect_sftp(
+                hostname, username, password=password, key_filename=key_filename
+            )
+            if ssh is None or sftp_conn is None:
+                self.logger.error("Failed to connect via SFTP")
+                return False
+
+            remote_path = "/root/.scifi/default_config.json"
+
+            # Ensure the directory exists
+            try:
+                sftp_conn.stat("/root/.scifi")
+            except FileNotFoundError:
+                sftp_conn.mkdir("/root/.scifi")
+
+            sftp_conn.putfo(io.BytesIO(json_bytes), remote_path)
+            sftp.close_sftp(ssh, sftp_conn)
+            self.logger.info("Successfully saved default config to device")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to save default config: {e}")
+            return False
+
+    def clear_default_config(
+        self,
+        username: str = "root",
+        password: Optional[str] = None,
+        key_filename: Optional[str] = None,
+    ) -> bool:
+        """
+        Clear the default configuration from the device.
+
+        Args:
+            username: SSH username (default: "root")
+            password: SSH password (optional if using key)
+            key_filename: Path to SSH private key file (optional if using password)
+
+        Returns:
+            True on success (including if file didn't exist), False on error
+        """
+        try:
+            hostname = self.uri.split(":")[0]
+
+            ssh, sftp_conn = sftp.connect_sftp(
+                hostname, username, password=password, key_filename=key_filename
+            )
+            if ssh is None or sftp_conn is None:
+                self.logger.error("Failed to connect via SFTP")
+                return False
+
+            remote_path = "/root/.scifi/default_config.json"
+
+            try:
+                sftp_conn.remove(remote_path)
+                self.logger.info("Successfully cleared default config from device")
+            except FileNotFoundError:
+                self.logger.info("Default config file does not exist, nothing to clear")
+            except IOError as e:
+                self.logger.info(f"Default config file could not be removed: {e}")
+
+            sftp.close_sftp(ssh, sftp_conn)
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to clear default config: {e}")
+            return False
