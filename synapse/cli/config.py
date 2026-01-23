@@ -164,7 +164,7 @@ def get_default(args):
         return
 
     hostname = args.uri.split(":")[0]
-    remote_path = "/root/.scifi/default_config.json"
+    remote_path = "/opt/scifi/config/default_config.json"
 
     with console.status("Fetching default config from device...", spinner="bouncingBall"):
         ssh, sftp_conn = sftp.connect_sftp(
@@ -177,7 +177,7 @@ def get_default(args):
         try:
             with sftp_conn.open(remote_path, "r") as f:
                 config_content = f.read().decode("utf-8")
-        except FileNotFoundError:
+        except IOError:
             sftp.close_sftp(ssh, sftp_conn)
             console.print("[yellow]No default config found on device[/yellow]")
             return
