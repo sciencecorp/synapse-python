@@ -102,6 +102,12 @@ class Tap(object):
         self.zmq_socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
         self.zmq_socket.setsockopt(zmq.TCP_KEEPALIVE_IDLE, 60)
 
+        # Set ZMQ heartbeats to keep connection alive (especially important on Windows)
+        # This generates bidirectional traffic to prevent NAT/firewall timeouts
+        self.zmq_socket.setsockopt(zmq.HEARTBEAT_IVL, 30000)  # 30s between heartbeats
+        self.zmq_socket.setsockopt(zmq.HEARTBEAT_TIMEOUT, 90000)  # 90s to consider dead
+        self.zmq_socket.setsockopt(zmq.HEARTBEAT_TTL, 90000)  # TTL for heartbeat packets
+
         # Replace the endpoint with our device URI if needed
         endpoint = selected_tap.endpoint
         if "://" in endpoint:
