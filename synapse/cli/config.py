@@ -164,7 +164,8 @@ def get_default(args):
         return
 
     hostname = args.uri.split(":")[0]
-    remote_path = "/opt/scifi/data/default_config.json"
+    # scifi-sftp user is chrooted to /opt/scifi/data/
+    remote_path = "/default_config.json"
 
     with console.status("Fetching default config from device...", spinner="bouncingBall"):
         ssh, sftp_conn = sftp.connect_sftp(
