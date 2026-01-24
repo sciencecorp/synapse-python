@@ -257,9 +257,9 @@ class Device(object):
                 self.logger.error("Failed to connect via SFTP")
                 return False
 
-            # scifi-sftp user is chrooted to /opt/scifi/data/, so use root-relative path
-            # This maps to /opt/scifi/data/default_config.json on the actual filesystem
-            remote_path = "/default_config.json"
+            # scifi-sftp user is chrooted to /opt/scifi/data/
+            # Write to disk_writer/ which has group write permissions
+            remote_path = "/disk_writer/default_config.json"
 
             sftp_conn.putfo(io.BytesIO(json_bytes), remote_path)
             sftp.close_sftp(ssh, sftp_conn)
@@ -298,7 +298,7 @@ class Device(object):
                 return False
 
             # scifi-sftp user is chrooted to /opt/scifi/data/
-            remote_path = "/default_config.json"
+            remote_path = "/disk_writer/default_config.json"
 
             try:
                 sftp_conn.remove(remote_path)
