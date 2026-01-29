@@ -6,7 +6,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name="science-synapse",
-    version="2.4.0",
+    version="2.4.1",
     description="Client library and CLI for the Synapse API",
     author="Science Team",
     author_email="team@science.xyz",
