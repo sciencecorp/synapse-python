@@ -593,6 +593,9 @@ def configure_device(device, config, console):
 
         # Apply the configuration to the device
         configure_status = device.configure_with_status(config)
+        if configure_status is None:
+            console.print("[bold red]Failed to configure device: connection error[/bold red]")
+            return False
         if configure_status.code != StatusCode.kOk:
             console.print(
                 f"[bold red]Failed to configure device: {configure_status.message}[/bold red]"
@@ -610,6 +613,9 @@ def start_device(device, console):
 
     with console.status("Starting device...", spinner="bouncingBall"):
         start_status = device.start_with_status()
+        if start_status is None:
+            console.print("[bold red]Failed to start device: connection error[/bold red]")
+            return False
         if start_status.code != StatusCode.kOk:
             console.print(
                 f"[bold red]Failed to start device: {start_status.message}[/bold red]"
@@ -621,6 +627,9 @@ def start_device(device, console):
 def stop_device(device, console):
     with console.status("Stopping device...", spinner="bouncingBall"):
         stop_status = device.stop_with_status()
+        if stop_status is None:
+            console.print("[bold red]Failed to stop device: connection error[/bold red]")
+            return False
         if stop_status.code != StatusCode.kOk:
             console.print(
                 f"[bold red]Failed to stop device: {stop_status.message}[/bold red]"
