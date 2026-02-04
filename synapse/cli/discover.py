@@ -14,11 +14,12 @@ class DeviceTable:
         self.table = Table(show_lines=True, min_width=80)
         self.table.title = Spinner("dots")
         self.table.add_column("Name", justify="left")
-        self.table.add_column("Host", justify="right")
+        self.table.add_column("Host", justify="left")
+        self.table.add_column("Device Type", justify="left")
 
     def add_device(self, device):
         self.devices.append(device)
-        self.table.add_row(device.name, device.host)
+        self.table.add_row(device.name, device.host, device.device_type)
 
 
 def generate_layout(device_table):
