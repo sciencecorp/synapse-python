@@ -32,6 +32,14 @@ setup(
         "scipy",
         "h5py",
     ],
+    extras_require={
+        "model-convert": [
+            "onnx>=1.12.0,<1.16.0",
+            "torch",
+            "packaging",
+            "protobuf",
+        ],
+    },
     entry_points={
         "console_scripts": [
             "synapsectl = synapse.cli:main",
