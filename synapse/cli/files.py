@@ -11,7 +11,6 @@ from rich.table import Table
 from rich import progress
 from rich.prompt import Confirm
 
-from synapse import Device
 import synapse.client.sftp as sftp
 from synapse.utils.file import format_mode, format_time, filesize_binary
 
@@ -155,28 +154,29 @@ def setup_connection(
     forget_password: bool,
     console: Console,
 ) -> Optional[tuple[paramiko.SSHClient, paramiko.SFTPClient]]:
-    dev_name = Device(uri).get_name()
+    # Strip port if present - SFTP uses port 22, not the gRPC port
+    hostname = uri.split(":")[0] if ":" in uri else uri
     password = find_password(
-        dev_name, env_file
+        hostname, env_file
     )  # Check if password is provided or stored in env file
     if password is None:
-        console.print(f"[bold red]Didnt find any password for {uri}[/bold red]")
+        console.print(f"[bold red]Didnt find any password for {hostname}[/bold red]")
         return
 
     # Open SFTP connection
     with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
         try:
-            ssh, sftp_conn = sftp.connect_sftp(uri, username, password)
+            ssh, sftp_conn = sftp.connect_sftp(hostname, username, password)
         except paramiko.ssh_exception.AuthenticationException:
-            console.print(f"[bold red]Authentication failed for {uri}[/bold red]")
+            console.print(f"[bold red]Authentication failed for {hostname}[/bold red]")
             console.print("[yellow] Incorrect username or password.")
             return None
     if ssh is None or sftp_conn is None:
-        console.print(f"[bold red]Failed to connect to {uri}[/bold red]")
+        console.print(f"[bold red]Failed to connect to {hostname}[/bold red]")
         return
     # If the connection is successful, we can prompt the user if they want to save the password
-    if not forget_password and dev_name is not None:
-        save_password(password, env_file, dev_name)
+    if not forget_password:
+        save_password(password, env_file, hostname)
     return ssh, sftp_conn
 
 

@@ -1,4 +1,5 @@
 import logging
+import socket
 import paramiko
 import paramiko.ssh_exception
 
@@ -27,20 +28,29 @@ def connect_sftp(hostname, username, password=None, pass_filename=None, key_file
         except Exception as e:
             logging.error(f"Failed to read password file: {e}")
             return None, None
-    try: 
+    try:
+        logging.debug(f"Connecting to {hostname}:{port} as {username}")
         ssh.connect(
             hostname=hostname,
             port=port,
             username=username,
             password=password,
             key_filename=key_filename,
-            timeout=5
+            timeout=10,
+            allow_agent=False,
+            look_for_keys=False,
         )
         sftp = ssh.open_sftp()
     except TimeoutError as e:
         logging.error(f"Connection to {hostname} timed out")
         return None, None
-    
+    except socket.error as e:
+        logging.error(f"Socket error connecting to {hostname}:{port}: {e}")
+        return None, None
+    except paramiko.ssh_exception.SSHException as e:
+        logging.error(f"SSH error connecting to {hostname}:{port}: {e}")
+        raise  # Re-raise to let caller handle it
+
     return ssh, sftp
 
 def close_sftp(ssh, sftp):
