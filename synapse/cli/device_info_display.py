@@ -91,6 +91,22 @@ def visualize_peripherals(info_dict):
         tree.add("No peripherals found")
     return tree
 
+def visualize_storage_devices(status):
+    tree = Tree("Storage Devices")
+    storage_devices = status.get("storage", {}).get("storage_devices", [])
+    if storage_devices:
+        for storage_device in storage_devices:
+            storage_devices_tree = tree.add(
+                f"{storage_device.get('name', 'Unknown')}"
+            )
+            total = float(storage_device.get("total_gb", 0))
+            used = float(storage_device.get("used_gb", 0))
+            used_percent = (used / total * 100) if total > 0 else 0
+            storage_devices_tree.add(f"ID: {storage_device.get('storage_device_id', 'Unknown')}")
+            storage_devices_tree.add(f"Storage: {used_percent:.1f}% used ({used:.1f}GB / {total:.1f}GB)")
+    else:
+        tree.add("No storage devices found")
+    return tree
 
 class DeviceInfoDisplay:
     """A class for displaying device information."""
@@ -135,15 +151,6 @@ class DeviceInfoDisplay:
                 battery = status["power"].get("battery_level_percent", "N/A")
                 self.console.print(f"Battery: {battery}%", highlight=False)
 
-            if "storage" in status:
-                storage = status["storage"]
-                total = float(storage.get("total_gb", 0))
-                used = float(storage.get("used_gb", 0))
-                used_percent = (used / total * 100) if total > 0 else 0
-                self.console.print(
-                    f"Storage: {used_percent:.1f}% used ({used:.1f}GB / {total:.1f}GB)",
-                    highlight=False,
-                )
-
+            self.console.print(visualize_storage_devices(status))
             self.console.print(visualize_peripherals(info_dict))
             self.console.print(visualize_configuration(info_dict, status))
