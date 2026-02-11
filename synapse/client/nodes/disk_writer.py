@@ -6,12 +6,13 @@ from synapse.client.node import Node
 class DiskWriter(Node):
     type = NodeType.kDiskWriter
 
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, storage_device_id: int):
         self.filename = filename
+        self.storage_device_id = storage_device_id
 
     def _to_proto(self):
         n = NodeConfig()
-        p = DiskWriterConfig(filename=self.filename)
+        p = DiskWriterConfig(filename=self.filename, storage_device_id=self.storage_device_id)
         n.disk_writer.CopyFrom(p)
         return n
 
@@ -22,4 +23,4 @@ class DiskWriter(Node):
         if not isinstance(proto, DiskWriterConfig):
             raise ValueError("proto is not of type DiskWriterConfig")
 
-        return DiskWriter(filename=proto.filename)
+        return DiskWriter(filename=proto.filename, storage_device_id=proto.storage_device_id)
