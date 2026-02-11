@@ -97,12 +97,12 @@ def visualize_storage_devices(status):
     if storage_devices:
         for storage_device in storage_devices:
             storage_devices_tree = tree.add(
-                f"{storage_device.get("name", "Unknown")}"
+                f"{storage_device.get('name', 'Unknown')}"
             )
             total = float(storage_device.get("total_gb", 0))
             used = float(storage_device.get("used_gb", 0))
             used_percent = (used / total * 100) if total > 0 else 0
-            storage_devices_tree.add(f"ID: {storage_device.get("storage_device_id", "Unknown")}")
+            storage_devices_tree.add(f"ID: {storage_device.get('storage_device_id', 'Unknown')}")
             storage_devices_tree.add(f"Storage: {used_percent:.1f}% used ({used:.1f}GB / {total:.1f}GB)")
     else:
         tree.add("No storage devices found")
