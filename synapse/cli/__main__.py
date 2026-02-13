@@ -17,6 +17,7 @@ from synapse.cli import (
     streaming,
     taps,
     settings,
+    upload,
 )
 from synapse.utils.discover import find_device_by_name
 
@@ -77,6 +78,7 @@ def main():
     taps.add_commands(subparsers)
     apps.add_commands(subparsers)
     settings.add_commands(subparsers)
+    upload.add_commands(subparsers)
     args = parser.parse_args()
 
     # If we need to setup the device URI, do that now
