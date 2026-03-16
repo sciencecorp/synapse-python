@@ -78,6 +78,9 @@ class BroadbandSource(BaseNode):
             now = time.time_ns()
             elapsed_ns = now - t_last_ns
             n_samples = int(sample_rate_hz * elapsed_ns / 1e9)
+            if n_samples == 0:
+                continue
+
             samples = [[ch.id, [r_sample(bit_width) for _ in range(n_samples)]] for ch in channels]
 
             try:
@@ -105,7 +108,7 @@ class BroadbandSource(BaseNode):
                     except Exception as e:
                         self.logger.error(f"Error sending data: {e}")
 
-                t_last_ns = now
+                t_last_ns += int(n_samples * 1e9 / sample_rate_hz)
             except Exception as e:
                 print(f"Error sending data: {e}")
 
