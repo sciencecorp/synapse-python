@@ -47,7 +47,6 @@ def add_commands(subparsers: argparse._SubParsersAction):
 
     parser.add_argument(
         "--username",
-        "-u",
         type=str,
         default=DEFAULT_SFTP_USER,
         help=f"SFTP username (default: {DEFAULT_SFTP_USER})",
@@ -66,6 +65,13 @@ def add_commands(subparsers: argparse._SubParsersAction):
         "-f",
         action="store_true",
         help="Don't store password locally",
+    )
+
+    parser.add_argument(
+        "--snpe-root",
+        type=str,
+        default=None,
+        help="Path to SNPE/QAIRT SDK root (or set SNPE_ROOT env var)",
     )
 
     parser.set_defaults(func=deploy_model)
@@ -108,6 +114,7 @@ def deploy_model(args):
     dlc_path = convert_to_dlc(
         args.model_path,
         input_shape=input_shape,
+        snpe_root=args.snpe_root,
         console=console,
     )
 

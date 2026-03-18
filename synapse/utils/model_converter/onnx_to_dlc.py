@@ -1,10 +1,9 @@
-"""ONNX to DLC conversion using SNPE converter.
+"""ONNX to DLC conversion via Docker container.
 
-Requirements for ONNX→DLC conversion:
-- QAIRT SDK (set SNPE_ROOT or QAIRT_ROOT environment variable)
-- Python 3.10 with: numpy, onnx, pyyaml, packaging, protobuf
-- System libraries: libc++1 (sudo apt install libc++1)
-- LD_LIBRARY_PATH must include path to libpython3.10.so
+The conversion runs inside a Docker container that has Python 3.10 and
+the required dependencies pre-installed. The user's SNPE/QAIRT SDK is
+bind-mounted at runtime (not baked into the image) to comply with
+Qualcomm's license terms.
 """
 
 import os
@@ -15,80 +14,97 @@ from typing import Optional
 
 from rich.console import Console
 
-
-def _get_snpe_root() -> Optional[str]:
-    """Get SNPE/QAIRT SDK root from environment."""
-    return os.environ.get("SNPE_ROOT") or os.environ.get("QAIRT_ROOT")
+DOCKER_IMAGE = "synapse-model-converter:latest"
 
 
-def find_snpe_converter(snpe_root: Optional[str] = None) -> Optional[str]:
-    """
-    Find the snpe-onnx-to-dlc converter binary.
-
-    Args:
-        snpe_root: Optional path to SNPE/QAIRT SDK root
-
-    Returns:
-        Path to the converter binary, or None if not found
-    """
-    if snpe_root is None:
-        snpe_root = _get_snpe_root()
-
-    if snpe_root is None:
-        return None
-
-    converter_path = os.path.join(
-        snpe_root, "bin", "x86_64-linux-clang", "snpe-onnx-to-dlc"
+def _find_model_converter_dir() -> str:
+    """Locate the model-converter/ directory containing the Dockerfile."""
+    # Walk up from this file to the repo root
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(here)))
+    candidate = os.path.join(repo_root, "model-converter")
+    if os.path.isdir(candidate) and os.path.isfile(
+        os.path.join(candidate, "Dockerfile")
+    ):
+        return candidate
+    raise FileNotFoundError(
+        f"model-converter/ directory not found at {candidate}. "
+        "Make sure you are running from the synapse-python repository."
     )
 
-    if os.path.exists(converter_path):
-        return converter_path
 
-    return None
-
-
-def _find_python310() -> Optional[str]:
-    """Find Python 3.10 executable."""
-    # Check common locations
-    candidates = [
-        "/usr/bin/python3.10",
-        shutil.which("python3.10"),
-    ]
-    for path in candidates:
-        if path and os.path.exists(path):
-            return path
-    return None
+def _image_exists() -> bool:
+    """Check if the Docker image is already built."""
+    result = subprocess.run(
+        ["docker", "image", "inspect", DOCKER_IMAGE],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
 
 
-def _setup_converter_env(snpe_root: str) -> dict:
-    """
-    Set up environment variables for the SNPE converter.
+def _build_image(console: Optional[Console] = None) -> bool:
+    """Build the model-converter Docker image."""
+    try:
+        build_dir = _find_model_converter_dir()
+    except FileNotFoundError as e:
+        if console:
+            console.print(f"[bold red]Error:[/bold red] {e}")
+        return False
 
-    The converter requires:
-    - SNPE_ROOT pointing to SDK
-    - PYTHONPATH with SDK's Python libs first, then system packages (for onnx, numpy, etc.)
-    - LD_LIBRARY_PATH including libpython3.10.so location
-    """
-    env = os.environ.copy()
+    if console:
+        console.print(
+            f"[yellow]Building Docker image [bold]{DOCKER_IMAGE}[/bold] "
+            f"(first time only)...[/yellow]"
+        )
 
-    # Set SNPE_ROOT
-    env["SNPE_ROOT"] = snpe_root
+    try:
+        subprocess.run(
+            ["docker", "build", "-t", DOCKER_IMAGE, "."],
+            cwd=build_dir,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        if console:
+            console.print(
+                "[bold red]Error:[/bold red] Failed to build model-converter Docker image"
+            )
+        return False
 
-    # Set PYTHONPATH - SDK's Python libs must come first, but we also need
-    # access to installed packages (onnx, numpy, etc.)
-    python_lib_path = os.path.join(snpe_root, "lib", "python")
-    if "PYTHONPATH" in env:
-        env["PYTHONPATH"] = f"{python_lib_path}:{env['PYTHONPATH']}"
-    else:
-        env["PYTHONPATH"] = python_lib_path
+    if console:
+        console.print(f"[green]Docker image {DOCKER_IMAGE} built successfully[/green]")
+    return True
 
-    # Set LD_LIBRARY_PATH for libpython3.10.so
-    ld_paths = ["/usr/lib/x86_64-linux-gnu"]
-    if "LD_LIBRARY_PATH" in env:
-        ld_paths.append(env["LD_LIBRARY_PATH"])
-    env["LD_LIBRARY_PATH"] = ":".join(ld_paths)
 
-    return env
+def ensure_docker(console: Optional[Console] = None) -> bool:
+    """Check that Docker is available and the image is built."""
+    if shutil.which("docker") is None:
+        if console:
+            console.print(
+                "[bold red]Error:[/bold red] Docker is required for model conversion "
+                "but was not found. Please install Docker."
+            )
+        return False
+
+    try:
+        subprocess.run(
+            ["docker", "info"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        if console:
+            console.print(
+                "[bold red]Error:[/bold red] Docker daemon is not running. "
+                "Please start Docker and try again."
+            )
+        return False
+
+    if not _image_exists():
+        return _build_image(console)
+
+    return True
 
 
 def convert_onnx_to_dlc(
@@ -99,142 +115,122 @@ def convert_onnx_to_dlc(
     snpe_root: Optional[str] = None,
     console: Optional[Console] = None,
 ) -> Optional[str]:
-    """
-    Convert an ONNX model to DLC format using SNPE converter.
+    """Convert an ONNX model to DLC format using the Docker-based converter.
 
     Args:
         onnx_path: Path to the ONNX model
         output_path: Optional output path for the DLC file
-        input_shape: Input shape to use (required if model has dynamic dims)
-        input_name: Name of the input tensor (default: "input")
-        snpe_root: Optional path to SNPE/QAIRT SDK root
+        input_shape: Input shape (required if model has dynamic dims)
+        input_name: Name of the input tensor
+        snpe_root: Path to the SNPE/QAIRT SDK
         console: Rich console for output
 
     Returns:
-        Path to the converted DLC file, or None if conversion failed
+        Path to the converted DLC file, or None on failure
     """
     if snpe_root is None:
-        snpe_root = _get_snpe_root()
+        snpe_root = os.environ.get("SNPE_ROOT") or os.environ.get("QAIRT_ROOT")
 
     if snpe_root is None:
         if console:
             console.print(
-                "[bold red]Error:[/bold red] SNPE_ROOT or QAIRT_ROOT environment variable not set"
-            )
-            console.print(
-                "[yellow]Hint: export SNPE_ROOT=/path/to/qairt/x.xx.x.xxxxxx[/yellow]"
+                "[bold red]Error:[/bold red] --snpe-root is required "
+                "(or set SNPE_ROOT / QAIRT_ROOT env var)"
             )
         return None
 
-    converter_path = find_snpe_converter(snpe_root)
-    if converter_path is None:
+    snpe_root = os.path.abspath(snpe_root)
+    if not os.path.isdir(snpe_root):
         if console:
             console.print(
-                "[bold red]Error:[/bold red] Could not find snpe-onnx-to-dlc converter"
-            )
-            console.print(
-                f"[yellow]Expected at: {snpe_root}/bin/x86_64-linux-clang/snpe-onnx-to-dlc[/yellow]"
+                f"[bold red]Error:[/bold red] SNPE root not found: {snpe_root}"
             )
         return None
 
-    # Determine output path
+    if not ensure_docker(console):
+        return None
+
+    # Resolve paths for Docker mounts
+    onnx_path = os.path.abspath(onnx_path)
+    onnx_dir = os.path.dirname(onnx_path)
+    onnx_filename = os.path.basename(onnx_path)
+
     if output_path is None:
-        base_name = os.path.splitext(os.path.basename(onnx_path))[0]
+        base_name = os.path.splitext(onnx_filename)[0]
         output_path = os.path.join(tempfile.gettempdir(), f"{base_name}.dlc")
 
-    if console:
-        console.print(f"[blue]Converting ONNX to DLC: {output_path}...[/blue]")
+    output_dir = os.path.abspath(os.path.dirname(output_path))
+    output_filename = os.path.basename(output_path)
+    os.makedirs(output_dir, exist_ok=True)
 
-    # Build command - use -d for input dimensions (short form)
+    # Build docker run command
+    # Run as the host user so output files have correct ownership
     cmd = [
-        converter_path,
-        "--input_network", onnx_path,
-        "--output_path", output_path,
+        "docker",
+        "run",
+        "--rm",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "-v",
+        f"{onnx_dir}:/input:ro",
+        "-v",
+        f"{snpe_root}:/snpe:ro",
+        "-v",
+        f"{output_dir}:/output",
+        DOCKER_IMAGE,
+        "--input",
+        f"/input/{onnx_filename}",
+        "--output",
+        f"/output/{output_filename}",
+        "--snpe-root",
+        "/snpe",
     ]
 
-    # Add input shape if provided
     if input_shape is not None:
         shape_str = ",".join(str(d) for d in input_shape)
-        cmd.extend(["-d", input_name, shape_str])
+        cmd.extend(["--input-shape", shape_str])
 
-    # Set up environment
-    env = _setup_converter_env(snpe_root)
+    if input_name != "input":
+        cmd.extend(["--input-name", input_name])
 
     if console:
-        console.print(f"[dim]Running: {' '.join(cmd)}[/dim]")
+        console.print("[dim]Running conversion in Docker container...[/dim]")
 
     try:
         result = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minute timeout
+            cmd, capture_output=True, text=True, timeout=600,
         )
-
-        if result.returncode != 0:
-            if console:
-                console.print("[bold red]DLC conversion failed:[/bold red]")
-                if result.stderr:
-                    _display_conversion_error(result.stderr, console)
-                if result.stdout:
-                    console.print(f"[dim]{result.stdout}[/dim]")
-            return None
-
-        if not os.path.exists(output_path):
-            if console:
-                console.print(
-                    "[bold red]Error:[/bold red] Converter ran but DLC file was not created"
-                )
-            return None
-
-        if console:
-            console.print(f"[green]Successfully converted to {output_path}[/green]")
-
-        return output_path
-
     except subprocess.TimeoutExpired:
         if console:
-            console.print("[bold red]Error:[/bold red] Conversion timed out after 5 minutes")
+            console.print(
+                "[bold red]Error:[/bold red] Conversion timed out after 10 minutes"
+            )
         return None
-    except Exception as e:
+
+    # Display container output
+    if result.stdout:
+        for line in result.stdout.strip().split("\n"):
+            if line.strip():
+                if console:
+                    console.print(f"  {line}")
+
+    if result.returncode != 0:
         if console:
-            console.print(f"[bold red]Error running converter:[/bold red] {e}")
+            console.print("[bold red]DLC conversion failed:[/bold red]")
+            if result.stderr:
+                for line in result.stderr.strip().split("\n")[-15:]:
+                    if line.strip():
+                        console.print(f"[red]  {line}[/red]")
         return None
 
+    if not os.path.exists(output_path):
+        if console:
+            console.print(
+                "[bold red]Error:[/bold red] Container exited OK but DLC file not found"
+            )
+        return None
 
-def _display_conversion_error(stderr: str, console: Console):
-    """Display helpful error messages based on converter output."""
-    lines = stderr.strip().split("\n")
+    if console:
+        console.print(f"[green]Successfully converted to {output_path}[/green]")
 
-    # Common error patterns and suggestions
-    error_hints = {
-        "unsupported op": (
-            "The model contains an unsupported operation. "
-            "Try simplifying the model or using a different export configuration."
-        ),
-        "dynamic": (
-            "The model has dynamic shapes. "
-            "Provide a fixed input shape with --input-shape."
-        ),
-        "opset": (
-            "The ONNX opset version may be too new. "
-            "Try exporting with an older opset version (e.g., opset 11)."
-        ),
-        "memory": (
-            "The conversion ran out of memory. "
-            "Try reducing model size or batch dimension."
-        ),
-    }
-
-    # Display first few error lines
-    for line in lines[-10:]:
-        if line.strip():
-            console.print(f"[red]{line}[/red]")
-
-    # Check for known patterns and provide hints
-    stderr_lower = stderr.lower()
-    for pattern, hint in error_hints.items():
-        if pattern in stderr_lower:
-            console.print(f"\n[yellow]Hint: {hint}[/yellow]")
-            break
+    return output_path
