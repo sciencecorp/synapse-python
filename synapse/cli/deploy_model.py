@@ -74,6 +74,29 @@ def add_commands(subparsers: argparse._SubParsersAction):
         help="Path to SNPE/QAIRT SDK root (or set SNPE_ROOT env var)",
     )
 
+    parser.add_argument(
+        "--quantize",
+        action="store_true",
+        help=(
+            "Quantize the model to INT8 after conversion. Required for DSP/NPU inference. "
+            "Must be used with --input-list pointing to a file of representative inputs. "
+            "Each line in the input list should be a path to a raw binary file containing "
+            "float32 data matching the model's input shape (e.g., numpy: "
+            'arr.astype(np.float32).tofile("sample_001.raw")).'
+        ),
+    )
+
+    parser.add_argument(
+        "--input-list",
+        type=str,
+        default=None,
+        help=(
+            "Path to a text file listing representative input samples for quantization. "
+            "Each line is a path to a .raw file (float32 binary). Paths should be "
+            "relative to the directory containing the input list file."
+        ),
+    )
+
     parser.set_defaults(func=deploy_model)
 
 
@@ -108,6 +131,19 @@ def deploy_model(args):
     console.print(f"[bold]Target:[/bold] {args.uri}:{DEVICE_MODEL_DIR}/{model_name}.dlc")
     console.print()
 
+    # Validate quantize + input-list
+    if args.quantize and not args.input_list:
+        console.print(
+            "[bold red]Error:[/bold red] --quantize requires --input-list "
+            "with representative input samples"
+        )
+        return
+
+    if args.input_list and not args.quantize:
+        console.print(
+            "[yellow]Note: --input-list provided without --quantize, ignoring[/yellow]"
+        )
+
     # Step 1: Convert model to DLC
     console.print("[bold cyan]Converting model to DLC format...[/bold cyan]")
 
@@ -115,6 +151,8 @@ def deploy_model(args):
         args.model_path,
         input_shape=input_shape,
         snpe_root=args.snpe_root,
+        quantize=args.quantize,
+        input_list=args.input_list,
         console=console,
     )
 

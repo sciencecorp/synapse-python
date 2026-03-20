@@ -113,6 +113,8 @@ def convert_onnx_to_dlc(
     input_shape: Optional[tuple[int, ...]] = None,
     input_name: str = "input",
     snpe_root: Optional[str] = None,
+    quantize: bool = False,
+    input_list: Optional[str] = None,
     console: Optional[Console] = None,
 ) -> Optional[str]:
     """Convert an ONNX model to DLC format using the Docker-based converter.
@@ -123,6 +125,8 @@ def convert_onnx_to_dlc(
         input_shape: Input shape (required if model has dynamic dims)
         input_name: Name of the input tensor
         snpe_root: Path to the SNPE/QAIRT SDK
+        quantize: Whether to quantize the model to INT8 after conversion
+        input_list: Path to representative input list file for quantization
         console: Rich console for output
 
     Returns:
@@ -177,6 +181,16 @@ def convert_onnx_to_dlc(
         f"{snpe_root}:/snpe:ro",
         "-v",
         f"{output_dir}:/output",
+    ]
+
+    # Mount input data directory for quantization
+    if quantize and input_list:
+        input_list = os.path.abspath(input_list)
+        input_list_dir = os.path.dirname(input_list)
+        input_list_filename = os.path.basename(input_list)
+        cmd.extend(["-v", f"{input_list_dir}:/data:ro"])
+
+    cmd.extend([
         DOCKER_IMAGE,
         "--input",
         f"/input/{onnx_filename}",
@@ -184,7 +198,7 @@ def convert_onnx_to_dlc(
         f"/output/{output_filename}",
         "--snpe-root",
         "/snpe",
-    ]
+    ])
 
     if input_shape is not None:
         shape_str = ",".join(str(d) for d in input_shape)
@@ -192,6 +206,9 @@ def convert_onnx_to_dlc(
 
     if input_name != "input":
         cmd.extend(["--input-name", input_name])
+
+    if quantize and input_list:
+        cmd.extend(["--quantize", "--input-list", f"/data/{input_list_filename}"])
 
     if console:
         console.print("[dim]Running conversion in Docker container...[/dim]")

@@ -15,6 +15,8 @@ def convert_to_dlc(
     input_shape: Optional[tuple[int, ...]] = None,
     output_path: Optional[str] = None,
     snpe_root: Optional[str] = None,
+    quantize: bool = False,
+    input_list: Optional[str] = None,
     console: Optional[Console] = None,
 ) -> Optional[str]:
     """Convert a model to DLC format for deployment to Synapse devices.
@@ -29,6 +31,8 @@ def convert_to_dlc(
         input_shape: Input shape for the model (required if model has dynamic dims)
         output_path: Optional output path for the DLC file
         snpe_root: Path to the SNPE/QAIRT SDK
+        quantize: Whether to quantize the model to INT8
+        input_list: Path to representative input list file (required if quantize=True)
         console: Rich console for output
 
     Returns:
@@ -50,10 +54,14 @@ def convert_to_dlc(
         return model_path
 
     if ext == ".pt":
-        return _convert_pt_to_dlc(model_path, input_shape, output_path, snpe_root, console)
+        return _convert_pt_to_dlc(
+            model_path, input_shape, output_path, snpe_root, quantize, input_list, console
+        )
 
     if ext == ".onnx":
-        return _convert_onnx_to_dlc(model_path, input_shape, output_path, snpe_root, console)
+        return _convert_onnx_to_dlc(
+            model_path, input_shape, output_path, snpe_root, quantize, input_list, console
+        )
 
     if console:
         console.print(f"[bold red]Error:[/bold red] Unsupported file type: {ext}")
@@ -66,6 +74,8 @@ def _convert_pt_to_dlc(
     input_shape: Optional[tuple[int, ...]],
     output_path: Optional[str],
     snpe_root: Optional[str],
+    quantize: bool,
+    input_list: Optional[str],
     console: Optional[Console],
 ) -> Optional[str]:
     """Convert PyTorch model to DLC via ONNX."""
@@ -92,6 +102,8 @@ def _convert_pt_to_dlc(
         output_path=output_path,
         input_shape=input_shape,
         snpe_root=snpe_root,
+        quantize=quantize,
+        input_list=input_list,
         console=console,
     )
 
@@ -101,6 +113,8 @@ def _convert_onnx_to_dlc(
     input_shape: Optional[tuple[int, ...]],
     output_path: Optional[str],
     snpe_root: Optional[str],
+    quantize: bool,
+    input_list: Optional[str],
     console: Optional[Console],
 ) -> Optional[str]:
     """Convert ONNX model to DLC via Docker."""
@@ -112,5 +126,7 @@ def _convert_onnx_to_dlc(
         output_path=output_path,
         input_shape=input_shape,
         snpe_root=snpe_root,
+        quantize=quantize,
+        input_list=input_list,
         console=console,
     )

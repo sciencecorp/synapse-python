@@ -281,6 +281,92 @@ def convert(input_path, output_path, snpe_root, input_shape=None, input_name=Non
 
 
 # ---------------------------------------------------------------------------
+# Quantization
+# ---------------------------------------------------------------------------
+
+def find_quantizer(snpe_root):
+    # Use the native binary directly, not the bash wrapper
+    path = os.path.join(snpe_root, "bin", "x86_64-linux-clang", "snpe-dlc-quant")
+    if os.path.exists(path):
+        return path
+    # Fall back to the wrapper script
+    path = os.path.join(snpe_root, "bin", "x86_64-linux-clang", "snpe-dlc-quantize")
+    return path if os.path.exists(path) else None
+
+
+def quantize_dlc(dlc_path, input_list, snpe_root, output_path=None):
+    """Quantize a DLC model to INT8 using representative input data."""
+    quantizer = find_quantizer(snpe_root)
+    if quantizer is None:
+        print(
+            f"ERROR: snpe-dlc-quant not found at "
+            f"{snpe_root}/bin/x86_64-linux-clang/",
+            file=sys.stderr,
+        )
+        return False
+
+    if output_path is None:
+        base, ext = os.path.splitext(dlc_path)
+        output_path = f"{base}_quantized{ext}"
+
+    env = os.environ.copy()
+    env["SNPE_ROOT"] = snpe_root
+    env["PYTHONPATH"] = os.path.join(snpe_root, "lib", "python")
+    bin_dir = os.path.join(snpe_root, "bin", "x86_64-linux-clang")
+    lib_dir = os.path.join(snpe_root, "lib", "x86_64-linux-clang")
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["LD_LIBRARY_PATH"] = f"{lib_dir}:/usr/local/lib:/usr/lib/x86_64-linux-gnu"
+
+    cmd = [
+        quantizer,
+        "--input_dlc",
+        dlc_path,
+        "--input_list",
+        input_list,
+        "--output_dlc",
+        output_path,
+    ]
+
+    # The quantizer resolves raw file paths relative to cwd and also writes
+    # intermediate output to ./output/ in cwd.  We create a temp working
+    # directory and symlink the raw files there so the data mount can stay
+    # read-only.
+    input_list_dir = os.path.dirname(os.path.abspath(input_list))
+    work_dir = tempfile.mkdtemp()
+
+    # Symlink every file from the input data directory into the work dir
+    for name in os.listdir(input_list_dir):
+        src = os.path.join(input_list_dir, name)
+        dst = os.path.join(work_dir, name)
+        os.symlink(src, dst)
+
+    print(f"Quantizing model: {' '.join(cmd)}")
+    result = subprocess.run(
+        cmd, env=env, capture_output=True, text=True, timeout=600,
+        cwd=work_dir,
+    )
+
+    shutil.rmtree(work_dir, ignore_errors=True)
+
+    if result.returncode != 0:
+        print("ERROR: Quantization failed:", file=sys.stderr)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        if result.stdout:
+            print(result.stdout)
+        return False
+
+    if not os.path.exists(output_path):
+        print("ERROR: Quantizer ran but output file not created", file=sys.stderr)
+        return False
+
+    # Replace the float DLC with the quantized one
+    shutil.move(output_path, dlc_path)
+    print(f"Successfully quantized model to {dlc_path}")
+    return True
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -297,6 +383,12 @@ def main():
         "--input-shape", default=None, help="Input shape (comma-separated, e.g. 1,1920)"
     )
     parser.add_argument("--input-name", default=None, help="Input tensor name")
+    parser.add_argument(
+        "--quantize", action="store_true", help="Quantize model to INT8"
+    )
+    parser.add_argument(
+        "--input-list", default=None, help="Input list file for quantization"
+    )
     args = parser.parse_args()
 
     input_shape = None
@@ -310,6 +402,16 @@ def main():
         input_shape=input_shape,
         input_name=args.input_name,
     )
+
+    if success and args.quantize:
+        if not args.input_list:
+            print(
+                "ERROR: --quantize requires --input-list with representative inputs",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        success = quantize_dlc(args.output, args.input_list, args.snpe_root)
+
     sys.exit(0 if success else 1)
 
 
