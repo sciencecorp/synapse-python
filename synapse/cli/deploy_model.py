@@ -97,6 +97,16 @@ def add_commands(subparsers: argparse._SubParsersAction):
         ),
     )
 
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        help=(
+            "Compile a QNN context binary (.bin) pre-compiled for the HTP backend. "
+            "This enables DSP inference by bypassing runtime graph compilation. "
+            "Implies --quantize (HTP requires INT8 models)."
+        ),
+    )
+
     parser.set_defaults(func=deploy_model)
 
 
@@ -126,33 +136,43 @@ def deploy_model(args):
     if model_name is None:
         model_name = os.path.splitext(os.path.basename(args.model_path))[0]
 
+    model_ext = ".bin" if args.compile else ".dlc"
+
     console.print(f"[bold]Deploying model:[/bold] {model_name}")
     console.print(f"[bold]Source:[/bold] {args.model_path}")
-    console.print(f"[bold]Target:[/bold] {args.uri}:{DEVICE_MODEL_DIR}/{model_name}.dlc")
+    console.print(f"[bold]Target:[/bold] {args.uri}:{DEVICE_MODEL_DIR}/{model_name}{model_ext}")
     console.print()
 
+    # --compile implies --quantize (HTP requires INT8)
+    quantize = args.quantize or args.compile
+    compile_context = args.compile
+
     # Validate quantize + input-list
-    if args.quantize and not args.input_list:
+    if quantize and not args.input_list:
         console.print(
-            "[bold red]Error:[/bold red] --quantize requires --input-list "
+            "[bold red]Error:[/bold red] --quantize/--compile requires --input-list "
             "with representative input samples"
         )
         return
 
-    if args.input_list and not args.quantize:
+    if args.input_list and not quantize:
         console.print(
             "[yellow]Note: --input-list provided without --quantize, ignoring[/yellow]"
         )
 
-    # Step 1: Convert model to DLC
-    console.print("[bold cyan]Converting model to DLC format...[/bold cyan]")
+    # Step 1: Convert model
+    if compile_context:
+        console.print("[bold cyan]Converting model to QNN context binary...[/bold cyan]")
+    else:
+        console.print("[bold cyan]Converting model to DLC format...[/bold cyan]")
 
     dlc_path = convert_to_dlc(
         args.model_path,
         input_shape=input_shape,
         snpe_root=args.snpe_root,
-        quantize=args.quantize,
+        quantize=quantize,
         input_list=args.input_list,
+        compile_context=compile_context,
         console=console,
     )
 
@@ -182,8 +202,8 @@ def deploy_model(args):
         # Step 3: Ensure model directory exists
         _ensure_model_dir(sftp_conn, console)
 
-        # Step 4: Upload the DLC file
-        remote_path = f"{DEVICE_MODEL_DIR}/{model_name}.dlc"
+        # Step 4: Upload the model file
+        remote_path = f"{DEVICE_MODEL_DIR}/{model_name}{model_ext}"
         _upload_file(sftp_conn, dlc_path, remote_path, console)
 
         console.print()

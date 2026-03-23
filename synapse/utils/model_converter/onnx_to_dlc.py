@@ -115,22 +115,24 @@ def convert_onnx_to_dlc(
     snpe_root: Optional[str] = None,
     quantize: bool = False,
     input_list: Optional[str] = None,
+    compile_context: bool = False,
     console: Optional[Console] = None,
 ) -> Optional[str]:
-    """Convert an ONNX model to DLC format using the Docker-based converter.
+    """Convert an ONNX model to DLC or QNN context binary using Docker.
 
     Args:
         onnx_path: Path to the ONNX model
-        output_path: Optional output path for the DLC file
+        output_path: Optional output path for the output file
         input_shape: Input shape (required if model has dynamic dims)
         input_name: Name of the input tensor
-        snpe_root: Path to the SNPE/QAIRT SDK
-        quantize: Whether to quantize the model to INT8 after conversion
+        snpe_root: Path to the QAIRT SDK
+        quantize: Whether to quantize the model to INT8
         input_list: Path to representative input list file for quantization
+        compile_context: Whether to compile a QNN context binary (.bin) for HTP
         console: Rich console for output
 
     Returns:
-        Path to the converted DLC file, or None on failure
+        Path to the output file (.dlc or .bin), or None on failure
     """
     if snpe_root is None:
         snpe_root = os.environ.get("SNPE_ROOT") or os.environ.get("QAIRT_ROOT")
@@ -161,7 +163,8 @@ def convert_onnx_to_dlc(
 
     if output_path is None:
         base_name = os.path.splitext(onnx_filename)[0]
-        output_path = os.path.join(tempfile.gettempdir(), f"{base_name}.dlc")
+        ext = ".bin" if compile_context else ".dlc"
+        output_path = os.path.join(tempfile.gettempdir(), f"{base_name}{ext}")
 
     output_dir = os.path.abspath(os.path.dirname(output_path))
     output_filename = os.path.basename(output_path)
@@ -209,6 +212,9 @@ def convert_onnx_to_dlc(
 
     if quantize and input_list:
         cmd.extend(["--quantize", "--input-list", f"/data/{input_list_filename}"])
+
+    if compile_context:
+        cmd.append("--compile")
 
     if console:
         console.print("[dim]Running conversion in Docker container...[/dim]")

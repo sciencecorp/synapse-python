@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""ONNX to DLC conversion script.
+"""ONNX to QNN context binary conversion script.
 
 Runs inside the synapse-model-converter Docker container.
+Pipeline: ONNX → qairt-converter → DLC → qairt-quantizer → qnn-context-binary-generator → .bin
+
 Expects:
-  - SNPE/QAIRT SDK mounted at the path given by --snpe-root
+  - QAIRT SDK mounted at the path given by --snpe-root
   - Input ONNX model accessible at --input
   - Output directory writable at --output parent
 """
@@ -45,155 +47,41 @@ def has_dynamic_shapes(onnx_path):
 
 
 # ---------------------------------------------------------------------------
-# ONNX transforms (SNPE compatibility)
+# Tool finders
 # ---------------------------------------------------------------------------
 
-def fix_gemm_transpose(onnx_path, output_path=None):
-    """Convert GEMM ops with transB=1 to MatMul+Add."""
-    import onnx
-    from onnx import helper, numpy_helper
-
-    model = onnx.load(onnx_path)
-    graph = model.graph
-    if output_path is None:
-        output_path = onnx_path
-
-    replacements = []
-    initializers_to_add = []
-    transforms_applied = 0
-
-    for idx, node in enumerate(graph.node):
-        if node.op_type != "Gemm":
-            continue
-
-        trans_b = 0
-        alpha = 1.0
-        beta = 1.0
-        trans_a = 0
-
-        for attr in node.attribute:
-            if attr.name == "transB":
-                trans_b = attr.i
-            elif attr.name == "transA":
-                trans_a = attr.i
-            elif attr.name == "alpha":
-                alpha = attr.f
-            elif attr.name == "beta":
-                beta = attr.f
-
-        if trans_b != 1:
-            continue
-        if trans_a != 0 or alpha != 1.0:
-            print(f"Warning: Skipping complex GEMM node {node.name}")
-            continue
-
-        weight_name = node.input[1]
-        weight_initializer = None
-        for init in graph.initializer:
-            if init.name == weight_name:
-                weight_initializer = init
-                break
-
-        if weight_initializer is None:
-            print(f"Warning: Could not find initializer for {weight_name}, skipping")
-            continue
-
-        transforms_applied += 1
-        weight_array = numpy_helper.to_array(weight_initializer)
-        transposed_weight = weight_array.T
-        new_weight_name = f"{weight_name}_transposed"
-        new_weight = numpy_helper.from_array(transposed_weight, name=new_weight_name)
-        initializers_to_add.append(new_weight)
-
-        matmul_output = f"{node.name}_matmul_out"
-        matmul_node = helper.make_node(
-            "MatMul",
-            inputs=[node.input[0], new_weight_name],
-            outputs=[matmul_output],
-            name=f"{node.name}_matmul",
-        )
-
-        if len(node.input) > 2 and node.input[2]:
-            bias_name = node.input[2]
-            if beta != 1.0:
-                for init in graph.initializer:
-                    if init.name == bias_name:
-                        bias_array = numpy_helper.to_array(init)
-                        scaled_bias = bias_array * beta
-                        new_bias_name = f"{bias_name}_scaled"
-                        new_bias = numpy_helper.from_array(
-                            scaled_bias, name=new_bias_name
-                        )
-                        initializers_to_add.append(new_bias)
-                        bias_name = new_bias_name
-                        break
-
-            add_node = helper.make_node(
-                "Add",
-                inputs=[matmul_output, bias_name],
-                outputs=node.output,
-                name=f"{node.name}_add",
-            )
-            replacement_nodes = [matmul_node, add_node]
-        else:
-            matmul_node = helper.make_node(
-                "MatMul",
-                inputs=[node.input[0], new_weight_name],
-                outputs=node.output,
-                name=f"{node.name}_matmul",
-            )
-            replacement_nodes = [matmul_node]
-
-        replacements.append((idx, replacement_nodes))
-
-    if transforms_applied > 0:
-        for idx, new_nodes in reversed(replacements):
-            del graph.node[idx]
-            for i, new_node in enumerate(new_nodes):
-                graph.node.insert(idx + i, new_node)
-        graph.initializer.extend(initializers_to_add)
-        print(f"Applied GEMM->MatMul+Add transformation to {transforms_applied} nodes")
-        onnx.save(model, output_path)
-
-    return output_path
-
-
-def downgrade_opset(onnx_path, target_opset=11, output_path=None):
-    """Downgrade ONNX opset version for SNPE compatibility."""
-    import onnx
-    from onnx import version_converter
-
-    model = onnx.load(onnx_path)
-    if output_path is None:
-        output_path = onnx_path
-
-    current_opset = model.opset_import[0].version
-    if current_opset <= target_opset:
-        print(f"Model opset {current_opset} already at or below target {target_opset}")
-        return output_path
-
-    print(f"Downgrading opset from {current_opset} to {target_opset}...")
-    try:
-        converted = version_converter.convert_version(model, target_opset)
-        onnx.save(converted, output_path)
-        print(f"Successfully downgraded to opset {target_opset}")
-    except Exception as e:
-        print(f"Warning: Could not downgrade opset: {e}. Proceeding with original.")
-
-    return output_path
-
-
-# ---------------------------------------------------------------------------
-# DLC conversion
-# ---------------------------------------------------------------------------
-
-def find_converter(snpe_root):
-    path = os.path.join(snpe_root, "bin", "x86_64-linux-clang", "snpe-onnx-to-dlc")
+def find_tool(snpe_root, name):
+    """Find a tool in the SDK bin directory."""
+    path = os.path.join(snpe_root, "bin", "x86_64-linux-clang", name)
     return path if os.path.exists(path) else None
 
 
-def convert(input_path, output_path, snpe_root, input_shape=None, input_name=None):
-    """Run the full ONNX -> DLC conversion pipeline."""
+def python_env(snpe_root):
+    """Environment for running Python-based SDK tools."""
+    env = os.environ.copy()
+    env["SNPE_ROOT"] = snpe_root
+    env["PYTHONPATH"] = os.path.join(snpe_root, "lib", "python")
+    env["LD_LIBRARY_PATH"] = "/usr/local/lib:/usr/lib/x86_64-linux-gnu"
+    return env
+
+
+def native_env(snpe_root):
+    """Environment for running native (C++) SDK tools."""
+    env = os.environ.copy()
+    env["SNPE_ROOT"] = snpe_root
+    lib_dir = os.path.join(snpe_root, "lib", "x86_64-linux-clang")
+    env["LD_LIBRARY_PATH"] = f"{lib_dir}:/usr/local/lib:/usr/lib/x86_64-linux-gnu"
+    bin_dir = os.path.join(snpe_root, "bin", "x86_64-linux-clang")
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    return env
+
+
+# ---------------------------------------------------------------------------
+# Step 1: ONNX → DLC (qairt-converter)
+# ---------------------------------------------------------------------------
+
+def convert_to_dlc(input_path, output_path, snpe_root, input_shape=None, input_name=None):
+    """Convert ONNX model to DLC using qairt-converter."""
     if has_dynamic_shapes(input_path):
         if input_shape is None:
             shapes = get_input_shapes(input_path)
@@ -208,61 +96,41 @@ def convert(input_path, output_path, snpe_root, input_shape=None, input_name=Non
             return False
         print(f"Using provided input shape {input_shape} for dynamic model")
 
-    # Determine input name from model
     if input_name is None:
         shapes = get_input_shapes(input_path)
         input_name = shapes[0][0] if shapes else "input"
 
-    # Work on a temp copy so we don't modify the original
-    temp_dir = tempfile.mkdtemp()
-    temp_onnx = os.path.join(temp_dir, os.path.basename(input_path))
-    shutil.copy2(input_path, temp_onnx)
+    # Try qairt-converter first (unified, preferred), fall back to snpe-onnx-to-dlc
+    converter = find_tool(snpe_root, "qairt-converter")
+    if converter:
+        cmd = [
+            sys.executable,
+            converter,
+            "-i", input_path,
+            "-o", output_path,
+        ]
+        if input_shape is not None:
+            shape_str = ",".join(str(d) for d in input_shape)
+            cmd.extend(["-d", input_name, shape_str])
+    else:
+        converter = find_tool(snpe_root, "snpe-onnx-to-dlc")
+        if converter is None:
+            print("ERROR: No converter found (tried qairt-converter, snpe-onnx-to-dlc)",
+                  file=sys.stderr)
+            return False
+        cmd = [
+            sys.executable,
+            converter,
+            "--input_network", input_path,
+            "--output_path", output_path,
+        ]
+        if input_shape is not None:
+            shape_str = ",".join(str(d) for d in input_shape)
+            cmd.extend(["-d", input_name, shape_str])
 
-    # Apply transforms
-    print("Applying ONNX transformations...")
-    try:
-        fix_gemm_transpose(temp_onnx)
-    except Exception as e:
-        print(f"Warning: GEMM transform failed: {e}. Proceeding.")
-
-    try:
-        downgrade_opset(temp_onnx)
-    except Exception as e:
-        print(f"Warning: Opset downgrade failed: {e}. Proceeding.")
-
-    # Find converter
-    converter = find_converter(snpe_root)
-    if converter is None:
-        print(
-            f"ERROR: snpe-onnx-to-dlc not found at "
-            f"{snpe_root}/bin/x86_64-linux-clang/snpe-onnx-to-dlc",
-            file=sys.stderr,
-        )
-        return False
-
-    # Set up environment for the SNPE converter
-    env = os.environ.copy()
-    env["SNPE_ROOT"] = snpe_root
-    env["PYTHONPATH"] = os.path.join(snpe_root, "lib", "python")
-    env["LD_LIBRARY_PATH"] = "/usr/local/lib:/usr/lib/x86_64-linux-gnu"
-
-    cmd = [
-        sys.executable,
-        converter,
-        "--input_network",
-        temp_onnx,
-        "--output_path",
-        output_path,
-    ]
-
-    if input_shape is not None:
-        shape_str = ",".join(str(d) for d in input_shape)
-        cmd.extend(["-d", input_name, shape_str])
-
-    print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=300)
-
-    shutil.rmtree(temp_dir, ignore_errors=True)
+    print(f"Converting ONNX to DLC: {' '.join(cmd)}")
+    result = subprocess.run(cmd, env=python_env(snpe_root),
+                            capture_output=True, text=True, timeout=300)
 
     if result.returncode != 0:
         print("ERROR: DLC conversion failed:", file=sys.stderr)
@@ -281,70 +149,48 @@ def convert(input_path, output_path, snpe_root, input_shape=None, input_name=Non
 
 
 # ---------------------------------------------------------------------------
-# Quantization
+# Step 2: Quantize DLC (qairt-quantizer)
 # ---------------------------------------------------------------------------
-
-def find_quantizer(snpe_root):
-    # Use the native binary directly, not the bash wrapper
-    path = os.path.join(snpe_root, "bin", "x86_64-linux-clang", "snpe-dlc-quant")
-    if os.path.exists(path):
-        return path
-    # Fall back to the wrapper script
-    path = os.path.join(snpe_root, "bin", "x86_64-linux-clang", "snpe-dlc-quantize")
-    return path if os.path.exists(path) else None
-
 
 def quantize_dlc(dlc_path, input_list, snpe_root, output_path=None):
     """Quantize a DLC model to INT8 using representative input data."""
-    quantizer = find_quantizer(snpe_root)
+    # Try qairt-quantizer first, fall back to snpe-dlc-quant
+    quantizer = find_tool(snpe_root, "qairt-quantizer")
+    if quantizer:
+        is_python = True
+    else:
+        quantizer = find_tool(snpe_root, "snpe-dlc-quant")
+        is_python = False
     if quantizer is None:
-        print(
-            f"ERROR: snpe-dlc-quant not found at "
-            f"{snpe_root}/bin/x86_64-linux-clang/",
-            file=sys.stderr,
-        )
+        print("ERROR: No quantizer found (tried qairt-quantizer, snpe-dlc-quant)",
+              file=sys.stderr)
         return False
 
     if output_path is None:
         base, ext = os.path.splitext(dlc_path)
         output_path = f"{base}_quantized{ext}"
 
-    env = os.environ.copy()
-    env["SNPE_ROOT"] = snpe_root
-    env["PYTHONPATH"] = os.path.join(snpe_root, "lib", "python")
-    bin_dir = os.path.join(snpe_root, "bin", "x86_64-linux-clang")
-    lib_dir = os.path.join(snpe_root, "lib", "x86_64-linux-clang")
-    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
-    env["LD_LIBRARY_PATH"] = f"{lib_dir}:/usr/local/lib:/usr/lib/x86_64-linux-gnu"
+    if is_python:
+        cmd = [sys.executable, quantizer, "-i", dlc_path, "-l", input_list,
+               "-o", output_path]
+        env = python_env(snpe_root)
+    else:
+        cmd = [quantizer, "--input_dlc", dlc_path, "--input_list", input_list,
+               "--output_dlc", output_path]
+        env = native_env(snpe_root)
 
-    cmd = [
-        quantizer,
-        "--input_dlc",
-        dlc_path,
-        "--input_list",
-        input_list,
-        "--output_dlc",
-        output_path,
-    ]
-
-    # The quantizer resolves raw file paths relative to cwd and also writes
-    # intermediate output to ./output/ in cwd.  We create a temp working
-    # directory and symlink the raw files there so the data mount can stay
-    # read-only.
+    # The quantizer resolves raw file paths relative to cwd. Create a temp
+    # working directory with symlinks so the data mount can stay read-only.
     input_list_dir = os.path.dirname(os.path.abspath(input_list))
     work_dir = tempfile.mkdtemp()
-
-    # Symlink every file from the input data directory into the work dir
     for name in os.listdir(input_list_dir):
         src = os.path.join(input_list_dir, name)
         dst = os.path.join(work_dir, name)
         os.symlink(src, dst)
 
     print(f"Quantizing model: {' '.join(cmd)}")
-    result = subprocess.run(
-        cmd, env=env, capture_output=True, text=True, timeout=600,
-        cwd=work_dir,
-    )
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True,
+                            timeout=600, cwd=work_dir)
 
     shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -367,17 +213,92 @@ def quantize_dlc(dlc_path, input_list, snpe_root, output_path=None):
 
 
 # ---------------------------------------------------------------------------
+# Step 3: Generate QNN context binary (qnn-context-binary-generator)
+# ---------------------------------------------------------------------------
+
+def generate_context_binary(dlc_path, output_path, snpe_root):
+    """Generate a pre-compiled QNN context binary for HTP backend."""
+    generator = find_tool(snpe_root, "qnn-context-binary-generator")
+    if generator is None:
+        print("ERROR: qnn-context-binary-generator not found", file=sys.stderr)
+        return False
+
+    backend_lib = os.path.join(snpe_root, "lib", "x86_64-linux-clang", "libQnnHtp.so")
+    if not os.path.exists(backend_lib):
+        print(f"ERROR: HTP backend not found at {backend_lib}", file=sys.stderr)
+        return False
+
+    output_dir = os.path.dirname(output_path)
+    output_name = os.path.splitext(os.path.basename(output_path))[0]
+
+    # Write HTP backend extensions config to limit VTCM usage.
+    # QCS6490 (Hexagon v68) has limited VTCM; vtcm_mb=0 lets the runtime decide.
+    import json
+
+    htp_config_path = os.path.join(output_dir or ".", "htp_config.json")
+    with open(htp_config_path, "w") as f:
+        json.dump({"graphs": [{"vtcm_mb": 0, "graph_names": ["*"]}]}, f)
+
+    backend_ext_lib = os.path.join(
+        snpe_root, "lib", "x86_64-linux-clang", "libQnnHtpNetRunExtensions.so"
+    )
+    ext_config_path = os.path.join(output_dir or ".", "backend_extensions_config.json")
+    with open(ext_config_path, "w") as f:
+        json.dump({
+            "backend_extensions": {
+                "shared_library_path": backend_ext_lib,
+                "config_file_path": htp_config_path,
+            }
+        }, f)
+
+    cmd = [
+        generator,
+        "--dlc_path", dlc_path,
+        "--backend", backend_lib,
+        "--binary_file", output_name,
+        "--output_dir", output_dir,
+        "--config_file", ext_config_path,
+    ]
+
+    print(f"Generating context binary: {' '.join(cmd)}")
+    result = subprocess.run(cmd, env=native_env(snpe_root),
+                            capture_output=True, text=True, timeout=600)
+
+    if result.stdout:
+        print(result.stdout)
+
+    if result.returncode != 0:
+        print("ERROR: Context binary generation failed:", file=sys.stderr)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        return False
+
+    # qnn-context-binary-generator outputs <name>.bin in output_dir
+    expected_bin = os.path.join(output_dir, f"{output_name}.bin")
+    if not os.path.exists(expected_bin):
+        print(f"ERROR: Expected output not found at {expected_bin}", file=sys.stderr)
+        return False
+
+    # Move to the requested output path if different
+    if expected_bin != output_path:
+        shutil.move(expected_bin, output_path)
+
+    print(f"Successfully generated context binary: {output_path}")
+    return True
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Convert ONNX model to Qualcomm DLC format"
+        description="Convert ONNX model to Qualcomm QNN context binary"
     )
     parser.add_argument("--input", required=True, help="Path to input ONNX model")
-    parser.add_argument("--output", required=True, help="Path for output DLC file")
+    parser.add_argument("--output", required=True, help="Path for output file")
     parser.add_argument(
-        "--snpe-root", required=True, help="Path to SNPE/QAIRT SDK root"
+        "--snpe-root", required=True, help="Path to QAIRT SDK root"
     )
     parser.add_argument(
         "--input-shape", default=None, help="Input shape (comma-separated, e.g. 1,1920)"
@@ -389,28 +310,38 @@ def main():
     parser.add_argument(
         "--input-list", default=None, help="Input list file for quantization"
     )
+    parser.add_argument(
+        "--compile", action="store_true",
+        help="Generate QNN context binary (.bin) for HTP backend"
+    )
     args = parser.parse_args()
 
     input_shape = None
     if args.input_shape:
         input_shape = tuple(int(x.strip()) for x in args.input_shape.split(","))
 
-    success = convert(
-        args.input,
-        args.output,
-        args.snpe_root,
-        input_shape=input_shape,
-        input_name=args.input_name,
+    # Determine intermediate DLC path
+    if args.compile:
+        dlc_path = os.path.splitext(args.output)[0] + ".dlc"
+    else:
+        dlc_path = args.output
+
+    # Step 1: Convert ONNX → DLC
+    success = convert_to_dlc(
+        args.input, dlc_path, args.snpe_root,
+        input_shape=input_shape, input_name=args.input_name,
     )
 
+    # Step 2: Quantize (optional, but required for HTP/DSP)
     if success and args.quantize:
         if not args.input_list:
-            print(
-                "ERROR: --quantize requires --input-list with representative inputs",
-                file=sys.stderr,
-            )
+            print("ERROR: --quantize requires --input-list", file=sys.stderr)
             sys.exit(1)
-        success = quantize_dlc(args.output, args.input_list, args.snpe_root)
+        success = quantize_dlc(dlc_path, args.input_list, args.snpe_root)
+
+    # Step 3: Generate context binary (optional)
+    if success and args.compile:
+        success = generate_context_binary(dlc_path, args.output, args.snpe_root)
 
     sys.exit(0 if success else 1)
 
