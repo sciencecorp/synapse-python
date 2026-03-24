@@ -1,16 +1,65 @@
 #!/bin/bash
 # Idempotent setup script for QCS6490 target device (scifi@10.40.63.143)
-# Deploys v2.42 SDK libraries and configures QNN HTP runtime
+# Deploys QNN SDK libraries, BSP libc++, and configures QNN HTP runtime
 #
-# Usage: ./scripts/setup-target-device.sh [SNPE_ROOT]
-# Defaults: SNPE_ROOT=/home/calvinl/v2.42.0.251225/qairt/2.42.0.251225
+# Usage: ./scripts/setup-target-device.sh [--sdk-version v2.34|v2.42] [SNPE_ROOT]
+# Defaults: --sdk-version v2.42
+#
+# Examples:
+#   ./scripts/setup-target-device.sh                      # v2.42 (default)
+#   ./scripts/setup-target-device.sh --sdk-version v2.34  # full v2.34 stack
+#   ./scripts/setup-target-device.sh /path/to/custom/sdk  # custom SDK path
+#
+# Prerequisites:
+#   - sshpass installed on host
+#   - Device accessible at DEVICE_HOST
+#   - BSP repo at BSP_ROOT (for Hexagon libc++)
 
 set -euo pipefail
+
+# --- Parse arguments ---
+SDK_VERSION="v2.42"
+SNPE_ROOT=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --sdk-version)
+            SDK_VERSION="$2"
+            shift 2
+            ;;
+        --sdk-version=*)
+            SDK_VERSION="${1#*=}"
+            shift
+            ;;
+        *)
+            SNPE_ROOT="$1"
+            shift
+            ;;
+    esac
+done
+
+# --- Resolve SDK path from version if not explicitly provided ---
+if [ -z "$SNPE_ROOT" ]; then
+    case "$SDK_VERSION" in
+        v2.42)
+            SNPE_ROOT="/home/calvinl/v2.42.0.251225/qairt/2.42.0.251225"
+            ;;
+        v2.34)
+            SNPE_ROOT="/opt/qcom/aistack/qairt/2.34.0.250424"
+            ;;
+        *)
+            echo "ERROR: Unknown SDK version '$SDK_VERSION'. Supported: v2.34, v2.42"
+            exit 1
+            ;;
+    esac
+fi
+
+echo "=== Using SDK version: $SDK_VERSION ==="
+echo "    SNPE_ROOT: $SNPE_ROOT"
 
 DEVICE_HOST="${DEVICE_HOST:-scifi@10.40.63.143}"
 DEVICE_PASS="${DEVICE_PASS:-synapse}"
 ROOT_PASS="${ROOT_PASS:-oelinux123}"
-SNPE_ROOT="${1:-/home/calvinl/v2.42.0.251225/qairt/2.42.0.251225}"
 BSP_ROOT="${BSP_ROOT:-/home/calvinl/Documents/repos/qcs6490-ubun-1-0_amss_standard_oem}"
 SDK_LIB="${SNPE_ROOT}/lib/aarch64-ubuntu-gcc9.4"
 SDK_HEX="${SNPE_ROOT}/lib/hexagon-v68/unsigned"
@@ -26,9 +75,10 @@ for dir in "$SDK_LIB" "$SDK_HEX" "$SDK_BIN"; do
 done
 
 if [ ! -d "$BSP_CDSP" ]; then
-    echo "WARNING: BSP CDSP path not found: $BSP_CDSP"
-    echo "  libc++ for Hexagon DSP will not be deployed."
-    echo "  Set BSP_ROOT to the qcs6490 BSP directory."
+    echo "ERROR: BSP CDSP path not found: $BSP_CDSP"
+    echo "  Hexagon libc++ from the BSP is REQUIRED for QNN HTP skel loading."
+    echo "  Set BSP_ROOT to the qcs6490-ubun-1-0_amss_standard_oem directory."
+    exit 1
 fi
 
 echo "=== Staging libraries ==="
@@ -38,12 +88,9 @@ trap "rm -rf $STAGING" EXIT
 mkdir -p "$STAGING/usr_lib" "$STAGING/adsp" "$STAGING/bin"
 
 # Core QNN/SNPE libraries for /usr/lib/
-for lib in libQnnCpu.so libQnnGpu.so libQnnHtp.so libQnnHtpPrepare.so \
-           libQnnHtpV68Stub.so libQnnHtpV68CalculatorStub.so \
-           libQnnSystem.so libSNPE.so libcalculator.so; do
-    if [ -f "$SDK_LIB/$lib" ]; then
-        cp "$SDK_LIB/$lib" "$STAGING/usr_lib/"
-    fi
+# Copy all QNN/SNPE/calculator libs from the SDK — covers both v2.34 and v2.42
+for lib in "$SDK_LIB"/libQnn*.so "$SDK_LIB"/libSnpe*.so "$SDK_LIB"/libSNPE.so "$SDK_LIB"/libcalculator.so; do
+    [ -f "$lib" ] && cp "$lib" "$STAGING/usr_lib/"
 done
 
 # Hexagon v68 skel libraries for /usr/lib/rfsa/adsp/
@@ -52,12 +99,11 @@ for f in "$SDK_HEX"/*.so; do
 done
 
 # Hexagon libc++ from BSP (CRITICAL: must match the device's fastrpc_shell)
-# The QAIRT SDK does not ship these; they come from the device BSP
-if [ -d "$BSP_CDSP" ]; then
-    cp "$BSP_CDSP/libc++.so.1" "$STAGING/adsp/"
-    cp "$BSP_CDSP/libc++abi.so.1" "$STAGING/adsp/"
-    echo "Staged BSP libc++ for Hexagon DSP"
-fi
+# The QAIRT SDK does NOT ship these; they come from the device BSP.
+# Without these, the QNN HTP skel fails to load with error 0x80000406.
+cp "$BSP_CDSP/libc++.so.1" "$STAGING/adsp/"
+cp "$BSP_CDSP/libc++abi.so.1" "$STAGING/adsp/"
+echo "Staged BSP libc++ for Hexagon DSP"
 
 # Useful debug binaries
 for bin in qnn-net-run qnn-platform-validator; do
@@ -66,25 +112,21 @@ for bin in qnn-net-run qnn-platform-validator; do
     fi
 done
 
-echo "=== Uploading to device ==="
-sshpass -p "$DEVICE_PASS" ssh -o StrictHostKeyChecking=no "$DEVICE_HOST" "rm -rf /tmp/sdk-staging && mkdir -p /tmp/sdk-staging"
-sshpass -p "$DEVICE_PASS" scp -o StrictHostKeyChecking=no -r "$STAGING/usr_lib" "$STAGING/adsp" "$STAGING/bin" "$DEVICE_HOST:/tmp/sdk-staging/"
-
-echo "=== Applying on device as root ==="
-sshpass -p "$DEVICE_PASS" ssh -o StrictHostKeyChecking=no "$DEVICE_HOST" "echo '$ROOT_PASS' | su -c '
+# Write device-side setup script (heredoc with single-quoted delimiter prevents local expansion)
+cat > "$STAGING/apply.sh" <<'APPLY_EOF'
+#!/bin/bash
 set -e
 
-# --- Install QNN/SNPE libraries to /usr/lib/ ---
-# Remove stale artifacts from other SDK versions
-rm -f /usr/lib/libQnnHtpV73*.so /usr/lib/libQnnHtpV69*.so
-rm -f /usr/lib/libSnpeHtpV73*.so /usr/lib/libSnpeHtpV69*.so
-rm -f /usr/lib/libSNPE_gcc11.so
-rm -f /usr/lib/libQnnDsp.so /usr/lib/libQnnDspV66Stub.so
-rm -f /usr/lib/libSnpeHtpPrepare.so /usr/lib/libSnpeHtpV68Stub.so
+# --- Remove ALL existing QNN/SNPE libs to prevent version mixing ---
+rm -f /usr/lib/libQnn*.so /usr/lib/libSnpe*.so /usr/lib/libSNPE*.so
+rm -f /usr/lib/libcalculator.so
+rm -f /usr/lib/rfsa/adsp/libQnn*.so /usr/lib/rfsa/adsp/libSnpe*.so
+rm -f /usr/lib/rfsa/adsp/libCalculator_skel.so
 
+# --- Install QNN/SNPE libraries to /usr/lib/ ---
 cp /tmp/sdk-staging/usr_lib/*.so /usr/lib/
 
-# --- Install hexagon-v68 skel libraries ---
+# --- Install hexagon-v68 skel + BSP libc++ to /usr/lib/rfsa/adsp/ ---
 cp /tmp/sdk-staging/adsp/*.so /usr/lib/rfsa/adsp/
 
 # --- Install debug binaries ---
@@ -100,26 +142,48 @@ fi
 if ! grep -q ADSP_LIBRARY_PATH /lib/systemd/system/cdsprpcd.service 2>/dev/null; then
     sed -i "/\[Service\]/a Environment=ADSP_LIBRARY_PATH=/usr/lib/rfsa/adsp" /lib/systemd/system/cdsprpcd.service
     systemctl daemon-reload
-    systemctl restart cdsprpcd
 fi
+# Always restart cdsprpcd to pick up env var
+systemctl restart cdsprpcd
+sleep 1
 
 # --- Update linker cache ---
 ldconfig
 
-echo "=== Setup complete ==="
+# --- Verify ---
+echo ""
+echo "=== Verification ==="
 echo "QNN libs in /usr/lib/:"
 ls /usr/lib/libQnn*.so /usr/lib/libSNPE.so 2>/dev/null | xargs -I{} basename {}
-echo "Skel libs in /usr/lib/rfsa/adsp/:"
-ls /usr/lib/rfsa/adsp/libQnn*.so 2>/dev/null | xargs -I{} basename {}
+echo ""
+echo "Skel + libc++ in /usr/lib/rfsa/adsp/:"
+ls /usr/lib/rfsa/adsp/libQnn*.so /usr/lib/rfsa/adsp/libc++*.so* 2>/dev/null | xargs -I{} basename {}
+echo ""
 echo "ADSP_LIBRARY_PATH in cdsprpcd:"
-CDSP_PID=\$(pgrep cdsprpcd | head -1)
-if [ -n "\$CDSP_PID" ]; then cat /proc/\$CDSP_PID/environ | tr "\\0" "\\n" | grep ADSP; else echo "(not running)"; fi
-' 2>&1"
+CDSP_PID=$(pgrep cdsprpcd | head -1)
+if [ -n "$CDSP_PID" ]; then
+    cat /proc/"$CDSP_PID"/environ | tr "\0" "\n" | grep ADSP || echo "(not set)"
+else
+    echo "(cdsprpcd not running)"
+fi
+echo ""
+echo "Calculator test:"
+export ADSP_LIBRARY_PATH=/usr/lib/rfsa/adsp
+export LD_LIBRARY_PATH=/usr/lib
+/usr/local/bin/qnn-platform-validator --backend dsp --testBackend 2>&1 | grep -E "Unit Test|supported"
+APPLY_EOF
+
+echo "=== Uploading to device ==="
+sshpass -p "$DEVICE_PASS" ssh -o StrictHostKeyChecking=no "$DEVICE_HOST" "rm -rf /tmp/sdk-staging && mkdir -p /tmp/sdk-staging"
+sshpass -p "$DEVICE_PASS" scp -o StrictHostKeyChecking=no -r "$STAGING/usr_lib" "$STAGING/adsp" "$STAGING/bin" "$STAGING/apply.sh" "$DEVICE_HOST:/tmp/sdk-staging/"
+
+echo "=== Applying on device as root ==="
+sshpass -p "$DEVICE_PASS" ssh -o StrictHostKeyChecking=no "$DEVICE_HOST" "echo '$ROOT_PASS' | su -c 'bash /tmp/sdk-staging/apply.sh' 2>&1"
 
 echo ""
-echo "=== Device setup complete ==="
-echo "To test on device:"
+echo "=== Device setup complete (SDK: $SDK_VERSION) ==="
+echo ""
+echo "To run on device:"
 echo "  export ADSP_LIBRARY_PATH=/usr/lib/rfsa/adsp"
 echo "  export LD_LIBRARY_PATH=/usr/lib:/opt/scifi/lib"
-echo "  qnn-platform-validator --backend dsp --testBackend"
 echo "  ./synapse-example-app"
