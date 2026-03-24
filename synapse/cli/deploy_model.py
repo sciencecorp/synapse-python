@@ -41,8 +41,8 @@ def add_commands(subparsers: argparse._SubParsersAction):
     parser.add_argument(
         "--name",
         type=str,
-        default=None,
-        help="Model name on device (default: filename without extension)",
+        required=True,
+        help="Model name on device (no extension needed, e.g., 'my_model')",
     )
 
     parser.add_argument(
@@ -75,36 +75,21 @@ def add_commands(subparsers: argparse._SubParsersAction):
     )
 
     parser.add_argument(
-        "--quantize",
-        action="store_true",
-        help=(
-            "Quantize the model to INT8 after conversion. Required for DSP/NPU inference. "
-            "Must be used with --input-list pointing to a file of representative inputs. "
-            "Each line in the input list should be a path to a raw binary file containing "
-            "float32 data matching the model's input shape (e.g., numpy: "
-            'arr.astype(np.float32).tofile("sample_001.raw")).'
-        ),
-    )
-
-    parser.add_argument(
         "--input-list",
         type=str,
-        default=None,
+        required=True,
         help=(
-            "Path to a text file listing representative input samples for quantization. "
-            "Each line is a path to a .raw file (float32 binary). Paths should be "
-            "relative to the directory containing the input list file."
+            "Path to a text file listing representative input samples for INT8 quantization "
+            "(required for DSP inference). Each line is a path to a .raw file (float32 binary). "
+            "Paths should be relative to the directory containing the input list file. "
+            "Generate .raw files with: arr.astype(np.float32).tofile('sample.raw')"
         ),
     )
 
     parser.add_argument(
-        "--compile",
+        "--force",
         action="store_true",
-        help=(
-            "Compile a QNN context binary (.bin) pre-compiled for the HTP backend. "
-            "This enables DSP inference by bypassing runtime graph compilation. "
-            "Implies --quantize (HTP requires INT8 models)."
-        ),
+        help="Overwrite existing model on device without prompting",
     )
 
     parser.set_defaults(func=deploy_model)
@@ -131,48 +116,22 @@ def deploy_model(args):
             console.print('[yellow]Expected format: "dim1,dim2,..." (e.g., "1,32,64")[/yellow]')
             return
 
-    # Determine model name
     model_name = args.name
-    if model_name is None:
-        model_name = os.path.splitext(os.path.basename(args.model_path))[0]
-
-    model_ext = ".bin" if args.compile else ".dlc"
 
     console.print(f"[bold]Deploying model:[/bold] {model_name}")
     console.print(f"[bold]Source:[/bold] {args.model_path}")
-    console.print(f"[bold]Target:[/bold] {args.uri}:{DEVICE_MODEL_DIR}/{model_name}{model_ext}")
+    console.print(f"[bold]Format:[/bold] Quantized DLC (INT8)")
     console.print()
 
-    # --compile implies --quantize (HTP requires INT8)
-    quantize = args.quantize or args.compile
-    compile_context = args.compile
-
-    # Validate quantize + input-list
-    if quantize and not args.input_list:
-        console.print(
-            "[bold red]Error:[/bold red] --quantize/--compile requires --input-list "
-            "with representative input samples"
-        )
-        return
-
-    if args.input_list and not quantize:
-        console.print(
-            "[yellow]Note: --input-list provided without --quantize, ignoring[/yellow]"
-        )
-
-    # Step 1: Convert model
-    if compile_context:
-        console.print("[bold cyan]Converting model to QNN context binary...[/bold cyan]")
-    else:
-        console.print("[bold cyan]Converting model to DLC format...[/bold cyan]")
+    # Step 1: Convert model (always quantize for DSP inference)
+    console.print("[bold cyan]Converting model to quantized DLC...[/bold cyan]")
 
     dlc_path = convert_to_dlc(
         args.model_path,
         input_shape=input_shape,
         snpe_root=args.snpe_root,
-        quantize=quantize,
+        quantize=True,
         input_list=args.input_list,
-        compile_context=compile_context,
         console=console,
     )
 
@@ -202,15 +161,33 @@ def deploy_model(args):
         # Step 3: Ensure model directory exists
         _ensure_model_dir(sftp_conn, console)
 
-        # Step 4: Upload the model file
-        remote_path = f"{DEVICE_MODEL_DIR}/{model_name}{model_ext}"
+        # Step 4: Check if model already exists on device
+        remote_path = f"{DEVICE_MODEL_DIR}/{model_name}.dlc"
+        try:
+            sftp_conn.stat(remote_path)
+            if not args.force:
+                console.print(
+                    f"[yellow]Model '{model_name}.dlc' already exists on device. "
+                    f"Overwrite? [y/N][/yellow] ",
+                    end="",
+                )
+                response = input().strip().lower()
+                if response not in ("y", "yes"):
+                    console.print("[dim]Aborted.[/dim]")
+                    return
+        except FileNotFoundError:
+            pass
+
+        # Step 5: Upload the model file
         _upload_file(sftp_conn, dlc_path, remote_path, console)
 
         console.print()
         console.print("[bold green]Model deployed successfully![/bold green]")
         console.print()
-        console.print("[dim]To use in your app:[/dim]")
-        console.print(f'[cyan]  auto model = synapse::Model::load("{model_name}");[/cyan]')
+        console.print(f"  Model deployed: [cyan]models/{model_name}.dlc[/cyan]")
+        console.print()
+        console.print("  To load in your app:")
+        console.print(f'    [cyan]auto model = synapse::create_model("{model_name}");[/cyan]')
 
     finally:
         sftp.close_sftp(ssh, sftp_conn)

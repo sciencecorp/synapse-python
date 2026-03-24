@@ -2,7 +2,7 @@
 """ONNX to QNN context binary conversion script.
 
 Runs inside the synapse-model-converter Docker container.
-Pipeline: ONNX → qairt-converter → DLC → qairt-quantizer → qnn-context-binary-generator → .bin
+Pipeline: ONNX → qairt-converter → DLC → qairt-quantizer → quantized DLC
 
 Expects:
   - QAIRT SDK mounted at the path given by --snpe-root
@@ -213,87 +213,12 @@ def quantize_dlc(dlc_path, input_list, snpe_root, output_path=None):
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Generate QNN context binary (qnn-context-binary-generator)
-# ---------------------------------------------------------------------------
-
-def generate_context_binary(dlc_path, output_path, snpe_root):
-    """Generate a pre-compiled QNN context binary for HTP backend."""
-    generator = find_tool(snpe_root, "qnn-context-binary-generator")
-    if generator is None:
-        print("ERROR: qnn-context-binary-generator not found", file=sys.stderr)
-        return False
-
-    backend_lib = os.path.join(snpe_root, "lib", "x86_64-linux-clang", "libQnnHtp.so")
-    if not os.path.exists(backend_lib):
-        print(f"ERROR: HTP backend not found at {backend_lib}", file=sys.stderr)
-        return False
-
-    output_dir = os.path.dirname(output_path)
-    output_name = os.path.splitext(os.path.basename(output_path))[0]
-
-    # Write HTP backend extensions config to limit VTCM usage.
-    # QCS6490 (Hexagon v68) has limited VTCM; vtcm_mb=0 lets the runtime decide.
-    import json
-
-    htp_config_path = os.path.join(output_dir or ".", "htp_config.json")
-    with open(htp_config_path, "w") as f:
-        json.dump({"graphs": [{"vtcm_mb": 0, "graph_names": ["*"]}]}, f)
-
-    backend_ext_lib = os.path.join(
-        snpe_root, "lib", "x86_64-linux-clang", "libQnnHtpNetRunExtensions.so"
-    )
-    ext_config_path = os.path.join(output_dir or ".", "backend_extensions_config.json")
-    with open(ext_config_path, "w") as f:
-        json.dump({
-            "backend_extensions": {
-                "shared_library_path": backend_ext_lib,
-                "config_file_path": htp_config_path,
-            }
-        }, f)
-
-    cmd = [
-        generator,
-        "--dlc_path", dlc_path,
-        "--backend", backend_lib,
-        "--binary_file", output_name,
-        "--output_dir", output_dir,
-        "--config_file", ext_config_path,
-    ]
-
-    print(f"Generating context binary: {' '.join(cmd)}")
-    result = subprocess.run(cmd, env=native_env(snpe_root),
-                            capture_output=True, text=True, timeout=600)
-
-    if result.stdout:
-        print(result.stdout)
-
-    if result.returncode != 0:
-        print("ERROR: Context binary generation failed:", file=sys.stderr)
-        if result.stderr:
-            print(result.stderr, file=sys.stderr)
-        return False
-
-    # qnn-context-binary-generator outputs <name>.bin in output_dir
-    expected_bin = os.path.join(output_dir, f"{output_name}.bin")
-    if not os.path.exists(expected_bin):
-        print(f"ERROR: Expected output not found at {expected_bin}", file=sys.stderr)
-        return False
-
-    # Move to the requested output path if different
-    if expected_bin != output_path:
-        shutil.move(expected_bin, output_path)
-
-    print(f"Successfully generated context binary: {output_path}")
-    return True
-
-
-# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Convert ONNX model to Qualcomm QNN context binary"
+        description="Convert ONNX model to quantized DLC for Qualcomm HTP inference"
     )
     parser.add_argument("--input", required=True, help="Path to input ONNX model")
     parser.add_argument("--output", required=True, help="Path for output file")
@@ -310,21 +235,14 @@ def main():
     parser.add_argument(
         "--input-list", default=None, help="Input list file for quantization"
     )
-    parser.add_argument(
-        "--compile", action="store_true",
-        help="Generate QNN context binary (.bin) for HTP backend"
-    )
     args = parser.parse_args()
 
     input_shape = None
     if args.input_shape:
         input_shape = tuple(int(x.strip()) for x in args.input_shape.split(","))
 
-    # Determine intermediate DLC path
-    if args.compile:
-        dlc_path = os.path.splitext(args.output)[0] + ".dlc"
-    else:
-        dlc_path = args.output
+    # Output is always DLC
+    dlc_path = args.output
 
     # Step 1: Convert ONNX → DLC
     success = convert_to_dlc(
@@ -332,16 +250,12 @@ def main():
         input_shape=input_shape, input_name=args.input_name,
     )
 
-    # Step 2: Quantize (optional, but required for HTP/DSP)
+    # Step 2: Quantize (required for DSP inference)
     if success and args.quantize:
         if not args.input_list:
             print("ERROR: --quantize requires --input-list", file=sys.stderr)
             sys.exit(1)
         success = quantize_dlc(dlc_path, args.input_list, args.snpe_root)
-
-    # Step 3: Generate context binary (optional)
-    if success and args.compile:
-        success = generate_context_binary(dlc_path, args.output, args.snpe_root)
 
     sys.exit(0 if success else 1)
 

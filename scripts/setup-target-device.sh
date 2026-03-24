@@ -1,5 +1,6 @@
 #!/bin/bash
-# Idempotent setup script for QCS6490 target device (scifi@10.40.63.143)
+# Developer tool for setting up QCS6490 dev boards directly.
+# End users: install the synapse-app-sdk .deb package instead.
 # Deploys QNN SDK libraries, BSP libc++, and configures QNN HTP runtime
 #
 # Usage: ./scripts/setup-target-device.sh [--sdk-version v2.34|v2.42] [SNPE_ROOT]
@@ -18,7 +19,7 @@
 set -euo pipefail
 
 # --- Parse arguments ---
-SDK_VERSION="v2.42"
+SDK_VERSION="v2.34"
 SNPE_ROOT=""
 
 while [[ $# -gt 0 ]]; do

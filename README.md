@@ -57,6 +57,35 @@ And a toy device `synapse-sim` for local development,
 
 For more information on deploy and build, visit [synapse-example-app](https://github.com/sciencecorp/synapse-example-app)
 
+## Model Deployment
+
+Deploy machine learning models to Synapse devices for DSP inference.
+
+**Prerequisites:**
+- [QAIRT SDK v2.34](https://softwarecenter.qualcomm.com/) (Qualcomm AI Runtime)
+- Docker (for model conversion)
+
+**Deploy a model:**
+
+```bash
+synapsectl deploy-model model.onnx \
+  --name my_model \
+  --input-list calibration_data.txt \
+  --snpe-root /path/to/qairt/2.34.0.250424 \
+  -u <device-ip>
+```
+
+Models are automatically quantized to INT8 and converted to DLC format for on-device DSP compilation.
+
+**Use in your C++ app:**
+
+```cpp
+auto model = synapse::create_model("my_model");
+if (model && model->is_ready()) {
+    auto result = model->infer(input_data);
+}
+```
+
 ## A Note on Streaming
 
 Synapse devices stream data to and from clients with UDP. To minimize packet loss, it is highly recommended that users increase their OS UDP buffer size.
