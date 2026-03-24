@@ -75,13 +75,22 @@ def add_commands(subparsers: argparse._SubParsersAction):
     )
 
     parser.add_argument(
+        "--quantize",
+        action="store_true",
+        help=(
+            "Quantize the model to INT8 for DSP inference. Requires --input-list with "
+            "representative input samples. Quantized models run on the HTP/DSP backend "
+            "for maximum performance (~1ms). Without quantization, models run on CPU."
+        ),
+    )
+
+    parser.add_argument(
         "--input-list",
         type=str,
-        required=True,
+        default=None,
         help=(
-            "Path to a text file listing representative input samples for INT8 quantization "
-            "(required for DSP inference). Each line is a path to a .raw file (float32 binary). "
-            "Paths should be relative to the directory containing the input list file. "
+            "Path to a text file listing representative input samples for INT8 quantization. "
+            "Each line is a path to a .raw file (float32 binary). Required with --quantize. "
             "Generate .raw files with: arr.astype(np.float32).tofile('sample.raw')"
         ),
     )
@@ -117,20 +126,42 @@ def deploy_model(args):
             return
 
     model_name = args.name
+    quantize = args.quantize
+
+    # Validate quantize + input-list
+    if quantize and not args.input_list:
+        console.print(
+            "[bold red]Error:[/bold red] --quantize requires --input-list "
+            "with representative input samples for INT8 calibration."
+        )
+        console.print()
+        console.print("[dim]Example:[/dim]")
+        console.print("  synapsectl deploy-model model.onnx --name my_model \\")
+        console.print("    --quantize --input-list calibration_data.txt \\")
+        console.print("    --snpe-root /path/to/qairt/2.34.0.250424 -u <device>")
+        return
+
+    if quantize:
+        fmt_str = "Quantized DLC (INT8) — runs on DSP"
+    else:
+        fmt_str = "Float DLC — runs on CPU/GPU"
 
     console.print(f"[bold]Deploying model:[/bold] {model_name}")
     console.print(f"[bold]Source:[/bold] {args.model_path}")
-    console.print(f"[bold]Format:[/bold] Quantized DLC (INT8)")
+    console.print(f"[bold]Format:[/bold] {fmt_str}")
     console.print()
 
-    # Step 1: Convert model (always quantize for DSP inference)
-    console.print("[bold cyan]Converting model to quantized DLC...[/bold cyan]")
+    # Step 1: Convert model
+    if quantize:
+        console.print("[bold cyan]Converting model to quantized DLC...[/bold cyan]")
+    else:
+        console.print("[bold cyan]Converting model to DLC...[/bold cyan]")
 
     dlc_path = convert_to_dlc(
         args.model_path,
         input_shape=input_shape,
         snpe_root=args.snpe_root,
-        quantize=True,
+        quantize=quantize,
         input_list=args.input_list,
         console=console,
     )
@@ -185,6 +216,14 @@ def deploy_model(args):
         console.print("[bold green]Model deployed successfully![/bold green]")
         console.print()
         console.print(f"  Model deployed: [cyan]models/{model_name}.dlc[/cyan]")
+        if quantize:
+            console.print(f"  Runtime: [cyan]DSP (quantized INT8)[/cyan]")
+        else:
+            console.print(f"  Runtime: [cyan]CPU (float32)[/cyan]")
+            console.print()
+            console.print(
+                "  [dim]Tip: for faster DSP inference (~1ms), redeploy with --quantize --input-list[/dim]"
+            )
         console.print()
         console.print("  To load in your app:")
         console.print(f'    [cyan]auto model = synapse::create_model("{model_name}");[/cyan]')

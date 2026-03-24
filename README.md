@@ -65,17 +65,24 @@ Deploy machine learning models to Synapse devices for DSP inference.
 - [QAIRT SDK v2.34](https://softwarecenter.qualcomm.com/) (Qualcomm AI Runtime)
 - Docker (for model conversion)
 
-**Deploy a model:**
+**Deploy a model (float, runs on CPU):**
 
 ```bash
 synapsectl deploy-model model.onnx \
   --name my_model \
-  --input-list calibration_data.txt \
   --snpe-root /path/to/qairt/2.34.0.250424 \
   -u <device-ip>
 ```
 
-Models are automatically quantized to INT8 and converted to DLC format for on-device DSP compilation.
+**Deploy a quantized model (INT8, runs on DSP at ~1ms):**
+
+```bash
+synapsectl deploy-model model.onnx \
+  --name my_model \
+  --quantize --input-list calibration_data.txt \
+  --snpe-root /path/to/qairt/2.34.0.250424 \
+  -u <device-ip>
+```
 
 **Use in your C++ app:**
 
