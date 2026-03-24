@@ -6,7 +6,7 @@ Includes `synapsectl` command line utility:
 
     % synapsectl --help
     usage: synapsectl [-h] [--uri URI] [--version] [--verbose]
-                    {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy,build,settings} ...
+                    {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy,build,settings,deploy-model} ...
 
     Synapse Device Manager
 
@@ -17,7 +17,7 @@ Includes `synapsectl` command line utility:
     --verbose, -v         Enable verbose output
 
     Commands:
-    {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy,build,settings}
+    {discover,info,query,start,stop,configure,logs,read,plot,file,taps,deploy,build,settings,deploy-model}
         discover            Discover Synapse devices on the network
         info                Get device information
         query               Execute a query on the device
@@ -32,6 +32,7 @@ Includes `synapsectl` command line utility:
         deploy              Deploy an application to a Synapse device
         build               Cross-compile and package an application into a .deb without deploying
         settings            Manage the persistent device settings
+        deploy-model        Deploy a machine learning model to a Synapse device
 
 As well as the base for a device implementation (`synapse/server`),
 
@@ -56,42 +57,6 @@ And a toy device `synapse-sim` for local development,
     -v, --verbose         Enable verbose output
 
 For more information on deploy and build, visit [synapse-example-app](https://github.com/sciencecorp/synapse-example-app)
-
-## Model Deployment
-
-Deploy machine learning models to Synapse devices for DSP inference.
-
-**Prerequisites:**
-- [QAIRT SDK v2.34](https://softwarecenter.qualcomm.com/) (Qualcomm AI Runtime)
-- Docker (for model conversion)
-
-**Deploy a model (float, runs on CPU):**
-
-```bash
-synapsectl deploy-model model.onnx \
-  --name my_model \
-  --snpe-root /path/to/qairt/2.34.0.250424 \
-  -u <device-ip>
-```
-
-**Deploy a quantized model (INT8, runs on DSP at ~1ms):**
-
-```bash
-synapsectl deploy-model model.onnx \
-  --name my_model \
-  --quantize --input-list calibration_data.txt \
-  --snpe-root /path/to/qairt/2.34.0.250424 \
-  -u <device-ip>
-```
-
-**Use in your C++ app:**
-
-```cpp
-auto model = synapse::create_model("my_model");
-if (model && model->is_ready()) {
-    auto result = model->infer(input_data);
-}
-```
 
 ## A Note on Streaming
 
@@ -229,4 +194,106 @@ After recording data to a file, you can generate plots to visualize your data. U
 
 ```
 synapsectl plot --dir <path to directory containing .dat and .json>
+```
+
+## Model Deployment
+
+Deploy machine learning models to Synapse devices.
+
+### Prerequisites
+
+1. **Docker** — required for model conversion
+2. **QAIRT SDK v2.34** (Qualcomm AI Runtime) — required for model conversion
+
+#### Installing the QAIRT SDK
+
+1. Create a free account at [softwarecenter.qualcomm.com](https://softwarecenter.qualcomm.com/)
+2. Download and install [Qualcomm Software Center](https://softwarecenter.qualcomm.com/) for your platform (Linux, macOS, or Windows)
+3. Open the Software Center, search for "Qualcomm AI Runtime", and install **v2.34 (Linux)**
+
+   > **Note:** Always install the **Linux** version, even on macOS/Windows. The SDK is mounted into a Linux Docker container for model conversion.
+
+   Alternatively on Linux, you can download the `.qik` file directly from the website and install via command line:
+   ```bash
+   /opt/qcom/softwarecenter/bin/qik/qik INSTALL "/path/to/Qualcomm_AI_Runtime_SDK.2.34.0.250424.Linux-AnyCPU.qik"
+   ```
+
+4. The SDK installs to `/opt/qcom/aistack/qairt/2.34.0.250424` by default. Note this path — you'll pass it as `--snpe-root` when deploying models.
+
+### Quick Start — Deploy a Float Model (CPU)
+
+The simplest path — no calibration data needed, runs on CPU:
+
+```bash
+synapsectl deploy-model model.onnx \
+  --name my_model \
+  --snpe-root /opt/qcom/aistack/qairt/2.34.0.250424 \
+  -u <device-ip>
+```
+
+### Deploy a Quantized Model (DSP, ~1ms inference)
+
+For production performance, quantize the model to INT8 for DSP inference. This requires representative input samples for calibration.
+
+#### Step 1: Create calibration data
+
+Generate `.raw` files from representative inputs your model will see in production. Each `.raw` file is a flat binary dump of float32 values matching your model's input shape.
+
+```python
+import numpy as np
+
+# Example: model expects input shape [1, 1920]
+# Generate 10 representative samples
+for i in range(10):
+    sample = np.random.randn(1, 1920).astype(np.float32)  # replace with real data
+    sample.tofile(f"sample_{i:03d}.raw")
+```
+
+#### Step 2: Create an input list file
+
+Create a text file (e.g., `input_list.txt`) with one `.raw` file path per line. Paths are relative to the directory containing the input list file.
+
+```
+sample_000.raw
+sample_001.raw
+sample_002.raw
+sample_003.raw
+sample_004.raw
+sample_005.raw
+sample_006.raw
+sample_007.raw
+sample_008.raw
+sample_009.raw
+```
+
+> **Tip:** Use 10-100 samples that represent the range of inputs your model will see. More diverse samples = better quantization accuracy.
+
+#### Step 3: Deploy with quantization
+
+```bash
+synapsectl deploy-model model.onnx \
+  --name my_model \
+  --quantize --input-list input_list.txt \
+  --snpe-root /opt/qcom/aistack/qairt/2.34.0.250424 \
+  -u <device-ip>
+```
+
+### Use in Your C++ App
+
+```cpp
+#include <synapse-app-sdk/inference/model.hpp>
+
+// Loads models/<name>.dlc from the device model directory
+auto model = synapse::create_model("my_model");
+
+if (model && model->is_ready()) {
+    auto result = model->infer(input_data);
+    // result.success, result.outputs, result.inference_time_us
+}
+```
+
+The runtime is selected automatically: quantized models run on the DSP, float models run on CPU. You can also specify a runtime explicitly:
+
+```cpp
+auto model = synapse::create_model("my_model", synapse::InferenceRuntime::kDsp);
 ```
