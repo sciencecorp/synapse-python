@@ -207,18 +207,17 @@ Deploy machine learning models to Synapse devices.
 
 #### Installing the QAIRT SDK
 
-1. Create a free account at [softwarecenter.qualcomm.com](https://softwarecenter.qualcomm.com/)
-2. Download and install [Qualcomm Software Center](https://softwarecenter.qualcomm.com/) for your platform (Linux, macOS, or Windows)
-3. Open the Software Center, search for "Qualcomm AI Runtime", and install **v2.34 (Linux)**
-
-   > **Note:** Always install the **Linux** version, even on macOS/Windows. The SDK is mounted into a Linux Docker container for model conversion.
-
-   Alternatively on Linux, you can download the `.qik` file directly from the website and install via command line:
+1. Create a free account at [softwarecenter.qualcomm.com](https://softwarecenter.qualcomm.com/) (no paid license required)
+2. Download **Qualcomm Software Center** (Linux `.deb`) and **Qualcomm AI Runtime v2.34** (Linux `.qik`) from the website
+3. Install both:
    ```bash
-   /opt/qcom/softwarecenter/bin/qik/qik INSTALL "/path/to/Qualcomm_AI_Runtime_SDK.2.34.0.250424.Linux-AnyCPU.qik"
-   ```
+   # Install Qualcomm Software Center (includes the qik package manager)
+   sudo dpkg -i QualcommSoftwareCenter*.deb
 
-4. The SDK installs to `/opt/qcom/aistack/qairt/2.34.0.250424` by default. Note this path — you'll pass it as `--snpe-root` when deploying models.
+   # Install the QAIRT SDK
+   sudo /opt/qcom/softwarecenter/bin/qik/qik INSTALL "/path/to/Qualcomm_AI_Runtime_SDK.2.34.0.250424.Linux-AnyCPU.qik"
+   ```
+4. The SDK installs to `/opt/qcom/aistack/qairt/2.34.0.250424`. You'll pass this path as `--snpe-root` when deploying models.
 
 ### Quick Start — Deploy a Float Model (CPU)
 
