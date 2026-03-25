@@ -18,18 +18,17 @@ DOCKER_IMAGE = "synapse-model-converter:latest"
 
 
 def _find_model_converter_dir() -> str:
-    """Locate the model-converter/ directory containing the Dockerfile."""
-    # Walk up from this file to the repo root
+    """Locate the directory containing the Dockerfile for model conversion."""
     here = os.path.dirname(os.path.abspath(__file__))
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(here)))
-    candidate = os.path.join(repo_root, "model-converter")
-    if os.path.isdir(candidate) and os.path.isfile(
-        os.path.join(candidate, "Dockerfile")
+    docker_dir = os.path.join(here, "docker")
+    if os.path.isdir(docker_dir) and os.path.isfile(
+        os.path.join(docker_dir, "Dockerfile")
     ):
-        return candidate
+        return docker_dir
+
     raise FileNotFoundError(
-        f"model-converter/ directory not found at {candidate}. "
-        "Make sure you are running from the synapse-python repository."
+        "Model converter Dockerfile not found. "
+        "Try reinstalling: pip install science-synapse"
     )
 
 
@@ -72,7 +71,7 @@ def _build_image(console: Optional[Console] = None) -> bool:
         return False
 
     if console:
-        console.print(f"[green]Docker image {DOCKER_IMAGE} built successfully[/green]")
+        console.print(f"[green]Docker image built successfully[/green]")
     return True
 
 

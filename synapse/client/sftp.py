@@ -29,7 +29,6 @@ def connect_sftp(hostname, username, password=None, pass_filename=None, key_file
             logging.error(f"Failed to read password file: {e}")
             return None, None
     try:
-        logging.debug(f"Connecting to {hostname}:{port} as {username}")
         ssh.connect(
             hostname=hostname,
             port=port,

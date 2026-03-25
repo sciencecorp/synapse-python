@@ -11,6 +11,12 @@ setup(
     author="Science Team",
     author_email="team@science.xyz",
     packages=find_packages(include=["synapse", "synapse.*"]),
+    package_data={
+        "synapse": [
+            "utils/model_converter/docker/Dockerfile",
+            "utils/model_converter/docker/convert.py",
+        ],
+    },
     long_description=long_description,
     long_description_content_type="text/markdown",
     python_requires=">=3.9",
