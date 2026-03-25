@@ -4,12 +4,12 @@ import argparse
 import os
 from typing import Optional
 
-import paramiko.ssh_exception
 from rich.console import Console
 from rich import progress
+from rich.prompt import Confirm
 
 import synapse.client.sftp as sftp
-from synapse.cli.files import find_password, save_password
+from synapse.cli.files import setup_connection
 from synapse.utils.model_converter import convert_to_dlc
 
 # Constants
@@ -205,7 +205,7 @@ def deploy_model(args):
     # Step 2: Connect to device via SFTP
     console.print("[bold cyan]Connecting to device...[/bold cyan]")
 
-    connections = _setup_connection(
+    result = setup_connection(
         args.uri,
         args.username,
         args.env_file,
@@ -213,10 +213,10 @@ def deploy_model(args):
         console,
     )
 
-    if connections is None:
+    if result is None:
         return
 
-    ssh, sftp_conn = connections
+    ssh, sftp_conn = result
 
     try:
         # Step 3: Ensure model directory exists
@@ -227,13 +227,10 @@ def deploy_model(args):
         try:
             sftp_conn.stat(remote_path)
             if not args.force:
-                console.print(
-                    f"[yellow]Model '{model_name}.dlc' already exists on device. "
-                    f"Overwrite? [y/N][/yellow] ",
-                    end="",
-                )
-                response = input().strip().lower()
-                if response not in ("y", "yes"):
+                if not Confirm.ask(
+                    f"[yellow]Model '{model_name}.dlc' already exists on device. Overwrite?[/yellow]",
+                    default=False,
+                ):
                     console.print("[dim]Aborted.[/dim]")
                     return
         except FileNotFoundError:
@@ -260,47 +257,6 @@ def deploy_model(args):
 
     finally:
         sftp.close_sftp(ssh, sftp_conn)
-
-
-def _setup_connection(
-    uri: str,
-    username: str,
-    env_file: str,
-    forget_password: bool,
-    console: Console,
-) -> Optional[tuple]:
-    """Set up SFTP connection to device."""
-    hostname = uri.split(":")[0] if ":" in uri else uri
-    password = find_password(hostname, env_file)
-
-    if password is None:
-        console.print(f"[bold red]Didn't find any password for {hostname}[/bold red]")
-        return None
-
-    console.print(f"[dim]Connecting to {hostname}:22 as {username}...[/dim]")
-
-    try:
-        ssh, sftp_conn = sftp.connect_sftp(hostname, username, password)
-    except paramiko.ssh_exception.AuthenticationException:
-        console.print(f"[bold red]Authentication failed for {hostname}[/bold red]")
-        console.print("[yellow]Incorrect username or password.[/yellow]")
-        return None
-    except paramiko.ssh_exception.SSHException as e:
-        console.print(f"[bold red]SSH connection failed: {e}[/bold red]")
-        return None
-    except Exception as e:
-        console.print(f"[bold red]Connection failed: {e}[/bold red]")
-        return None
-
-    if ssh is None or sftp_conn is None:
-        console.print(f"[bold red]Failed to connect to {hostname}[/bold red]")
-        return None
-
-    if not forget_password:
-        save_password(password, env_file, hostname)
-
-    console.print(f"[green]Connected to {hostname}[/green]")
-    return ssh, sftp_conn
 
 
 def _ensure_model_dir(sftp_conn, console: Console):
