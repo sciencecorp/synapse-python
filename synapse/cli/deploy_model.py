@@ -41,8 +41,8 @@ def add_commands(subparsers: argparse._SubParsersAction):
     parser.add_argument(
         "--name",
         type=str,
-        required=True,
-        help="Model name on device (no extension needed, e.g., 'my_model')",
+        default=None,
+        help="Model name on device (default: filename without extension, e.g., 'my_model')",
     )
 
     parser.add_argument(
@@ -125,7 +125,37 @@ def deploy_model(args):
             console.print('[yellow]Expected format: "dim1,dim2,..." (e.g., "1,32,64")[/yellow]')
             return
 
+    # Default dynamic dimensions to 1 if the model has them and no --input-shape given
+    if input_shape is None:
+        ext = os.path.splitext(args.model_path)[1].lower()
+        if ext == ".onnx":
+            try:
+                import onnx
+
+                onnx_model = onnx.load(args.model_path)
+                for inp in onnx_model.graph.input:
+                    dims = inp.type.tensor_type.shape.dim
+                    has_dynamic = any(d.dim_param or d.dim_value == 0 for d in dims)
+                    if has_dynamic:
+                        resolved = []
+                        for d in dims:
+                            if d.dim_param or d.dim_value == 0:
+                                resolved.append(1)
+                            else:
+                                resolved.append(d.dim_value)
+                        input_shape = tuple(resolved)
+                        console.print(
+                            f"[yellow]Note: model has dynamic dimensions, "
+                            f"defaulting to {input_shape}[/yellow]"
+                        )
+                        break
+            except Exception:
+                pass  # If onnx isn't installed or can't load, let the converter handle it
+
+    # Default model name to filename without extension
     model_name = args.name
+    if model_name is None:
+        model_name = os.path.splitext(os.path.basename(args.model_path))[0]
     quantize = args.quantize
 
     # Validate quantize + input-list
