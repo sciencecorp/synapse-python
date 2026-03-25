@@ -230,27 +230,48 @@ synapsectl deploy-model model.onnx \
   -u <device-ip>
 ```
 
-### Deploy a Quantized Model (DSP, ~1ms inference)
+### Deploy a Quantized Model (DSP)
 
-For production performance, quantize the model to INT8 for DSP inference. This requires representative input samples for calibration.
+For production performance, quantize the model to INT8 for DSP inference. This requires **calibration data** — a small set of example inputs that represent what the model will see in real use.
 
-#### Step 1: Create calibration data
+#### What is calibration data and why do I need it?
 
-Generate `.raw` files from representative inputs your model will see in production. Each `.raw` file is a flat binary dump of float32 values matching your model's input shape.
+Quantization converts your model from 32-bit floats to 8-bit integers, making it ~4x smaller and much faster on the DSP. But to do this well, the quantizer needs to see what typical input values look like so it can choose the right scale for each layer. Bad calibration data leads to accuracy loss.
+
+**Good calibration data** is a handful of real (or realistic) inputs from your application. For example:
+- If your model processes neural signals, use 10-50 snippets of actual recorded neural data
+- If your model processes audio, use 10-50 clips of real audio
+- If you don't have real data yet, synthetic data that matches the expected distribution is acceptable
+
+Ideally, use at least **1000 representative samples** for best accuracy. Fewer samples (50-100) can work for initial testing, but more data gives the quantizer a better picture of your model's value ranges.
+
+#### Step 1: Create calibration `.raw` files
+
+Each `.raw` file is a flat binary dump of float32 values matching your model's input shape. Create them with numpy:
 
 ```python
 import numpy as np
 
 # Example: model expects input shape [1, 1920]
-# Generate 10 representative samples
-for i in range(10):
-    sample = np.random.randn(1, 1920).astype(np.float32)  # replace with real data
+# Load your real data here — these should be actual inputs, not random noise
+for i, sample_data in enumerate(my_real_samples[:20]):
+    # sample_data should be a numpy array with shape matching your model input
+    sample_data.astype(np.float32).tofile(f"sample_{i:03d}.raw")
+```
+
+If you don't have real data yet, you can use synthetic data to get started (accuracy may be lower):
+
+```python
+import numpy as np
+
+for i in range(20):
+    sample = np.random.randn(1, 1920).astype(np.float32)
     sample.tofile(f"sample_{i:03d}.raw")
 ```
 
 #### Step 2: Create an input list file
 
-Create a text file (e.g., `input_list.txt`) with one `.raw` file path per line. Paths are relative to the directory containing the input list file.
+Create a text file called `input_list.txt` listing your `.raw` files, one per line. Put this file in the same directory as the `.raw` files.
 
 ```
 sample_000.raw
@@ -264,8 +285,6 @@ sample_007.raw
 sample_008.raw
 sample_009.raw
 ```
-
-> **Tip:** Use 10-100 samples that represent the range of inputs your model will see. More diverse samples = better quantization accuracy.
 
 #### Step 3: Deploy with quantization
 
