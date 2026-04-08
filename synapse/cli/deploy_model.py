@@ -10,7 +10,6 @@ from rich.prompt import Confirm
 
 import synapse.client.sftp as sftp
 from synapse.cli.files import setup_connection
-from synapse.utils.model_converter import convert_to_dlc
 
 # Constants
 DEVICE_MODEL_DIR = "/models"
@@ -174,31 +173,64 @@ def deploy_model(args):
     if quantize:
         fmt_str = "Quantized DLC (INT8) — runs on DSP"
     else:
-        fmt_str = "Float DLC — runs on CPU/GPU"
+        fmt_str = "ONNX (float32) — runs on CPU via ONNX Runtime"
 
     console.print(f"[bold]Deploying model:[/bold] {model_name}")
     console.print(f"[bold]Source:[/bold] {args.model_path}")
     console.print(f"[bold]Format:[/bold] {fmt_str}")
     console.print()
 
-    # Step 1: Convert model
+    # Step 1: Prepare model for deployment
     if quantize:
+        # Quantized path: convert to DLC via Docker (requires QAIRT SDK)
         console.print("[bold cyan]Converting model to quantized DLC...[/bold cyan]")
+
+        from synapse.utils.model_converter import convert_to_dlc
+
+        dlc_path = convert_to_dlc(
+            args.model_path,
+            input_shape=input_shape,
+            snpe_root=args.snpe_root,
+            quantize=quantize,
+            input_list=args.input_list,
+            console=console,
+        )
+
+        if dlc_path is None:
+            console.print("[bold red]Model conversion failed[/bold red]")
+            return
+
+        deploy_path = dlc_path
+        remote_ext = ".dlc"
     else:
-        console.print("[bold cyan]Converting model to DLC...[/bold cyan]")
+        # Non-quantized path: deploy .onnx directly (no QAIRT SDK needed)
+        ext = os.path.splitext(args.model_path)[1].lower()
 
-    dlc_path = convert_to_dlc(
-        args.model_path,
-        input_shape=input_shape,
-        snpe_root=args.snpe_root,
-        quantize=quantize,
-        input_list=args.input_list,
-        console=console,
-    )
+        if ext == ".dlc":
+            deploy_path = args.model_path
+            remote_ext = ".dlc"
+        elif ext == ".pt":
+            console.print("[bold cyan]Converting PyTorch model to ONNX...[/bold cyan]")
+            from synapse.utils.model_converter.pt_to_onnx import convert_pt_to_onnx
 
-    if dlc_path is None:
-        console.print("[bold red]Model conversion failed[/bold red]")
-        return
+            onnx_path = convert_pt_to_onnx(
+                args.model_path,
+                input_shape=input_shape,
+                console=console,
+            )
+            if onnx_path is None:
+                console.print("[bold red]Model conversion failed[/bold red]")
+                return
+
+            deploy_path = onnx_path
+            remote_ext = ".onnx"
+        elif ext == ".onnx":
+            deploy_path = args.model_path
+            remote_ext = ".onnx"
+        else:
+            console.print(f"[bold red]Error:[/bold red] Unsupported file type: {ext}")
+            console.print("[yellow]Supported formats: .pt, .onnx, .dlc[/yellow]")
+            return
 
     console.print()
 
@@ -220,15 +252,15 @@ def deploy_model(args):
 
     try:
         # Step 3: Ensure model directory exists
-        _ensure_model_dir(sftp_conn, console)
+        _ensure_model_dir(sftp_conn, ssh, console)
 
         # Step 4: Check if model already exists on device
-        remote_path = f"{DEVICE_MODEL_DIR}/{model_name}.dlc"
+        remote_path = f"{DEVICE_MODEL_DIR}/{model_name}{remote_ext}"
         try:
             sftp_conn.stat(remote_path)
             if not args.force:
                 if not Confirm.ask(
-                    f"[yellow]Model '{model_name}.dlc' already exists on device. Overwrite?[/yellow]",
+                    f"[yellow]Model '{model_name}{remote_ext}' already exists on device. Overwrite?[/yellow]",
                     default=False,
                 ):
                     console.print("[dim]Aborted.[/dim]")
@@ -237,16 +269,16 @@ def deploy_model(args):
             pass
 
         # Step 5: Upload the model file
-        _upload_file(sftp_conn, dlc_path, remote_path, console)
+        _upload_file(sftp_conn, deploy_path, remote_path, console)
 
         console.print()
         console.print("[bold green]Model deployed successfully![/bold green]")
         console.print()
-        console.print(f"  Model deployed: [cyan]models/{model_name}.dlc[/cyan]")
+        console.print(f"  Model deployed: [cyan]models/{model_name}{remote_ext}[/cyan]")
         if quantize:
             console.print(f"  Runtime: [cyan]DSP (quantized INT8)[/cyan]")
         else:
-            console.print(f"  Runtime: [cyan]CPU (float32)[/cyan]")
+            console.print(f"  Runtime: [cyan]CPU (float32, ONNX Runtime)[/cyan]")
             console.print()
             console.print(
                 "  [dim]Tip: for faster DSP inference (~1ms), redeploy with --quantize --input-list[/dim]"
@@ -259,18 +291,43 @@ def deploy_model(args):
         sftp.close_sftp(ssh, sftp_conn)
 
 
-def _ensure_model_dir(sftp_conn, console: Console):
-    """Ensure the model directory exists on the device."""
+def _ensure_model_dir(sftp_conn, ssh, console: Console):
+    """Ensure the model directory exists on the device.
+
+    Tries SFTP mkdir first. If that fails (permission denied in chroot),
+    falls back to SSH exec to create and chown the directory.
+    """
     try:
         sftp_conn.stat(DEVICE_MODEL_DIR)
+        return
     except FileNotFoundError:
-        console.print(f"[blue]Creating model directory: {DEVICE_MODEL_DIR}[/blue]")
-        try:
-            sftp_conn.mkdir(DEVICE_MODEL_DIR)
-        except Exception as e:
-            console.print(
-                f"[yellow]Warning: Could not create model directory: {e}[/yellow]"
-            )
+        pass
+
+    console.print(f"[blue]Creating model directory: {DEVICE_MODEL_DIR}[/blue]")
+
+    # Try SFTP mkdir first
+    try:
+        sftp_conn.mkdir(DEVICE_MODEL_DIR)
+        return
+    except Exception:
+        pass
+
+    # SFTP failed — try SSH command to create with proper ownership
+    real_path = f"/opt/scifi/data{DEVICE_MODEL_DIR}"
+    try:
+        _, stdout, stderr = ssh.exec_command(
+            f"mkdir -p {real_path} && chown $(whoami) {real_path}"
+        )
+        exit_code = stdout.channel.recv_exit_status()
+        if exit_code == 0:
+            console.print(f"[green]Created {DEVICE_MODEL_DIR}[/green]")
+            return
+    except Exception:
+        pass
+
+    console.print(
+        f"[bold red]Error: Could not create model directory on device.[/bold red]"
+    )
 
 
 def _upload_file(sftp_conn, local_path: str, remote_path: str, console: Console):
