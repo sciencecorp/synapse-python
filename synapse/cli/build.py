@@ -340,6 +340,11 @@ WantedBy=multi-user.target
         lib_dst_dir = os.path.join(staging_dir, "opt", "scifi", "lib")
         os.makedirs(lib_dst_dir, exist_ok=True)
 
+        # QNN libraries are dlopen'd from /usr/lib/ (hardcoded paths in SDK),
+        # so they must be staged there — not in /opt/scifi/lib/
+        qnn_dst_dir = os.path.join(staging_dir, "usr", "lib")
+        os.makedirs(qnn_dst_dir, exist_ok=True)
+
         try:
             arch_suffix = detect_arch()
             image_tag = f"{app_name}:latest-{arch_suffix}"
@@ -349,6 +354,7 @@ WantedBy=multi-user.target
                 f"[yellow]Extracting SDK libraries from Docker image [bold]{image_tag}[/bold]...[/yellow]"
             )
 
+            # Extract SDK shared libraries → /opt/scifi/lib/
             docker_cmd = [
                 "docker",
                 "run",
@@ -360,10 +366,28 @@ WantedBy=multi-user.target
                 image_tag,
                 "/bin/bash",
                 "-c",
-                "find /usr/lib -name 'libsynapse*.so*' -exec cp -a {} /out/ \\;",
+                "find /usr/lib -maxdepth 1 -name 'libsynapse*.so*' -exec cp -a {} /out/ \\;",
             ]
 
             subprocess.run(docker_cmd, check=True)
+
+            # Extract QNN runtime libraries → /usr/lib/ (dlopen'd by absolute path)
+            docker_cmd_qnn = [
+                "docker",
+                "run",
+                "--rm",
+                "--platform",
+                platform_opt,
+                "-v",
+                f"{qnn_dst_dir}:/out",
+                image_tag,
+                "/bin/bash",
+                "-c",
+                "find /usr/lib -maxdepth 1 -name 'libQnn*.so' -exec cp -a {} /out/ \\; && "
+                "if [ -d /usr/lib/rfsa ]; then cp -a /usr/lib/rfsa /out/; fi",
+            ]
+
+            subprocess.run(docker_cmd_qnn, check=True)
 
         except subprocess.CalledProcessError as exc:
             console.print(
