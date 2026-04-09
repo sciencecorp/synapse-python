@@ -355,6 +355,7 @@ WantedBy=multi-user.target
             )
 
             # Extract SDK shared libraries → /opt/scifi/lib/
+            # Includes libsynapse-app-sdk and its runtime dependency libonnxruntime
             docker_cmd = [
                 "docker",
                 "run",
@@ -366,7 +367,8 @@ WantedBy=multi-user.target
                 image_tag,
                 "/bin/bash",
                 "-c",
-                "find /usr/lib -maxdepth 1 -name 'libsynapse*.so*' -exec cp -a {} /out/ \\;",
+                "find /usr/lib -maxdepth 1 -name 'libsynapse*.so*' -exec cp -a {} /out/ \\; && "
+                "find /usr/lib -maxdepth 1 -name 'libonnxruntime*.so*' -exec cp -a {} /out/ \\;",
             ]
 
             subprocess.run(docker_cmd, check=True)

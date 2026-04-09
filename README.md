@@ -203,7 +203,17 @@ Deploy machine learning models to Synapse devices.
 ### Prerequisites
 
 1. **Docker** — required for model conversion
-2. **QAIRT SDK v2.34** (Qualcomm AI Runtime) — required for model conversion
+2. **QAIRT SDK v2.34** (Qualcomm AI Runtime) — required for model conversion for DSP runtime, not required for CPU runtime
+
+### Quick Start — Deploy a Float Model (CPU)
+
+The simplest path — no calibration data needed, runs on CPU via onnxruntime:
+
+```bash
+synapsectl deploy-model model.onnx \
+  --name my_model \
+  -u <device-ip>
+```
 
 #### Installing the QAIRT SDK
 
@@ -219,16 +229,6 @@ Deploy machine learning models to Synapse devices.
    ```
 4. The SDK installs to `/opt/qcom/aistack/qairt/2.34.0.250424`. You'll pass this path as `--snpe-root` when deploying models.
 
-### Quick Start — Deploy a Float Model (CPU)
-
-The simplest path — no calibration data needed, runs on CPU:
-
-```bash
-synapsectl deploy-model model.onnx \
-  --name my_model \
-  --snpe-root /opt/qcom/aistack/qairt/2.34.0.250424 \
-  -u <device-ip>
-```
 
 ### Deploy a Quantized Model (DSP)
 
