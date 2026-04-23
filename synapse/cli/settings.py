@@ -37,7 +37,7 @@ def get_settings(args):
                 "[yellow]No settings have been configured (all are at default values)[/yellow]"
             )
             console.print("\n[dim]Available settings:[/dim]")
-            available = settings.get_available_settings()
+            available = settings.get_available_settings(device)
             for name, type_name in available.items():
                 console.print(f"  [cyan]{name}[/cyan] ({type_name})")
             return

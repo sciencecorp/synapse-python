@@ -1,8 +1,13 @@
 from __future__ import annotations
-from typing import Dict, Any, TYPE_CHECKING
-from google.protobuf.descriptor import FieldDescriptor
+from typing import Dict, Any, Optional, TYPE_CHECKING
 
-from synapse.api.device_pb2 import DeviceSettings, UpdateDeviceSettingsRequest
+from google.protobuf.struct_pb2 import Struct, Value
+
+from synapse.api.device_pb2 import (
+    DeviceSettings,
+    SettingDescriptor,
+    UpdateDeviceSettingsRequest,
+)
 from synapse.api.query_pb2 import QueryRequest
 
 if TYPE_CHECKING:
@@ -11,213 +16,151 @@ if TYPE_CHECKING:
 
 def get_all_settings(device: "Device") -> Dict[str, Any]:
     """
-    Get all non-default settings from device as a dictionary.
+    Get all settings currently set on the device as a dict of {name: value}.
 
-    Args:
-        device: Device instance to fetch settings from
-
-    Returns:
-        Dictionary of setting names to values
-
-    Raises:
-        RuntimeError: If failed to fetch settings from device
+    Values are returned as native Python types (str/int/float/bool) based on
+    each setting's Kind in the device's schema.
     """
-    request = QueryRequest(
-        query_type=QueryRequest.QueryType.kGetSettings, get_settings_query={}
-    )
-    response = device.query(request)
-
-    if not response or response.status.code != 0:
-        error_msg = response.status.message if response else "Unknown error"
-        raise RuntimeError(f"Failed to get settings from device: {error_msg}")
-
-    settings_proto = response.get_settings_response.settings
-    settings_dict = {}
-
-    for field in settings_proto.DESCRIPTOR.fields:
-        field_name = field.name
-        field_value = getattr(settings_proto, field_name)
-
-        # Check if field has non-default value
-        if _has_non_default_value(settings_proto, field, field_value):
-            settings_dict[field_name] = field_value
-
-    return settings_dict
+    _, values, schema = _query_settings(device)
+    kinds = {d.name: d.kind for d in schema}
+    return {
+        name: _value_to_python(v, kinds.get(name, SettingDescriptor.kKindUnknown))
+        for name, v in values.fields.items()
+    }
 
 
 def get_setting(device: "Device", key: str) -> Any:
-    """
-    Get a specific setting value from device.
+    """Get a single setting value by name."""
+    _, values, schema = _query_settings(device)
+    available = [d.name for d in schema]
+    if key not in available and key not in values.fields:
+        raise KeyError(f"Setting '{key}' not found. Available settings: {available}")
 
-    Args:
-        device: Device instance
-        key: Setting name
+    if key not in values.fields:
+        return None
 
-    Returns:
-        Setting value
-
-    Raises:
-        RuntimeError: If failed to fetch settings
-        KeyError: If setting doesn't exist
-    """
-    request = QueryRequest(
-        query_type=QueryRequest.QueryType.kGetSettings, get_settings_query={}
-    )
-    response = device.query(request)
-
-    if not response or response.status.code != 0:
-        error_msg = response.status.message if response else "Unknown error"
-        raise RuntimeError(f"Failed to get settings from device: {error_msg}")
-
-    settings_proto = response.get_settings_response.settings
-
-    if not _has_field(settings_proto, key):
-        available_fields = [field.name for field in settings_proto.DESCRIPTOR.fields]
-        raise KeyError(
-            f"Setting '{key}' not found. Available settings: {available_fields}"
-        )
-
-    return getattr(settings_proto, key)
+    kind = next((d.kind for d in schema if d.name == key), SettingDescriptor.kKindUnknown)
+    return _value_to_python(values.fields[key], kind)
 
 
 def set_setting(device: "Device", key: str, value: Any) -> Any:
     """
-    Set a specific setting value on device.
-
-    Args:
-        device: Device instance
-        key: Setting name
-        value: Setting value
-
-    Returns:
-        The actual value that was set (after any device processing)
-
-    Raises:
-        RuntimeError: If failed to update settings
-        KeyError: If setting doesn't exist
-        ValueError: If value is invalid for the setting type
+    Set a single setting on the device. Returns the value the device reports
+    after applying the update.
     """
-    # Create a new settings proto with just this field set
-    settings_proto = DeviceSettings()
+    _, _, schema = _query_settings(device)
+    descriptor = next((d for d in schema if d.name == key), None)
+    if descriptor is None:
+        available = [d.name for d in schema]
+        raise KeyError(f"Setting '{key}' not found. Available settings: {available}")
 
-    field_descriptor = _get_field_descriptor(settings_proto, key)
-    if not field_descriptor:
-        available_fields = [field.name for field in settings_proto.DESCRIPTOR.fields]
-        raise KeyError(
-            f"Setting '{key}' not found. Available settings: {available_fields}"
-        )
+    proto_value = _python_to_value(value, descriptor)
 
-    # Convert and validate value based on field type
-    converted_value = _convert_and_validate_value(field_descriptor, value)
-    setattr(settings_proto, key, converted_value)
+    update = DeviceSettings()
+    update.values.fields[key].CopyFrom(proto_value)
+    request = UpdateDeviceSettingsRequest(settings=update)
 
-    # Send to device
-    request = UpdateDeviceSettingsRequest(settings=settings_proto)
     response = device.update_device_settings(request)
-
     if not response or response.status.code != 0:
         error_msg = response.status.message if response else "Unknown error"
         raise RuntimeError(f"Failed to update settings on device: {error_msg}")
 
-    # Return the actual value that was set
-    return getattr(response.updated_settings, key)
-
-
-def get_available_settings() -> Dict[str, str]:
-    """
-    Get all available setting names and their types.
-
-    Returns:
-        Dictionary mapping setting names to their protobuf type names
-    """
-    settings_proto = DeviceSettings()
-    return {
-        field.name: _get_field_type_name(field)
-        for field in settings_proto.DESCRIPTOR.fields
-    }
-
-
-# Helper functions
-def _has_field(settings_proto: DeviceSettings, field_name: str) -> bool:
-    """Check if a field exists in the protobuf."""
-    return any(field.name == field_name for field in settings_proto.DESCRIPTOR.fields)
-
-
-def _get_field_descriptor(
-    settings_proto: DeviceSettings, field_name: str
-) -> FieldDescriptor:
-    """Get field descriptor by name."""
-    for field in settings_proto.DESCRIPTOR.fields:
-        if field.name == field_name:
-            return field
+    updated_values = response.updated_settings.values
+    if key in updated_values.fields:
+        return _value_to_python(updated_values.fields[key], descriptor.kind)
     return None
 
 
-def _has_non_default_value(
-    settings_proto: DeviceSettings, field: FieldDescriptor, value: Any
-) -> bool:
-    """Check if a field has a non-default value."""
-    # For message fields, use HasField to check presence
-    if field.type == field.TYPE_MESSAGE:
-        return settings_proto.HasField(field.name)
+def get_available_settings(device: "Device") -> Dict[str, str]:
+    """
+    Get all settings the device accepts and their kinds, as {name: kind_name}.
 
-    # For scalar fields, check if value is not default
-    if field.type == field.TYPE_STRING:
-        return value != ""
-    elif field.type in [
-        field.TYPE_INT32,
-        field.TYPE_UINT32,
-        field.TYPE_INT64,
-        field.TYPE_UINT64,
-    ]:
-        return value != 0
-    elif field.type in [field.TYPE_FLOAT, field.TYPE_DOUBLE]:
-        return value != 0.0
-    elif field.type == field.TYPE_BOOL:
-        return value is True
-    else:
-        # For other types, always display
-        return True
+    Returns the device-declared schema, so the set of keys depends on which
+    device is connected.
+    """
+    _, _, schema = _query_settings(device)
+    return {d.name: SettingDescriptor.Kind.Name(d.kind) for d in schema}
 
 
-def _convert_and_validate_value(field: FieldDescriptor, value: Any) -> Any:
-    """Convert and validate a value for a specific field type."""
-    try:
-        if field.type == field.TYPE_STRING:
-            return str(value)
-        elif field.type in [field.TYPE_INT32, field.TYPE_UINT32]:
-            return int(value)
-        elif field.type in [field.TYPE_INT64, field.TYPE_UINT64]:
-            return int(value)
-        elif field.type in [field.TYPE_FLOAT, field.TYPE_DOUBLE]:
-            return float(value)
-        elif field.type == field.TYPE_BOOL:
-            if isinstance(value, bool):
-                return value
-            elif isinstance(value, str):
-                return value.lower() in ("true", "1", "yes", "on")
-            else:
-                return bool(value)
+# ---- helpers ----
+
+
+def _query_settings(device: "Device"):
+    """Run a kGetSettings query and return (response, values Struct, schema list)."""
+    request = QueryRequest(
+        query_type=QueryRequest.QueryType.kGetSettings, get_settings_query={}
+    )
+    response = device.query(request)
+    if not response or response.status.code != 0:
+        error_msg = response.status.message if response else "Unknown error"
+        raise RuntimeError(f"Failed to get settings from device: {error_msg}")
+
+    settings_response = response.get_settings_response
+    return settings_response, settings_response.settings.values, list(settings_response.schema)
+
+
+def _value_to_python(v: Value, kind: int) -> Any:
+    which = v.WhichOneof("kind")
+    if which == "string_value":
+        return v.string_value
+    if which == "number_value":
+        # Int kinds round-trip as ints in Python even though Struct stores a double.
+        if kind == SettingDescriptor.kInt:
+            return int(v.number_value)
+        return v.number_value
+    if which == "bool_value":
+        return v.bool_value
+    if which == "null_value":
+        return None
+    return None
+
+
+def _python_to_value(value: Any, descriptor: SettingDescriptor) -> Value:
+    v = Value()
+    kind = descriptor.kind
+
+    if kind in (SettingDescriptor.kString, SettingDescriptor.kEnum):
+        v.string_value = str(value)
+    elif kind in (SettingDescriptor.kInt, SettingDescriptor.kDouble):
+        try:
+            v.number_value = float(value)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"Invalid numeric value '{value}' for setting '{descriptor.name}': {e}"
+            )
+    elif kind == SettingDescriptor.kBool:
+        if isinstance(value, bool):
+            v.bool_value = value
+        elif isinstance(value, str):
+            v.bool_value = value.lower() in ("true", "1", "yes", "on")
         else:
-            # For other types, try direct assignment
-            return value
-    except (ValueError, TypeError) as e:
+            v.bool_value = bool(value)
+    else:
         raise ValueError(
-            f"Invalid value '{value}' for field '{field.name}' of type {_get_field_type_name(field)}: {e}"
+            f"Setting '{descriptor.name}' has unsupported kind "
+            f"{SettingDescriptor.Kind.Name(kind)}"
         )
 
+    if descriptor.allowed_values:
+        if not any(_values_equal(v, allowed) for allowed in descriptor.allowed_values):
+            allowed_py = [_value_to_python(a, kind) for a in descriptor.allowed_values]
+            raise ValueError(
+                f"Value '{value}' is not allowed for setting '{descriptor.name}'. "
+                f"Allowed values: {allowed_py}"
+            )
 
-def _get_field_type_name(field: FieldDescriptor) -> str:
-    """Get human-readable field type name."""
-    type_names = {
-        field.TYPE_STRING: "string",
-        field.TYPE_INT32: "int32",
-        field.TYPE_UINT32: "uint32",
-        field.TYPE_INT64: "int64",
-        field.TYPE_UINT64: "uint64",
-        field.TYPE_FLOAT: "float",
-        field.TYPE_DOUBLE: "double",
-        field.TYPE_BOOL: "bool",
-        field.TYPE_MESSAGE: "message",
-    }
-    return type_names.get(field.type, f"unknown({field.type})")
+    return v
+
+
+def _values_equal(a: Value, b: Value) -> bool:
+    ak = a.WhichOneof("kind")
+    bk = b.WhichOneof("kind")
+    if ak != bk:
+        return False
+    if ak == "string_value":
+        return a.string_value == b.string_value
+    if ak == "number_value":
+        return a.number_value == b.number_value
+    if ak == "bool_value":
+        return a.bool_value == b.bool_value
+    return False
