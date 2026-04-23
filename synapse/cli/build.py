@@ -354,8 +354,33 @@ WantedBy=multi-user.target
                 f"[yellow]Extracting SDK libraries from Docker image [bold]{image_tag}[/bold]...[/yellow]"
             )
 
-            # Extract SDK shared libraries → /opt/scifi/lib/
-            # Includes libsynapse-app-sdk and its runtime dependency libonnxruntime
+            # Skip vcpkg .so files already shipped by scifi-headstage-shared-libraries
+            # to avoid dpkg file-overwrite conflicts when the app deb is installed.
+            extract_script = r"""
+set -e
+filter=/tmp/scifi_shared_libs.txt
+: > "$filter"
+if dpkg-query -W -f='${Status}' scifi-headstage-shared-libraries 2>/dev/null | grep -q "install ok installed"; then
+    dpkg-query -L scifi-headstage-shared-libraries | grep -oE '[^/]+\.so[^/]*$' | sort -u > "$filter" || true
+else
+    echo "WARNING: scifi-headstage-shared-libraries not installed in build image; packaging all vcpkg .so files (may conflict on device)" >&2
+fi
+
+find /usr/lib -maxdepth 1 -name 'libsynapse*.so*' -exec cp -a {} /out/ \;
+
+vcpkg_lib="${VCPKG_ROOT}/build/host/vcpkg_installed/arm64-linux-dynamic-release/lib"
+if [ -d "$vcpkg_lib" ]; then
+    find "$vcpkg_lib" -maxdepth 1 -name '*.so*' -print0 | while IFS= read -r -d '' f; do
+        base=$(basename "$f")
+        if [ -s "$filter" ] && grep -qxF "$base" "$filter"; then
+            echo "Skipping $base (already shipped by scifi-headstage-shared-libraries)" >&2
+        else
+            cp -a "$f" /out/
+        fi
+    done
+fi
+""".strip()
+
             docker_cmd = [
                 "docker",
                 "run",
@@ -367,8 +392,7 @@ WantedBy=multi-user.target
                 image_tag,
                 "/bin/bash",
                 "-c",
-                "find /usr/lib -maxdepth 1 -name 'libsynapse*.so*' -exec cp -a {} /out/ \\; && "
-                "find /usr/lib -maxdepth 1 -name 'libonnxruntime*.so*' -exec cp -a {} /out/ \\;",
+                extract_script,
             ]
 
             subprocess.run(docker_cmd, check=True)
