@@ -6,11 +6,17 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name="science-synapse",
-    version="2.5.0",
+    version="2.6.0a2",
     description="Client library and CLI for the Synapse API",
     author="Science Team",
     author_email="team@science.xyz",
     packages=find_packages(include=["synapse", "synapse.*"]),
+    package_data={
+        "synapse": [
+            "utils/model_converter/docker/Dockerfile",
+            "utils/model_converter/docker/convert.py",
+        ],
+    },
     long_description=long_description,
     long_description_content_type="text/markdown",
     python_requires=">=3.9",
@@ -32,6 +38,14 @@ setup(
         "scipy",
         "h5py",
     ],
+    extras_require={
+        "model-convert": [
+            "onnx>=1.12.0,<1.16.0",
+            "torch",
+            "packaging",
+            "protobuf",
+        ],
+    },
     entry_points={
         "console_scripts": [
             "synapsectl = synapse.cli:main",

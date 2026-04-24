@@ -112,9 +112,9 @@ def list_taps(args):
 
     taps = tap.list_taps()
     table = Table(title="Available Taps", show_lines=True)
-    table.add_column("Name", style="cyan")
-    table.add_column("Message Type", style="green")
-    table.add_column("Endpoint", style="green")
+    table.add_column("Name", style="cyan", overflow="fold")
+    table.add_column("Message Type", style="green", overflow="fold")
+    table.add_column("Endpoint", style="green", overflow="fold")
 
     for tap in taps:
         table.add_row(tap.name, tap.message_type, tap.endpoint)

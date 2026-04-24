@@ -10,6 +10,7 @@ from rich.logging import RichHandler
 
 from synapse.cli import (
     apps,
+    deploy_model,
     discover,
     files,
     offline_plot,
@@ -77,6 +78,7 @@ def main():
     taps.add_commands(subparsers)
     apps.add_commands(subparsers)
     settings.add_commands(subparsers)
+    deploy_model.add_commands(subparsers)
     args = parser.parse_args()
 
     # If we need to setup the device URI, do that now
