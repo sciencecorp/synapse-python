@@ -14,6 +14,7 @@ from synapse.cli import (
     discover,
     files,
     offline_plot,
+    peripherals,
     rpc,
     streaming,
     taps,
@@ -77,6 +78,7 @@ def main():
     files.add_commands(subparsers)
     taps.add_commands(subparsers)
     apps.add_commands(subparsers)
+    peripherals.add_commands(subparsers)
     settings.add_commands(subparsers)
     deploy_model.add_commands(subparsers)
     args = parser.parse_args()
