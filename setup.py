@@ -4,6 +4,29 @@ from pathlib import Path
 this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 
+
+def stamp_api_version():
+    """Mirror synapse-api/VERSION into synapse/_api_version.py.
+
+    The submodule is the source of truth for the protocol version. When
+    installing from an sdist the submodule isn't present, so we leave the
+    committed _api_version.py alone.
+    """
+    version_file = this_directory / "synapse-api" / "VERSION"
+    if not version_file.exists():
+        return
+    api_version = version_file.read_text().strip()
+    output = this_directory / "synapse" / "_api_version.py"
+    contents = (
+        "# Generated from synapse-api/VERSION by setup.py. Do not edit.\n"
+        f'SYNAPSE_API_VERSION = "{api_version}"\n'
+    )
+    if not output.exists() or output.read_text() != contents:
+        output.write_text(contents)
+
+
+stamp_api_version()
+
 setup(
     name="science-synapse",
     version="2.7.1",

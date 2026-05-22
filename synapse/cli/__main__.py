@@ -8,6 +8,7 @@ from importlib import metadata
 from rich.console import Console
 from rich.logging import RichHandler
 
+from synapse import SYNAPSE_API_VERSION
 from synapse.cli import (
     apps,
     deploy_model,
@@ -61,7 +62,8 @@ def main():
     parser.add_argument(
         "--version",
         action="version",
-        version="synapsectl %s" % metadata.version("science-synapse"),
+        version="synapsectl %s (Synapse API %s)"
+        % (metadata.version("science-synapse"), SYNAPSE_API_VERSION),
     )
     parser.add_argument(
         "--verbose",
