@@ -4,11 +4,9 @@ from synapse.client.nodes import NODE_TYPE_OBJECT_MAP
 
 
 class Config(object):
-    nodes = []
-    connections = []
-
     def __init__(self):
-        pass
+        self.nodes = []
+        self.connections = []
 
     def _gen_node_id(self):
         return len(self.nodes) + 1

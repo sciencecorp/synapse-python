@@ -63,6 +63,13 @@ def main(
     )
     args = parser.parse_args()
 
+    # if these contain spaces, the discovery will fail because the broadcast
+    # packet is parsed with str.split() in discover.py and each space marks a new token
+    if " " in args.name:
+        parser.error("--name must not contain spaces")
+    if " " in args.serial:
+        parser.error("--serial must not contain spaces")
+
     init_logging(level=logging.DEBUG if args.verbose else logging.INFO)
 
     # verify that network interface is real
