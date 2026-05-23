@@ -1,5 +1,7 @@
 from synapse.client.nodes.broadband_source import BroadbandSource
 from synapse.client.nodes.electrical_stimulation import ElectricalStimulation
+from synapse.client.nodes.image_sink import ImageSink
+from synapse.client.nodes.image_source import ImageSource
 from synapse.client.nodes.optical_stimulation import OpticalStimulation
 from synapse.client.nodes.spectral_filter import SpectralFilter
 from synapse.client.nodes.spike_binner import SpikeBinner
@@ -14,6 +16,8 @@ NODE_TYPE_OBJECT_MAP = {
     NodeType.kBroadbandSource: BroadbandSource,
     NodeType.kDiskWriter: DiskWriter,
     NodeType.kElectricalStimulation: ElectricalStimulation,
+    NodeType.kImageSink: ImageSink,
+    NodeType.kImageSource: ImageSource,
     NodeType.kOpticalStimulation: OpticalStimulation,
     NodeType.kSpectralFilter: SpectralFilter,
     NodeType.kSpikeBinner: SpikeBinner,
