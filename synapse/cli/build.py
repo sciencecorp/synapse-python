@@ -3,6 +3,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -71,42 +72,111 @@ def ensure_docker() -> bool:
         return False
 
 
-def build_docker_image(app_dir: str, app_name: str | None = None) -> str:
-    """(Re)build the cross-compile SDK Docker image and return its tag."""
+_ARG_HOST_UID_RE = re.compile(r"^ARG HOST_UID\b", re.MULTILINE)
+
+
+def _resolve_host_uid() -> int:
+    """Return the invoking user's UID, falling back to 1000 on non-POSIX hosts."""
+    try:
+        return os.getuid()
+    except AttributeError:
+        console.print(
+            "[yellow]Warning:[/yellow] os.getuid() unavailable on this host; "
+            "falling back to HOST_UID=1000."
+        )
+        return 1000
+
+
+def _dockerfile_needs_host_uid(dockerfile_path: str) -> bool:
+    """Return True iff *dockerfile_path* declares ``ARG HOST_UID`` at line start."""
+    with open(dockerfile_path, "r", encoding="utf-8") as fp:
+        return bool(_ARG_HOST_UID_RE.search(fp.read()))
+
+
+def build_docker_image(app_dir: str, app_name: str | None = None) -> dict[str, str]:
+    """(Re)build the cross-compile SDK Docker image(s) and return role -> tag.
+
+    Discovers every ``*.Dockerfile`` directly under ``<app_dir>/Dockerfiles/``
+    and builds each as ``<app_name>-<role>:latest-<arch>`` where ``role`` is
+    the filename stem (e.g. ``gateware.Dockerfile`` -> ``gateware``). Returns
+    a dict mapping role -> image tag.
+
+    Back-compat: if ``<app_dir>/Dockerfiles/`` does not exist and
+    ``<app_dir>/Dockerfile`` does, builds the single legacy image tagged
+    ``<app_name>:latest-<arch>`` (no role suffix) and returns
+    ``{"driver": "<that tag>"}``.
+
+    If ``Dockerfiles/`` exists but is empty, or if neither path exists,
+    raises :class:`FileNotFoundError`.
+
+    For each Dockerfile whose contents contain a line matching
+    ``^ARG HOST_UID\\b`` the build additionally receives
+    ``--build-arg HOST_UID=<os.getuid()>``. On non-POSIX hosts (where
+    ``os.getuid()`` is unavailable) the value falls back to ``1000``.
+    """
 
     if app_name is None:
         app_name = os.path.basename(app_dir)
 
     arch_suffix = detect_arch()  # "arm64" or "amd64"
 
-    # Look for a Dockerfile at the top level of the app directory
-    dockerfile_path = os.path.join(app_dir, "Dockerfile")
+    dockerfiles_dir = os.path.join(app_dir, "Dockerfiles")
+    legacy_dockerfile = os.path.join(app_dir, "Dockerfile")
 
-    if not os.path.exists(dockerfile_path):
+    # Discovery: Dockerfiles/ wins over the legacy root ./Dockerfile.
+    discovered: list[tuple[str, str]] = []
+    is_legacy = False
+    if os.path.isdir(dockerfiles_dir):
+        for entry in sorted(os.listdir(dockerfiles_dir)):
+            if entry.endswith(".Dockerfile"):
+                role = entry[: -len(".Dockerfile")]
+                discovered.append((role, os.path.join(dockerfiles_dir, entry)))
+    elif os.path.exists(legacy_dockerfile):
+        discovered.append(("driver", legacy_dockerfile))
+        is_legacy = True
+
+    if not discovered:
         raise FileNotFoundError(
-            f"Expected Dockerfile not found at {dockerfile_path}. "
-            "Ensure your application provides the required Dockerfile."
+            f"Expected Dockerfile not found at {legacy_dockerfile} or any "
+            f"*.Dockerfile under {dockerfiles_dir}. Ensure your application "
+            "provides the required Dockerfile."
         )
 
-    image_tag = f"{app_name}:latest-{arch_suffix}"
+    tags: dict[str, str] = {}
+    for role, dockerfile_path in discovered:
+        image_tag = (
+            f"{app_name}:latest-{arch_suffix}"
+            if is_legacy
+            else f"{app_name}-{role}:latest-{arch_suffix}"
+        )
 
-    console.print(f"[yellow]Building Docker image [bold]{image_tag}[/bold]...[/yellow]")
-    subprocess.run(
-        [
-            "docker",
-            "build",
-            "-t",
-            image_tag,
-            "-f",
-            dockerfile_path,
-            ".",
-        ],
-        check=True,
-        cwd=app_dir,
-    )
+        build_args: list[str] = []
+        if _dockerfile_needs_host_uid(dockerfile_path):
+            host_uid = _resolve_host_uid()
+            build_args.extend(["--build-arg", f"HOST_UID={host_uid}"])
 
-    console.print(f"[green]Successfully built Docker image {image_tag}[/green]")
-    return image_tag
+        console.print(
+            f"[yellow]Building Docker image [bold]{image_tag}[/bold]...[/yellow]"
+        )
+        subprocess.run(
+            [
+                "docker",
+                "build",
+                "-t",
+                image_tag,
+                "-f",
+                dockerfile_path,
+                *build_args,
+                ".",
+            ],
+            check=True,
+            cwd=app_dir,
+        )
+
+        console.print(f"[green]Successfully built Docker image {image_tag}[/green]")
+        tags[role] = image_tag
+
+    return tags
 
 
 def build_app(
@@ -127,12 +197,9 @@ def build_app(
 
     console.print("[yellow]Binary not found, attempting to build...[/yellow]")
 
-    arch_suffix = detect_arch()
-    image_tag = f"{os.path.basename(app_dir)}:latest-{arch_suffix}"
-
     # Build (or rebuild) the Docker image – this function is idempotent.
     try:
-        image_tag = build_docker_image(app_dir, app_name)
+        image_tag = build_docker_image(app_dir, app_name)["driver"]
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         console.print(
             f"[bold red]Error:[/bold red] Failed to build Docker image: {exc}"
