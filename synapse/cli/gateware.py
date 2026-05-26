@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -53,6 +54,26 @@ class LicenseUnsetError(RuntimeError):
     """Raised when ``LM_LICENSE_FILE`` is unset or empty."""
 
 
+def _host_mac_address() -> str | None:
+    """Return the host's primary MAC as ``xx:xx:xx:xx:xx:xx``, or ``None``.
+
+    Lattice node-locked licenses are bound to the host's MAC. When we run
+    Radiant inside a container, FlexLM sees the container's virtual eth0
+    MAC (auto-generated, different from the host) and rejects the license.
+    Passing ``--mac-address`` to ``docker run`` forces the container's eth0
+    onto the host's MAC so the license validates.
+
+    Uses :func:`uuid.getnode`, which falls back to a random multicast MAC
+    when no real hardware address is available; we detect that case via
+    the multicast bit and return ``None`` so the caller can skip the
+    ``--mac-address`` flag rather than passing a useless random value.
+    """
+    node = uuid.getnode()
+    if (node >> 40) & 0x01:
+        return None
+    return ":".join(f"{(node >> (8 * i)) & 0xFF:02x}" for i in range(5, -1, -1))
+
+
 def build_license_docker_args(
     env: Mapping[str, str] = os.environ,
 ) -> list[str]:
@@ -62,10 +83,13 @@ def build_license_docker_args(
 
     - **File path** (default branch): resolved with
       ``Path(value).expanduser().resolve(strict=True)`` and bind-mounted
-      read-only into the container at ``/opt/lattice/license.dat``.
+      read-only into the container at ``/opt/lattice/license.dat``. The
+      host's MAC is also forwarded via ``--mac-address`` (when detectable)
+      so the container's eth0 matches the node-locked license's HOSTID.
     - **Floating** (``port@host`` or ``port1@host1:port2@host2``): the
       value is forwarded verbatim via ``-e LM_LICENSE_FILE=<value>``
-      with no bind-mount.
+      with no bind-mount or MAC override — a license server checks out
+      tokens by network, hostid is irrelevant.
     - **Unset / empty**: raises :class:`LicenseUnsetError`.
 
     The helper reads only from ``env`` and never falls back to
@@ -79,12 +103,16 @@ def build_license_docker_args(
         return ["-e", f"LM_LICENSE_FILE={value}"]
 
     resolved = Path(value).expanduser().resolve(strict=True)
-    return [
+    args = [
         "-v",
         f"{resolved}:{_CONTAINER_LICENSE_PATH}:ro",
         "-e",
         f"LM_LICENSE_FILE={_CONTAINER_LICENSE_PATH}",
     ]
+    mac = _host_mac_address()
+    if mac is not None:
+        args.extend(["--mac-address", mac])
+    return args
 
 
 _SDK_BUILD_CMD = (

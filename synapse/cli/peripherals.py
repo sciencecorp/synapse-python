@@ -206,10 +206,12 @@ def build_peripheral_so(
     so_path = os.path.join(peripheral_dir, "build/aarch64", so_filename)
 
     try:
-        image_tag = build_docker_image(peripheral_dir, plugin_name)["driver"]
+        image_tag = build_docker_image(
+            peripheral_dir, "axon-peripheral", roles=["driver"]
+        )["driver"]
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         console.print(
-            f"[bold red]Error:[/bold red] Failed to build Docker image: {exc}"
+            f"[bold red]Error:[/bold red] Failed to build driver Docker image: {exc}"
         )
         return False
 
@@ -419,16 +421,16 @@ def build_peripheral_deb(
                     )
             else:
                 try:
-                    image_tag = build_docker_image(peripheral_dir, plugin_name)[
-                        "driver"
-                    ]
+                    image_tag = build_docker_image(
+                        peripheral_dir, "axon-peripheral", roles=["driver"]
+                    )["driver"]
                 except (
                     subprocess.CalledProcessError,
                     FileNotFoundError,
                     KeyError,
                 ) as exc:
                     console.print(
-                        f"[bold red]Error:[/bold red] Failed to resolve driver image tag: {exc}"
+                        f"[bold red]Error:[/bold red] Failed to build driver Docker image: {exc}"
                     )
                     return False
                 arch_suffix = detect_arch()
@@ -592,10 +594,12 @@ def _clean_gateware_tree(peripheral_dir: str, gateware_image_tag: str) -> None:
         console.print("[yellow]Warning: gateware clean failed; continuing.[/yellow]")
 
 
-def _run_gateware_half(peripheral_dir: str, plugin_name: str) -> Optional[str]:
+def _run_gateware_half(peripheral_dir: str) -> Optional[str]:
     """Run the gateware build half; return the emitted ``.bit`` path or None."""
     try:
-        image_tag = build_docker_image(peripheral_dir, plugin_name)["gateware"]
+        image_tag = build_docker_image(
+            peripheral_dir, "axon-peripheral", roles=["gateware"]
+        )["gateware"]
     except (subprocess.CalledProcessError, FileNotFoundError, KeyError) as exc:
         console.print(
             f"[bold red]Error:[/bold red] Failed to build gateware Docker image: {exc}"
@@ -643,9 +647,9 @@ def build_cmd(args) -> None:
 
     if do_gateware and args.clean:
         try:
-            gateware_image_tag = build_docker_image(peripheral_dir, plugin_name)[
-                "gateware"
-            ]
+            gateware_image_tag = build_docker_image(
+                peripheral_dir, "axon-peripheral", roles=["gateware"]
+            )["gateware"]
         except (subprocess.CalledProcessError, FileNotFoundError, KeyError) as exc:
             console.print(
                 f"[bold red]Error:[/bold red] Failed to build gateware Docker image: {exc}"
@@ -664,7 +668,7 @@ def build_cmd(args) -> None:
         so_path = os.path.join(peripheral_dir, "build/aarch64", so_filename)
 
     if do_gateware:
-        bit_path = _run_gateware_half(peripheral_dir, plugin_name)
+        bit_path = _run_gateware_half(peripheral_dir)
         if bit_path is None:
             return
 
@@ -753,7 +757,7 @@ def deploy_cmd(args) -> None:
             so_path = os.path.join(peripheral_dir, "build/aarch64", so_filename)
 
         if do_gateware:
-            bit_path = _run_gateware_half(peripheral_dir, plugin_name)
+            bit_path = _run_gateware_half(peripheral_dir)
             if bit_path is None:
                 return
 
@@ -824,10 +828,10 @@ def gateware_cmd(args) -> None:
         sys.exit(1)
 
     try:
-        tags = build_docker_image(peripheral_dir)
+        tags = build_docker_image(peripheral_dir, "axon-peripheral", roles=["gateware"])
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         console.print(
-            f"[bold red]Error:[/bold red] Failed to build Docker image: {exc}"
+            f"[bold red]Error:[/bold red] Failed to build gateware Docker image: {exc}"
         )
         sys.exit(1)
 

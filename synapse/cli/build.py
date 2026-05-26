@@ -93,7 +93,11 @@ def _dockerfile_needs_host_uid(dockerfile_path: str) -> bool:
         return bool(_ARG_HOST_UID_RE.search(fp.read()))
 
 
-def build_docker_image(app_dir: str, app_name: str | None = None) -> dict[str, str]:
+def build_docker_image(
+    app_dir: str,
+    app_name: str | None = None,
+    roles: list[str] | None = None,
+) -> dict[str, str]:
     """(Re)build the cross-compile SDK Docker image(s) and return role -> tag.
 
     Discovers every ``*.Dockerfile`` directly under ``<app_dir>/Dockerfiles/``
@@ -113,6 +117,17 @@ def build_docker_image(app_dir: str, app_name: str | None = None) -> dict[str, s
     ``^ARG HOST_UID\\b`` the build additionally receives
     ``--build-arg HOST_UID=<os.getuid()>``. On non-POSIX hosts (where
     ``os.getuid()`` is unavailable) the value falls back to ``1000``.
+
+    Args:
+        app_dir, app_name: as before.
+        roles: when provided, restricts the build to Dockerfiles whose role
+            (filename stem) is in this list. If a requested role is not found
+            on disk, raises FileNotFoundError. When None (default), builds
+            every discovered Dockerfile. The back-compat legacy single-
+            ``./Dockerfile`` path is treated as role "driver"; pass
+            ``roles=["driver"]`` (or None) to consume it; passing
+            ``roles=["gateware"]`` against a legacy repo with no
+            ``Dockerfiles/`` raises FileNotFoundError.
     """
 
     if app_name is None:
@@ -141,6 +156,17 @@ def build_docker_image(app_dir: str, app_name: str | None = None) -> dict[str, s
             f"*.Dockerfile under {dockerfiles_dir}. Ensure your application "
             "provides the required Dockerfile."
         )
+
+    if roles is not None:
+        requested = set(roles)
+        available = {role for role, _ in discovered}
+        missing = requested - available
+        if missing:
+            raise FileNotFoundError(
+                f"Requested roles {sorted(missing)} not found in {dockerfiles_dir}. "
+                f"Available roles: {sorted(available)}."
+            )
+        discovered = [(role, path) for role, path in discovered if role in requested]
 
     tags: dict[str, str] = {}
     for role, dockerfile_path in discovered:
