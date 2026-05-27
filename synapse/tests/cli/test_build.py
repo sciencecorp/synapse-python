@@ -23,3 +23,30 @@ def test_app_lib_staging_dir_is_not_the_shared_lib_dir():
     staging = "/tmp/stg"
     shared = os.path.join(staging, "opt", "scifi", "lib")
     assert app_lib_staging_dir(staging, "myapp") != shared
+
+
+from synapse.cli.build import render_service_unit
+
+
+def test_service_unit_puts_app_lib_dir_first_on_ld_library_path():
+    unit = render_service_unit("myapp")
+    assert (
+        "Environment=LD_LIBRARY_PATH="
+        "/opt/scifi/apps/myapp/lib:/opt/scifi/usr-libs:/opt/scifi/lib" in unit
+    )
+
+
+def test_service_unit_execstart_points_at_app_binary():
+    unit = render_service_unit("myapp")
+    assert "ExecStart=/opt/scifi/bin/myapp" in unit
+
+
+def test_service_unit_keeps_sysctl_execstartpre_hooks():
+    unit = render_service_unit("myapp")
+    assert "ExecStartPre=/sbin/sysctl -w net.core.wmem_max=4194304" in unit
+    assert "ExecStartPre=/sbin/sysctl -w net.core.wmem_default=4194304" in unit
+
+
+def test_service_unit_ld_path_matches_device_path_helper():
+    unit = render_service_unit("synapse-example-app")
+    assert app_lib_device_path("synapse-example-app") + ":" in unit

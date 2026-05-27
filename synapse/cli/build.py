@@ -289,6 +289,37 @@ def app_lib_staging_dir(staging_dir: str, app_name: str) -> str:
     return os.path.join(staging_dir, *_app_lib_parts(app_name))
 
 
+def render_service_unit(app_name: str) -> str:
+    """Render the systemd unit text for *app_name*.
+
+    The app's private lib dir is placed first on LD_LIBRARY_PATH so the app loads
+    the exact synapse-app-sdk (and other bundled libs) it was built against, ahead
+    of the shared /opt/scifi/lib fallback.
+    """
+    app_lib = app_lib_device_path(app_name)
+    return f"""[Unit]
+Description=Synapse Application
+After=network-online.target
+Wants=network-online.target
+Requires=systemd-udevd.service
+After=systemd-udevd.service
+
+[Service]
+Type=simple
+User=root
+Restart=no
+ExecStartPre=/sbin/sysctl -w net.core.wmem_max=4194304
+ExecStartPre=/sbin/sysctl -w net.core.wmem_default=4194304
+Environment=LD_LIBRARY_PATH={app_lib}:/opt/scifi/usr-libs:/opt/scifi/lib
+Environment=SCIFI_ROOT=/opt/scifi
+ExecStart=/opt/scifi/bin/{app_name}
+WorkingDirectory=/opt/scifi
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
 def build_deb_package(app_dir: str, app_name: str, version: str = "0.1.0") -> bool:
     """Stage *app_name* and produce a ``.deb`` file within *app_dir*."""
 
