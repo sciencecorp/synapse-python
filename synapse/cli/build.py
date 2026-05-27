@@ -337,27 +337,7 @@ def build_deb_package(app_dir: str, app_name: str, version: str = "0.1.0") -> bo
         os.makedirs(bin_dst_dir, exist_ok=True)
         shutil.copy2(binary_path, os.path.join(bin_dst_dir, app_name))
 
-        svc_content = f"""[Unit]
-Description=Synapse Application
-After=network-online.target
-Wants=network-online.target
-Requires=systemd-udevd.service
-After=systemd-udevd.service
-
-[Service]
-Type=simple
-User=root
-Restart=no
-ExecStartPre=/sbin/sysctl -w net.core.wmem_max=4194304
-ExecStartPre=/sbin/sysctl -w net.core.wmem_default=4194304
-Environment=LD_LIBRARY_PATH=/opt/scifi/usr-libs:/opt/scifi/lib
-Environment=SCIFI_ROOT=/opt/scifi
-ExecStart=/opt/scifi/bin/{app_name}
-WorkingDirectory=/opt/scifi
-
-[Install]
-WantedBy=multi-user.target
-"""
+        svc_content = render_service_unit(app_name)
         svc_dst = os.path.join(
             staging_dir, "etc", "systemd", "system", f"{app_name}.service"
         )
@@ -387,7 +367,7 @@ WantedBy=multi-user.target
         os.chmod(postremove_path, 0o755)
         lifecycle_scripts_tmp.append(postremove_path)
 
-        lib_dst_dir = os.path.join(staging_dir, "opt", "scifi", "lib")
+        lib_dst_dir = app_lib_staging_dir(staging_dir, app_name)
         os.makedirs(lib_dst_dir, exist_ok=True)
 
         # QNN libraries are dlopen'd from /usr/lib/ (hardcoded paths in SDK),
