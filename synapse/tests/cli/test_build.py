@@ -1,6 +1,15 @@
 import os
 
-from synapse.cli.build import app_lib_device_path, app_lib_staging_dir
+from synapse.cli.build import (
+    _app_lib_parts,
+    app_lib_device_path,
+    app_lib_staging_dir,
+    render_service_unit,
+)
+
+
+def test_app_lib_parts_returns_expected_segments():
+    assert _app_lib_parts("myapp") == ["opt", "scifi", "apps", "myapp", "lib"]
 
 
 def test_app_lib_device_path_is_absolute_forward_slash():
@@ -19,13 +28,13 @@ def test_app_lib_staging_dir_joins_under_staging_root():
     assert app_lib_staging_dir(staging, "myapp") == expected
 
 
-def test_app_lib_staging_dir_is_not_the_shared_lib_dir():
+def test_app_lib_staging_dir_is_per_app_not_shared_lib_dir():
     staging = "/tmp/stg"
-    shared = os.path.join(staging, "opt", "scifi", "lib")
-    assert app_lib_staging_dir(staging, "myapp") != shared
-
-
-from synapse.cli.build import render_service_unit
+    result = app_lib_staging_dir(staging, "myapp")
+    # Positive: it is the per-app dir...
+    assert result == os.path.join(staging, "opt", "scifi", "apps", "myapp", "lib")
+    # ...and negative: it is NOT the old shared /opt/scifi/lib path.
+    assert result != os.path.join(staging, "opt", "scifi", "lib")
 
 
 def test_service_unit_puts_app_lib_dir_first_on_ld_library_path():
