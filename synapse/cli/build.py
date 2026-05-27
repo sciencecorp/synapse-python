@@ -270,6 +270,25 @@ def build_app(
     return False
 
 
+def _app_lib_parts(app_name: str) -> list[str]:
+    """Path segments for an app's private library directory.
+
+    Single source of truth shared by the on-device path and the host staging
+    path so the two can never drift apart.
+    """
+    return ["opt", "scifi", "apps", app_name, "lib"]
+
+
+def app_lib_device_path(app_name: str) -> str:
+    """Absolute on-device path to *app_name*'s private lib dir (forward slashes)."""
+    return "/" + "/".join(_app_lib_parts(app_name))
+
+
+def app_lib_staging_dir(staging_dir: str, app_name: str) -> str:
+    """Host staging path that maps to the app's private lib dir inside the .deb."""
+    return os.path.join(staging_dir, *_app_lib_parts(app_name))
+
+
 def build_deb_package(app_dir: str, app_name: str, version: str = "0.1.0") -> bool:
     """Stage *app_name* and produce a ``.deb`` file within *app_dir*."""
 
