@@ -7,7 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from typing import Any
+from typing import Any, Literal
 
 from rich import box
 from rich.console import Console
@@ -16,7 +16,7 @@ from rich.panel import Panel
 console = Console()
 
 
-def validate_manifest(manifest_path: str) -> dict[str, Any] | bool:
+def validate_manifest(manifest_path: str) -> dict[str, Any] | Literal[False]:
     """Return the parsed ``manifest.json`` dictionary or ``False`` on error."""
 
     try:
@@ -410,10 +410,14 @@ WantedBy=multi-user.target
 
         lifecycle_scripts_tmp: list[str] = []
 
+        # 0o644 suffices for all three: fpm embeds each file's *contents* as a
+        # .deb maintainer script (--after-install / --before-remove /
+        # --after-remove below), and dpkg makes maintainer scripts executable
+        # itself at install time. The staging files' exec bits never ship.
         postinstall_path = os.path.join(staging_dir, "postinstall.sh")
         with open(postinstall_path, "w", encoding="utf-8") as fp:
             fp.write("#!/bin/bash\nset -e\nsystemctl daemon-reload\n")
-        os.chmod(postinstall_path, 0o755)
+        os.chmod(postinstall_path, 0o644)
         lifecycle_scripts_tmp.append(postinstall_path)
 
         preremove_path = os.path.join(staging_dir, "preremove.sh")
@@ -421,13 +425,13 @@ WantedBy=multi-user.target
             fp.write(
                 f"#!/bin/bash\nset -e\nsystemctl stop {app_name} || true\nsystemctl disable {app_name} || true\n"
             )
-        os.chmod(preremove_path, 0o755)
+        os.chmod(preremove_path, 0o644)
         lifecycle_scripts_tmp.append(preremove_path)
 
         postremove_path = os.path.join(staging_dir, "postremove.sh")
         with open(postremove_path, "w", encoding="utf-8") as fp:
             fp.write("#!/bin/bash\nset -e\nsystemctl daemon-reload\n")
-        os.chmod(postremove_path, 0o755)
+        os.chmod(postremove_path, 0o644)
         lifecycle_scripts_tmp.append(postremove_path)
 
         lib_dst_dir = os.path.join(staging_dir, "opt", "scifi", "lib")

@@ -1,0 +1,1009 @@
+"""AC-11 → AC-7 / AC-8 (sub-phase 4.4), AC-12 + AC-15 (sub-phase 4.5).
+
+Tests the ``driver`` / ``gateware`` / ``both`` target subcommands on
+``synapsectl peripherals build`` (AC-7) and ``... peripherals deploy``
+(AC-8), the ``--clean`` × half-selector matrix (AC-7 body), the
+combined ``.deb`` layout contract (AC-12), and the
+``_expected_bit_filename`` helper / new optional
+``install.gateware_target`` manifest field (AC-15).
+
+The half selectors were originally mutually-exclusive ``--driver`` /
+``--gateware`` flags; they are now ``build``/``deploy`` subcommands
+(``driver``/``gateware``/``both``). ``half`` still drives the handlers, so
+the cases that call ``build_cmd``/``deploy_cmd`` directly are unchanged; the
+argparse-surface cases parse the subcommand form.
+
+Conventions:
+  * Cases A-H cover ``peripherals build``.
+  * Cases I-L cover ``peripherals deploy`` (incl. ``--package`` interaction).
+  * Cases M-O exercise AC-12: the combined / half-flagged ``.deb`` staging
+    layout. They consume ``_expected_so_filename`` / ``_expected_bit_filename``
+    for symmetric naming derived from the manifest.
+  * Cases P1-P7 exercise AC-15: ``_expected_bit_filename`` fallback chain
+    (gateware_target -> .so stem -> manifest.name).
+
+Mocking strategy mirrors the prior Tester (``test_gateware_runner.py``):
+  * ``synapse.cli.peripherals.subprocess.run`` -> recorder
+  * ``synapse.cli.peripherals.build_peripheral_so`` -> recorder returning True
+  * ``synapse.cli.peripherals.build_peripheral_deb`` -> recorder returning True
+  * ``synapse.cli.peripherals.gateware.run_gateware_build`` -> recorder
+    returning the path of a fake ``.bit`` created under ``tmp_path``
+  * ``synapse.cli.peripherals.deploy_package`` -> recorder
+  * ``synapse.cli.peripherals.ensure_docker`` -> True
+  * ``synapse.cli.peripherals.build_docker_image`` -> dict return
+  * ``synapse.cli.peripherals.find_deb_package`` -> a fake .deb path
+
+Tests don't need a real Docker daemon, real cmake/vcpkg, or a real Radiant
+license — everything that would shell out is monkey-patched.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import os
+import subprocess
+from types import SimpleNamespace
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# Helpers / fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def peripherals():
+    """Lazy-import ``synapse.cli.peripherals``.
+
+    Importing at module-collection time would touch the half-selector code
+    paths before AC-7/AC-8 land. A fixture defers the import so a clean
+    ``ImportError`` per test is more informative than a single collection
+    crash that masks every case.
+    """
+    return importlib.import_module("synapse.cli.peripherals")
+
+
+def _make_peripheral_dir(
+    tmp_path,
+    *,
+    name: str = "intan_rhd2132",
+    with_gateware: bool = True,
+    with_install_target: bool = True,
+    with_gateware_target: bool = False,
+):
+    """Create a fake peripheral directory tree.
+
+    Layout::
+
+        <tmp_path>/<name>/
+            manifest.json
+            build/aarch64/<so_filename>             (fake .so so build_peripheral_deb finds it)
+            src/gateware/                            (only if with_gateware)
+            src/gateware/peripheral.yaml             (only if with_gateware)
+            src/gateware/build/SENTINEL_GATEWARE     (sentinel for --clean tests)
+            build/aarch64/SENTINEL_DRIVER            (sentinel for --clean tests)
+
+    Returns the absolute path of ``<tmp_path>/<name>``.
+    """
+    pd = tmp_path / name
+    pd.mkdir()
+
+    # Manifest
+    install: dict = {}
+    if with_install_target:
+        install["target"] = f"/usr/lib/scifi/plugins/{name}.so"
+    if with_gateware_target:
+        install["gateware_target"] = f"/usr/lib/scifi/gateware/{name}.bit"
+    manifest = {"name": name, "version": "0.1.0"}
+    if install:
+        manifest["install"] = install
+    (pd / "manifest.json").write_text(json.dumps(manifest))
+
+    # Driver build dir + sentinel
+    driver_build = pd / "build" / "aarch64"
+    driver_build.mkdir(parents=True)
+    (driver_build / "SENTINEL_DRIVER").write_text("driver")
+    # Fake .so so build_peripheral_deb's existence check passes if invoked.
+    (driver_build / f"{name}.so").write_text("fake-so")
+
+    # Gateware dir + sentinel
+    if with_gateware:
+        gw_dir = pd / "src" / "gateware"
+        gw_dir.mkdir(parents=True)
+        (gw_dir / "peripheral.yaml").write_text("radiant_version: '2024.2'\n")
+        gw_build = gw_dir / "build"
+        gw_build.mkdir()
+        (gw_build / "SENTINEL_GATEWARE").write_text("gateware")
+        # Also drop a fake .bit under build/bitstreams/ so run_gateware_build's
+        # stub has somewhere to point.
+        bs = gw_build / "bitstreams"
+        bs.mkdir()
+        (bs / f"sdk_{name}.bit").write_text("fake-bit")
+
+    return pd
+
+
+def _build_root_parser(peripherals):
+    """Build a fresh root parser wired with `peripherals.add_commands`.
+
+    Avoids relying on `synapse.cli.__main__` (which the conftest stubs out).
+    Returns the parser; tests call ``parser.parse_args([...])``.
+    """
+    parser = argparse.ArgumentParser(prog="synapsectl")
+    subparsers = parser.add_subparsers(dest="cmd")
+    peripherals.add_commands(subparsers)
+    return parser
+
+
+def _install_common_stubs(peripherals, monkeypatch, tmp_path, *, fake_bit=None):
+    """Stub out everything that would shell out.
+
+    Returns a ``SimpleNamespace`` with recorders so tests can introspect.
+    """
+    recorders = SimpleNamespace(
+        build_so_calls=[],
+        run_gateware_calls=[],
+        build_deb_calls=[],
+        subprocess_calls=[],
+        deploy_calls=[],
+    )
+
+    def fake_build_so(*args, **kwargs):
+        recorders.build_so_calls.append((args, kwargs))
+        return True
+
+    def fake_build_deb(*args, **kwargs):
+        recorders.build_deb_calls.append((args, kwargs))
+        return True
+
+    def fake_run_gateware(*args, **kwargs):
+        recorders.run_gateware_calls.append((args, kwargs))
+        if fake_bit is not None:
+            return str(fake_bit)
+        # Drop a fake .bit somewhere predictable.
+        path = tmp_path / "fake.bit"
+        path.write_text("bit")
+        return str(path)
+
+    def fake_subprocess_run(argv, *args, **kwargs):
+        recorders.subprocess_calls.append(
+            (list(argv) if isinstance(argv, list) else argv, args, kwargs)
+        )
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    def fake_deploy_package(uri, deb_path):
+        recorders.deploy_calls.append((uri, deb_path))
+
+    monkeypatch.setattr(peripherals, "build_peripheral_so", fake_build_so)
+    monkeypatch.setattr(peripherals, "build_peripheral_deb", fake_build_deb)
+    monkeypatch.setattr(peripherals, "ensure_docker", lambda: True)
+    monkeypatch.setattr(
+        peripherals,
+        "build_docker_image",
+        lambda *a, **kw: {
+            "driver": "fake-driver:latest-arm64",
+            "gateware": "fake-gateware:latest-arm64",
+        },
+    )
+    monkeypatch.setattr(peripherals.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(peripherals, "deploy_package", fake_deploy_package)
+
+    # find_deb_package is called after build_peripheral_deb succeeds.
+    monkeypatch.setattr(
+        peripherals,
+        "find_deb_package",
+        lambda dist_dir: os.path.join(dist_dir, "fake_arm64.deb"),
+    )
+
+    # gateware sub-module attribute on peripherals must expose run_gateware_build.
+    # The plan says peripherals.py imports gateware module-level, so we either
+    # patch synapse.cli.gateware.run_gateware_build OR peripherals.gateware.run_gateware_build.
+    # Patch the source-of-truth (synapse.cli.gateware) so both names resolve.
+    gateware_mod = importlib.import_module("synapse.cli.gateware")
+    monkeypatch.setattr(
+        gateware_mod, "run_gateware_build", fake_run_gateware, raising=False
+    )
+    # Best-effort: also patch a `peripherals.gateware` attribute if present.
+    if hasattr(peripherals, "gateware"):
+        monkeypatch.setattr(
+            peripherals.gateware, "run_gateware_build", fake_run_gateware, raising=False
+        )
+
+    return recorders
+
+
+def _build_args(peripheral_dir, **overrides):
+    """Construct an args Namespace for build_cmd."""
+    ns = SimpleNamespace(
+        peripheral_dir=str(peripheral_dir),
+        clean=False,
+        half="both",
+        uri=None,
+        package=None,
+    )
+    for k, v in overrides.items():
+        setattr(ns, k, v)
+    return ns
+
+
+def _deploy_args(peripheral_dir, **overrides):
+    """Construct an args Namespace for deploy_cmd."""
+    ns = SimpleNamespace(
+        peripheral_dir=str(peripheral_dir),
+        half="both",
+        uri=None,
+        package=None,
+    )
+    for k, v in overrides.items():
+        setattr(ns, k, v)
+    return ns
+
+
+# ===========================================================================
+# AC-7: peripherals build flag handling
+# ===========================================================================
+
+
+# --- Case A: no flag -> both halves ----------------------------------------
+
+
+def test_case_A_build_no_flag_runs_both_halves(peripherals, tmp_path, monkeypatch):
+    """A: ``peripherals build`` with no half flag runs driver AND gateware."""
+    pd = _make_peripheral_dir(tmp_path)
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    peripherals.build_cmd(_build_args(pd, half="both"))
+
+    assert len(recorders.build_so_calls) == 1, "driver builder should run once"
+    assert len(recorders.run_gateware_calls) == 1, "gateware runner should run once"
+    assert len(recorders.build_deb_calls) == 1, ".deb staging should run once"
+
+
+# --- Case A2: `both` subcommand parses to half="both" on build and deploy --
+
+
+def test_case_A2_both_subcommand_parses_to_both(peripherals, tmp_path):
+    """A2: ``build both`` and ``deploy both`` resolve ``args.half == "both"``.
+
+    The explicit ``both`` target is the subcommand-era replacement for the old
+    flagless default; it must route to the same handler with ``half="both"``.
+    """
+    pd = _make_peripheral_dir(tmp_path)
+    parser = _build_root_parser(peripherals)
+
+    build_args = parser.parse_args(["peripherals", "build", "both", str(pd)])
+    assert getattr(build_args, "half", None) == "both"
+    assert build_args.func is peripherals.build_cmd
+
+    deploy_args = parser.parse_args(["peripherals", "deploy", "both", str(pd)])
+    assert getattr(deploy_args, "half", None) == "both"
+    assert deploy_args.func is peripherals.deploy_cmd
+
+
+# --- Case B: build driver -> driver half only ------------------------------
+
+
+def test_case_B_build_driver_skips_gateware(peripherals, tmp_path, monkeypatch):
+    """B: ``build driver`` -> ``run_gateware_build`` is NEVER invoked.
+
+    Parses via the real argparse surface: the ``driver`` subcommand must set
+    ``args.half`` to ``"driver"`` and ``build_cmd`` must branch accordingly.
+    """
+    pd = _make_peripheral_dir(tmp_path)
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    parser = _build_root_parser(peripherals)
+    args = parser.parse_args(["peripherals", "build", "driver", str(pd)])
+    assert getattr(args, "half", None) == "driver", (
+        f"args.half must be 'driver' after the 'driver' subcommand; got: "
+        f"{getattr(args, 'half', None)!r}"
+    )
+    # Carry over fields build_cmd expects.
+    args.uri = None
+    if not hasattr(args, "package"):
+        args.package = None
+    peripherals.build_cmd(args)
+
+    assert len(recorders.build_so_calls) == 1
+    assert recorders.run_gateware_calls == [], (
+        "--driver must not invoke the gateware runner"
+    )
+    assert len(recorders.build_deb_calls) == 1
+
+
+# --- Case C: --gateware -> gateware half only ------------------------------
+
+
+def test_case_C_build_gateware_skips_driver(peripherals, tmp_path, monkeypatch):
+    """C: ``--gateware`` -> cmake/vcpkg path (``build_peripheral_so``) NEVER invoked."""
+    pd = _make_peripheral_dir(tmp_path)
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    peripherals.build_cmd(_build_args(pd, half="gateware"))
+
+    assert recorders.build_so_calls == [], (
+        "--gateware must not invoke the driver builder"
+    )
+    assert len(recorders.run_gateware_calls) == 1
+    assert len(recorders.build_deb_calls) == 1
+
+
+# --- Case D: build with an invalid target -> argparse rejects --------------
+
+
+def test_case_D_build_invalid_target_is_invalid_choice_error(
+    peripherals, tmp_path, capsys
+):
+    """D: ``build <bogus>`` -> argparse `SystemExit(2)` + "invalid choice".
+
+    The half selectors are now subcommands, so the old ``--driver --gateware``
+    mutex collision is structurally impossible: each half is a distinct verb
+    and they cannot be combined. The replacement contract is that the only
+    accepted targets are ``driver`` / ``gateware`` / ``both``; anything else
+    is argparse's standard invalid-choice error.
+    """
+    parser = _build_root_parser(peripherals)
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(["peripherals", "build", "neither"])
+
+    assert excinfo.value.code == 2, (
+        "argparse must reject an unknown build target with exit code 2"
+    )
+    captured = capsys.readouterr()
+    err = captured.err.lower()
+    assert "invalid choice" in err, (
+        f"stderr must reference argparse's 'invalid choice'; got: {captured.err!r}"
+    )
+    assert "driver" in err and "gateware" in err and "both" in err, (
+        f"stderr should enumerate the valid targets; got: {captured.err!r}"
+    )
+
+
+# --- Case D2: bare `build` (no target) prints help, builds nothing ----------
+
+
+def test_case_D2_build_no_target_prints_help_and_builds_nothing(
+    peripherals, tmp_path, monkeypatch, capsys
+):
+    """D2: ``build`` with no target -> the parent prints help; no half runs.
+
+    Bare ``build`` resolves to the help-printing default func, so dispatching
+    it must not invoke either builder.
+    """
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    parser = _build_root_parser(peripherals)
+    args = parser.parse_args(["peripherals", "build"])
+    assert hasattr(args, "func"), "bare `build` must carry a default func"
+    assert getattr(args, "half", None) is None, (
+        "bare `build` must not set a half; a target subcommand is required"
+    )
+    args.func(args)  # the help-printing default; must not raise
+
+    assert recorders.build_so_calls == []
+    assert recorders.run_gateware_calls == []
+    assert recorders.build_deb_calls == []
+    captured = capsys.readouterr()
+    assert "driver" in captured.out and "gateware" in captured.out, (
+        f"bare `build` should print help listing the targets; got: {captured.out!r}"
+    )
+
+
+# --- Case E: --clean --driver cleans only the driver tree ------------------
+
+
+def test_case_E_clean_driver_does_not_touch_gateware_tree(
+    peripherals, tmp_path, monkeypatch
+):
+    """E: ``build driver --clean`` -> driver clean fires, gateware tree untouched.
+
+    Parses via argparse. After the subcommand split:
+      * ``build_peripheral_so`` is called with ``clean=True`` (the existing
+        driver-side clean lives inside that helper).
+      * ``run_gateware_build`` is NOT called (driver-only half).
+      * No ``subprocess.run`` argv references ``rm -rf src/gateware/build``.
+      * The gateware sentinel file survives on disk.
+    """
+    pd = _make_peripheral_dir(tmp_path)
+    gw_sentinel = pd / "src" / "gateware" / "build" / "SENTINEL_GATEWARE"
+    driver_sentinel = pd / "build" / "aarch64" / "SENTINEL_DRIVER"
+    assert gw_sentinel.exists() and driver_sentinel.exists()
+
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    parser = _build_root_parser(peripherals)
+    args = parser.parse_args(["peripherals", "build", "driver", "--clean", str(pd)])
+    assert getattr(args, "half", None) == "driver"
+    assert getattr(args, "clean", False) is True
+    args.uri = None
+    if not hasattr(args, "package"):
+        args.package = None
+    peripherals.build_cmd(args)
+
+    # Driver builder must be invoked with clean=True.
+    assert len(recorders.build_so_calls) == 1, "driver builder must run under --driver"
+    pos_args, kwargs = recorders.build_so_calls[0]
+    saw_clean = bool(kwargs.get("clean")) or (len(pos_args) >= 4 and bool(pos_args[3]))
+    assert saw_clean, (
+        "build_peripheral_so must receive clean=True under --clean --driver"
+    )
+
+    # Gateware runner must not run.
+    assert recorders.run_gateware_calls == [], (
+        "--driver must not invoke the gateware runner"
+    )
+
+    # Gateware tree must NOT have been touched -- sentinel survives.
+    assert gw_sentinel.exists(), "--clean --driver must not touch src/gateware/build/"
+
+    flat_argv = [
+        " ".join(map(str, call[0]))
+        for call in recorders.subprocess_calls
+        if isinstance(call[0], list)
+    ]
+    gateware_clean_calls = [a for a in flat_argv if "rm -rf src/gateware/build" in a]
+    assert gateware_clean_calls == [], (
+        "--clean --driver must NOT issue any gateware-side clean; got: "
+        f"{gateware_clean_calls!r}"
+    )
+
+
+# --- Case F: --clean --gateware cleans only the gateware tree --------------
+
+
+def test_case_F_clean_gateware_does_not_touch_driver_tree(
+    peripherals, tmp_path, monkeypatch
+):
+    """F: ``--clean --gateware`` -> gateware clean fires, driver sentinel survives."""
+    pd = _make_peripheral_dir(tmp_path)
+    driver_sentinel = pd / "build" / "aarch64" / "SENTINEL_DRIVER"
+    gw_sentinel = pd / "src" / "gateware" / "build" / "SENTINEL_GATEWARE"
+    assert driver_sentinel.exists() and gw_sentinel.exists()
+
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    peripherals.build_cmd(_build_args(pd, half="gateware", clean=True))
+
+    # Driver tree must not be touched.
+    assert driver_sentinel.exists(), "--clean --gateware must not touch build/aarch64/"
+
+    flat_argv = [
+        " ".join(map(str, call[0]))
+        for call in recorders.subprocess_calls
+        if isinstance(call[0], list)
+    ]
+    # The driver-side clean lives in build_peripheral_so (which we stubbed),
+    # so the recorded subprocess.run calls should not include a driver
+    # `rm -rf build/` invocation. The driver builder being uninvoked is
+    # already verified by build_so_calls == []; this is the belt.
+    driver_clean_calls = [
+        a
+        for a in flat_argv
+        if "rm -rf build" in a and "rm -rf src/gateware/build" not in a
+    ]
+    assert recorders.build_so_calls == [], (
+        "build_peripheral_so (which owns the driver clean) must not run "
+        "under --gateware"
+    )
+    assert driver_clean_calls == [], (
+        f"--clean --gateware must NOT issue a driver-side clean; got: "
+        f"{driver_clean_calls!r}"
+    )
+
+
+# --- Case G: --clean (no half) cleans both ---------------------------------
+
+
+def test_case_G_clean_no_half_cleans_both(peripherals, tmp_path, monkeypatch):
+    """G: ``--clean`` alone (no half flag) -> both halves' cleans fire."""
+    pd = _make_peripheral_dir(tmp_path)
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    peripherals.build_cmd(_build_args(pd, half="both", clean=True))
+
+    # Driver builder must be invoked with clean=True (today's clean
+    # lives inside build_peripheral_so).
+    assert len(recorders.build_so_calls) == 1
+    _, kwargs = recorders.build_so_calls[0]
+    pos_args, _ = recorders.build_so_calls[0]
+    # clean=True may be passed positionally or as a kwarg; check both.
+    saw_clean = bool(kwargs.get("clean")) or (len(pos_args) >= 4 and bool(pos_args[3]))
+    assert saw_clean, (
+        "build_peripheral_so must receive clean=True under --clean (both halves)"
+    )
+
+    # The gateware-side clean must also fire — recorded as a subprocess.run
+    # call containing the gateware build dir path.
+    flat_argv = [
+        " ".join(map(str, call[0]))
+        for call in recorders.subprocess_calls
+        if isinstance(call[0], list)
+    ]
+    gateware_clean_calls = [a for a in flat_argv if "rm -rf src/gateware/build" in a]
+    assert len(gateware_clean_calls) >= 1, (
+        f"--clean (no half) must issue a gateware-side clean; got: {flat_argv!r}"
+    )
+
+
+# --- Case H: no --clean, no half -> nothing cleaned ------------------------
+
+
+def test_case_H_no_clean_no_half_cleans_nothing(peripherals, tmp_path, monkeypatch):
+    """H: ``peripherals build`` (no flags) -> neither half is cleaned.
+
+    Both sentinels survive. The driver builder is invoked with clean=False;
+    the gateware-side cleaner subprocess.run is not invoked.
+    """
+    pd = _make_peripheral_dir(tmp_path)
+    driver_sentinel = pd / "build" / "aarch64" / "SENTINEL_DRIVER"
+    gw_sentinel = pd / "src" / "gateware" / "build" / "SENTINEL_GATEWARE"
+
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    peripherals.build_cmd(_build_args(pd, half="both", clean=False))
+
+    assert driver_sentinel.exists() and gw_sentinel.exists()
+
+    # build_peripheral_so must NOT receive clean=True.
+    assert len(recorders.build_so_calls) == 1
+    pos_args, kwargs = recorders.build_so_calls[0]
+    saw_clean = bool(kwargs.get("clean")) or (len(pos_args) >= 4 and bool(pos_args[3]))
+    assert not saw_clean, (
+        "build_peripheral_so must NOT receive clean=True when --clean is absent"
+    )
+
+    flat_argv = [
+        " ".join(map(str, call[0]))
+        for call in recorders.subprocess_calls
+        if isinstance(call[0], list)
+    ]
+    gateware_clean_calls = [a for a in flat_argv if "rm -rf src/gateware/build" in a]
+    assert gateware_clean_calls == [], (
+        f"no --clean flag must issue zero gateware-side cleans; got: {flat_argv!r}"
+    )
+
+
+# ===========================================================================
+# AC-8: peripherals deploy flag handling
+# ===========================================================================
+
+
+# --- Case I: deploy --driver -u <uri> --------------------------------------
+
+
+def test_case_I_deploy_driver_only(peripherals, tmp_path, monkeypatch):
+    """I: ``peripherals deploy driver -u <uri>`` -> driver-only build then deploy.
+
+    Parses via argparse: the ``driver`` subcommand under ``deploy`` must set
+    ``args.half`` to ``"driver"``.
+    """
+    pd = _make_peripheral_dir(tmp_path)
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    parser = _build_root_parser(peripherals)
+    args = parser.parse_args(["peripherals", "deploy", "driver", str(pd)])
+    assert getattr(args, "half", None) == "driver", (
+        f"args.half must be 'driver' after the 'driver' subcommand on deploy; got: "
+        f"{getattr(args, 'half', None)!r}"
+    )
+    args.uri = "10.0.0.1"
+    if not hasattr(args, "package"):
+        args.package = None
+    peripherals.deploy_cmd(args)
+
+    assert len(recorders.build_so_calls) == 1
+    assert recorders.run_gateware_calls == [], (
+        "--driver deploy must not invoke the gateware runner"
+    )
+    assert len(recorders.deploy_calls) == 1, "deploy_package must be invoked once"
+    uri, deb_path = recorders.deploy_calls[0]
+    assert uri == "10.0.0.1"
+    assert deb_path.endswith(".deb")
+
+
+# --- Case J: deploy --gateware -u <uri> ------------------------------------
+
+
+def test_case_J_deploy_gateware_only(peripherals, tmp_path, monkeypatch):
+    """J: ``peripherals deploy --gateware -u <uri>`` -> gateware-only build then deploy."""
+    pd = _make_peripheral_dir(tmp_path)
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    peripherals.deploy_cmd(_deploy_args(pd, half="gateware", uri="10.0.0.1"))
+
+    assert recorders.build_so_calls == [], (
+        "--gateware deploy must not invoke the driver builder"
+    )
+    assert len(recorders.run_gateware_calls) == 1
+    assert len(recorders.deploy_calls) == 1
+    uri, deb_path = recorders.deploy_calls[0]
+    assert uri == "10.0.0.1"
+
+
+# --- Case K: deploy with an invalid target -> argparse rejects -------------
+
+
+def test_case_K_deploy_invalid_target_is_invalid_choice_error(
+    peripherals, tmp_path, capsys
+):
+    """K: ``deploy <bogus>`` -> argparse `SystemExit(2)` + "invalid choice".
+
+    Mirror of case D for ``deploy``: the half selectors are subcommands, so
+    the old ``--driver --gateware`` mutex is impossible. Only
+    ``driver`` / ``gateware`` / ``both`` are accepted targets.
+    """
+    parser = _build_root_parser(peripherals)
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(["peripherals", "deploy", "neither"])
+
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    err = captured.err.lower()
+    assert "invalid choice" in err, (
+        f"stderr must reference argparse's 'invalid choice'; got: {captured.err!r}"
+    )
+    assert "driver" in err and "gateware" in err and "both" in err
+
+
+# --- Case L: deploy --package <path>.deb --gateware -u <uri> ---------------
+
+
+def test_case_L_deploy_package_short_circuit_ignores_half_flag(
+    peripherals, tmp_path, monkeypatch, capsys
+):
+    """L: ``--package`` short-circuits; the ``--gateware`` flag is acknowledged
+    but does not redirect the .deb path. A warning naming both flags is
+    emitted to stdout (rich console)."""
+    pd = _make_peripheral_dir(tmp_path)
+    # Pre-build a fake .deb at a path the test will supply via --package.
+    fake_deb = tmp_path / "prebuilt.deb"
+    fake_deb.write_text("dpkg-stub")
+
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    peripherals.deploy_cmd(
+        _deploy_args(pd, half="gateware", uri="10.0.0.1", package=str(fake_deb))
+    )
+
+    # deploy_package called once with the user-supplied .deb path.
+    assert len(recorders.deploy_calls) == 1
+    uri, deb_path = recorders.deploy_calls[0]
+    assert uri == "10.0.0.1"
+    assert os.path.abspath(deb_path) == os.path.abspath(str(fake_deb))
+
+    # No build paths invoked.
+    assert recorders.build_so_calls == []
+    assert recorders.run_gateware_calls == []
+
+    # The warning must mention `--gateware` (and reference `--package` or the
+    # fact that the half-selector is being ignored).
+    captured = capsys.readouterr()
+    out_lower = (captured.out + captured.err).lower()
+    assert "--gateware" in out_lower or "gateware" in out_lower
+    assert (
+        "ignore" in out_lower or "--package" in out_lower or "package" in out_lower
+    ), (
+        "the --package short-circuit must emit a warning that the half-selector "
+        f"is being ignored; got: {captured.out + captured.err!r}"
+    )
+
+
+# ===========================================================================
+# AC-12: combined .deb composition (no-flag + half-flagged staging layout)
+# ===========================================================================
+
+
+# Probe shape: spy on ``tempfile.mkdtemp`` (called from inside
+# build_peripheral_deb to create its staging dir), then walk the dir after
+# the function returns. AC-12 broadens the signature to
+# (peripheral_dir, manifest_dict, *, bit_path=None, include_driver_runtime=True);
+# the tests below feed the manifest through ``build_cmd``'s normal codepath,
+# so as long as ``build_cmd`` itself is updated to pass the manifest in (also
+# AC-12 -- "Both call sites updated"), this exercises the real public surface.
+
+
+def _captured_staging_files(staging_dir):
+    """Walk ``staging_dir`` and return a sorted list of relative file paths."""
+    out: list[str] = []
+    for root, _, files in os.walk(staging_dir):
+        rel_root = os.path.relpath(root, staging_dir)
+        for f in files:
+            out.append(os.path.normpath(os.path.join(rel_root, f)))
+    return sorted(out)
+
+
+def _seed_runtime_libs_under(peripheral_dir):
+    """Pre-populate libscifi-peripheral-sdk.so* artifacts so the driver-half
+    extraction step has something to copy into the staging dir.
+
+    AC-12 says ``build_peripheral_deb`` extracts the runtime libs from the
+    driver Docker image. The implementer is free to either run the real docker
+    cp under stubs or to look for already-extracted .so files on disk. To
+    keep the test agnostic to which path the implementation picks, we drop
+    the libs directly under build/aarch64/ where the driver builder would
+    normally place them.
+    """
+    libs_dir = os.path.join(str(peripheral_dir), "build", "aarch64")
+    os.makedirs(libs_dir, exist_ok=True)
+    for fname in (
+        "libscifi-peripheral-sdk.so",
+        "libscifi-peripheral-sdk.so.0",
+        "libscifi-peripheral-sdk.so.0.1.0",
+    ):
+        p = os.path.join(libs_dir, fname)
+        with open(p, "w") as fh:
+            fh.write("fake-runtime-lib")
+
+
+def test_case_M_combined_deb_carries_both_so_and_bit(
+    peripherals, tmp_path, monkeypatch
+):
+    """M (AC-12): no-flag .deb stages BOTH the .so and the .bit.
+
+    Staging layout per AC-12 Public Interface Contract:
+        usr/lib/scifi/plugins/<so_stem>.so
+        usr/lib/scifi/gateware/<bit_stem>.bit
+        usr/lib/libscifi-peripheral-sdk.so*
+
+    Where <so_stem> = splitext(_expected_so_filename(manifest))[0]
+    and   <bit_stem> = splitext(_expected_bit_filename(manifest))[0].
+    For this manifest, both stems resolve to "intan_rhd2132".
+    """
+    pd = _make_peripheral_dir(tmp_path)
+    _seed_runtime_libs_under(pd)
+    fake_bit = tmp_path / "fake.bit"
+    fake_bit.write_text("BITSTREAM")
+
+    staging_holder: dict = {}
+    real_mkdtemp = peripherals.tempfile.mkdtemp
+
+    def spy_mkdtemp(*args, **kwargs):
+        d = real_mkdtemp(*args, **kwargs)
+        staging_holder["dir"] = d
+        return d
+
+    # Capture the real build_peripheral_deb BEFORE installing the common stubs
+    # (which would otherwise replace it with a recorder).
+    real_deb = peripherals.build_peripheral_deb
+    monkeypatch.setattr(peripherals.tempfile, "mkdtemp", spy_mkdtemp)
+    _install_common_stubs(peripherals, monkeypatch, tmp_path, fake_bit=fake_bit)
+    # Allow the real build_peripheral_deb to run (not the common stub).
+    monkeypatch.setattr(peripherals, "build_peripheral_deb", real_deb)
+    # And stub the fpm subprocess call so it's a no-op.
+    monkeypatch.setattr(
+        peripherals.subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess([], 0, b"", b""),
+    )
+
+    peripherals.build_cmd(_build_args(pd, half="both"))
+
+    staging_dir = staging_holder.get("dir")
+    assert staging_dir is not None, "build_peripheral_deb must have run"
+
+    # Derive expected basenames from the manifest via the public helpers so
+    # the assertion stays symmetric and survives a manifest swap.
+    manifest = json.loads((pd / "manifest.json").read_text())
+    expected_so = peripherals._expected_so_filename(manifest)
+    expected_bit = peripherals._expected_bit_filename(manifest)
+    assert expected_so == "intan_rhd2132.so", (
+        f"sanity: helper should derive 'intan_rhd2132.so' for this manifest, "
+        f"got {expected_so!r}"
+    )
+    assert expected_bit == "intan_rhd2132.bit", (
+        f"sanity: helper should derive 'intan_rhd2132.bit' (from .so stem) "
+        f"for this manifest with no gateware_target; got {expected_bit!r}"
+    )
+
+    files = _captured_staging_files(staging_dir)
+    assert any(
+        f.endswith(os.path.join("usr/lib/scifi/plugins", expected_so)) for f in files
+    ), f".so should be staged at usr/lib/scifi/plugins/{expected_so}; got: {files!r}"
+    assert any(
+        f.endswith(os.path.join("usr/lib/scifi/gateware", expected_bit)) for f in files
+    ), f".bit should be staged at usr/lib/scifi/gateware/{expected_bit}; got: {files!r}"
+    # Runtime libs must also be present in the combined .deb.
+    assert any("libscifi-peripheral-sdk" in f for f in files), (
+        f"combined .deb must carry libscifi-peripheral-sdk runtime; got: {files!r}"
+    )
+
+
+def test_case_N_driver_only_deb_carries_so_but_no_bit(
+    peripherals, tmp_path, monkeypatch
+):
+    """N (AC-12): ``--driver`` .deb has .so + runtime libs, NOT .bit."""
+    pd = _make_peripheral_dir(tmp_path)
+    _seed_runtime_libs_under(pd)
+
+    real_mkdtemp = peripherals.tempfile.mkdtemp
+    holder: dict = {}
+
+    def spy_mkdtemp(*args, **kwargs):
+        d = real_mkdtemp(*args, **kwargs)
+        holder["dir"] = d
+        return d
+
+    # Capture the real build_peripheral_deb BEFORE installing the common stubs.
+    real_deb = peripherals.build_peripheral_deb
+    monkeypatch.setattr(peripherals.tempfile, "mkdtemp", spy_mkdtemp)
+    _install_common_stubs(peripherals, monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        peripherals.subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess([], 0, b"", b""),
+    )
+    # Don't stub build_peripheral_deb -- we want the real one to run.
+    monkeypatch.setattr(peripherals, "build_peripheral_deb", real_deb)
+
+    peripherals.build_cmd(_build_args(pd, half="driver"))
+
+    staging_dir = holder.get("dir")
+    assert staging_dir is not None
+    files = _captured_staging_files(staging_dir)
+
+    manifest = json.loads((pd / "manifest.json").read_text())
+    expected_so = peripherals._expected_so_filename(manifest)
+    assert any(
+        f.endswith(os.path.join("usr/lib/scifi/plugins", expected_so)) for f in files
+    ), (
+        f"--driver .deb should stage .so at usr/lib/scifi/plugins/{expected_so}; got: {files!r}"
+    )
+    assert not any(f.endswith(".bit") for f in files), (
+        f"--driver .deb must not carry any .bit; got: {files!r}"
+    )
+    # Runtime libs MUST be present under --driver.
+    assert any("libscifi-peripheral-sdk" in f for f in files), (
+        f"--driver .deb must carry libscifi-peripheral-sdk runtime; got: {files!r}"
+    )
+
+
+def test_case_O_gateware_only_deb_carries_bit_but_no_so_no_runtime(
+    peripherals, tmp_path, monkeypatch
+):
+    """O (AC-12): ``--gateware`` .deb has only the .bit; no .so, no runtime libs."""
+    pd = _make_peripheral_dir(tmp_path)
+    _seed_runtime_libs_under(pd)
+    fake_bit = tmp_path / "fake.bit"
+    fake_bit.write_text("BITSTREAM")
+
+    real_mkdtemp = peripherals.tempfile.mkdtemp
+    holder: dict = {}
+
+    def spy_mkdtemp(*args, **kwargs):
+        d = real_mkdtemp(*args, **kwargs)
+        holder["dir"] = d
+        return d
+
+    # Capture the real build_peripheral_deb BEFORE installing the common stubs.
+    real_deb = peripherals.build_peripheral_deb
+    monkeypatch.setattr(peripherals.tempfile, "mkdtemp", spy_mkdtemp)
+    _install_common_stubs(peripherals, monkeypatch, tmp_path, fake_bit=fake_bit)
+    monkeypatch.setattr(
+        peripherals.subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess([], 0, b"", b""),
+    )
+    monkeypatch.setattr(peripherals, "build_peripheral_deb", real_deb)
+
+    peripherals.build_cmd(_build_args(pd, half="gateware"))
+
+    staging_dir = holder.get("dir")
+    assert staging_dir is not None
+    files = _captured_staging_files(staging_dir)
+
+    manifest = json.loads((pd / "manifest.json").read_text())
+    expected_bit = peripherals._expected_bit_filename(manifest)
+    assert any(
+        f.endswith(os.path.join("usr/lib/scifi/gateware", expected_bit)) for f in files
+    ), (
+        f"--gateware .deb should stage .bit at usr/lib/scifi/gateware/{expected_bit}; got: {files!r}"
+    )
+    assert not any(f.endswith(".so") for f in files), (
+        f"--gateware .deb must not carry any .so; got: {files!r}"
+    )
+    assert not any("libscifi-peripheral-sdk" in f for f in files), (
+        f"--gateware .deb must not carry libscifi-peripheral-sdk runtime; "
+        f"got: {files!r}"
+    )
+
+
+# ===========================================================================
+# AC-15: _expected_bit_filename helper + install.gateware_target manifest field
+# ===========================================================================
+
+
+# Fallback chain per AC-15 + AC-12 helper contract (read in the plan):
+#   1. install.gateware_target present and truthy -> basename(gateware_target)
+#   2. else if install.target present -> splitext(basename(target))[0] + ".bit"
+#   3. else -> "<manifest.name>.bit"
+#
+# An empty-string gateware_target ("") is falsy by the `if target:` guard
+# in the contract pseudocode in the plan, so it falls through to step 2/3.
+# Cases P1..P7 cover each branch + a few adversarial corners.
+
+
+def test_case_P1_expected_bit_filename_uses_explicit_gateware_target(peripherals):
+    """P1 (AC-15): install.gateware_target set -> returns its basename verbatim."""
+    manifest = {
+        "name": "scifi-intan-rhd2132",
+        "install": {
+            "target": "/usr/lib/scifi/plugins/intan_rhd2132.so",
+            "gateware_target": "/usr/lib/scifi/gateware/intan_rhd2132.bit",
+        },
+    }
+    assert peripherals._expected_bit_filename(manifest) == "intan_rhd2132.bit"
+
+
+def test_case_P2_expected_bit_filename_falls_back_to_so_stem(peripherals):
+    """P2 (AC-15): no gateware_target -> derive from .so stem.
+
+    For the current axon-peripheral-example manifest -- name
+    "scifi-intan-rhd2132" but install.target = ".../intan_rhd2132.so" --
+    the .bit must be "intan_rhd2132.bit" (NOT "scifi-intan-rhd2132.bit").
+    This is the symmetry-with-.so rule from the AC-12 rationale.
+    """
+    manifest = {
+        "name": "scifi-intan-rhd2132",
+        "install": {"target": "/usr/lib/scifi/plugins/intan_rhd2132.so"},
+    }
+    assert peripherals._expected_bit_filename(manifest) == "intan_rhd2132.bit"
+
+
+def test_case_P3_expected_bit_filename_falls_back_to_manifest_name(peripherals):
+    """P3 (AC-15): no install.target AND no gateware_target -> "<name>.bit"."""
+    manifest = {"name": "scifi-intan-rhd2132"}
+    assert peripherals._expected_bit_filename(manifest) == "scifi-intan-rhd2132.bit"
+
+
+def test_case_P4_expected_bit_filename_empty_install_block(peripherals):
+    """P4 (AC-15): install = {} (empty block) + name = "foo" -> "foo.bit"."""
+    manifest = {"name": "foo", "install": {}}
+    assert peripherals._expected_bit_filename(manifest) == "foo.bit"
+
+
+def test_case_P5_expected_bit_filename_no_install_key(peripherals):
+    """P5 (AC-15): no install key at all + name = "bar" -> "bar.bit"."""
+    manifest = {"name": "bar"}
+    assert peripherals._expected_bit_filename(manifest) == "bar.bit"
+
+
+def test_case_P6_expected_bit_filename_trusts_unusual_basename(peripherals):
+    """P6 (AC-15): gateware_target with a non-derived basename is honored verbatim.
+
+    The helper does not enforce that the .bit stem match the .so stem; the
+    user may intentionally pick a different name. Per AC-15:
+    "no cross-field constraint (the user may, intentionally or not, pick
+    different stems for the two artifacts)."
+    """
+    manifest = {
+        "name": "scifi-intan-rhd2132",
+        "install": {
+            "target": "/usr/lib/scifi/plugins/intan_rhd2132.so",
+            "gateware_target": "/usr/lib/scifi/gateware/my_custom_name.bit",
+        },
+    }
+    assert peripherals._expected_bit_filename(manifest) == "my_custom_name.bit"
+
+
+def test_case_P7_expected_bit_filename_empty_gateware_target_falls_through(
+    peripherals,
+):
+    """P7 (AC-15, adversarial): empty-string gateware_target is treated as "not set".
+
+    The AC-12 helper contract guards with ``if target:`` -- an empty string is
+    falsy and we fall through to the .so-stem fallback. This guards against a
+    user accidentally writing ``"gateware_target": ""`` and getting a
+    confusing ``"".bit`` artifact.
+    """
+    manifest = {
+        "name": "scifi-intan-rhd2132",
+        "install": {
+            "target": "/usr/lib/scifi/plugins/intan_rhd2132.so",
+            "gateware_target": "",
+        },
+    }
+    # Empty-string falls through; .so stem wins.
+    assert peripherals._expected_bit_filename(manifest) == "intan_rhd2132.bit"

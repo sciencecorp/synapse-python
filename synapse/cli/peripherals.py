@@ -51,6 +51,35 @@ SECTION_LABEL = "synapse-peripherals"
 # ---------------------------------------------------------------------------
 
 
+def _add_half_subcommands(parent_parser, *, func, action_label, extra_args):
+    """Wire driver/gateware/both leaf subcommands under *parent_parser*.
+
+    Each leaf carries a ``peripheral_dir`` positional plus whatever per-command
+    options *extra_args* installs, and sets ``half`` to its own name so the
+    shared handler (*func*) branches on ``args.half`` exactly as it did under
+    the old half-selector flags. A bare parent command (no leaf chosen) prints
+    its own help. *action_label* is the verb phrase used in each leaf's help
+    line ("Build/package", "Build/deploy").
+    """
+    targets = {
+        "driver": "only the driver .so (skips the gateware container)",
+        "gateware": "only the FPGA .bit (skips cmake/vcpkg)",
+        "both": "both the driver .so and the FPGA .bit",
+    }
+    half_subparsers = parent_parser.add_subparsers(title="Target")
+    for half, what in targets.items():
+        leaf = half_subparsers.add_parser(half, help=f"{action_label} {what}.")
+        leaf.add_argument(
+            "peripheral_dir",
+            nargs="?",
+            default=".",
+            help="Path to the peripheral plugin directory (defaults to cwd)",
+        )
+        extra_args(leaf)
+        leaf.set_defaults(func=func, half=half)
+    parent_parser.set_defaults(func=lambda _: parent_parser.print_help())
+
+
 def add_commands(subparsers: argparse._SubParsersAction):
     """Add the peripherals command group to the CLI."""
     peripherals_parser = subparsers.add_parser(
@@ -60,38 +89,25 @@ def add_commands(subparsers: argparse._SubParsersAction):
         title="Peripheral Commands"
     )
 
+    # `build` / `deploy` each expose driver/gateware/both as subcommands rather
+    # than half-selector flags. Each leaf sets `half` to its own name, which is
+    # exactly the value build_cmd/deploy_cmd already branch on, so the handlers
+    # need no change. A bare `build`/`deploy` (no leaf chosen) prints its help.
     build_parser = peripherals_subparsers.add_parser(
         "build",
-        help="Cross-compile a peripheral plugin into a .so and package it as a .deb",
+        help="Cross-compile a peripheral plugin into a .so/.bit and package it as a .deb",
     )
-    build_parser.add_argument(
-        "peripheral_dir",
-        nargs="?",
-        default=".",
-        help="Path to the peripheral plugin directory (defaults to cwd)",
+    _add_half_subcommands(
+        build_parser,
+        func=build_cmd,
+        action_label="Build/package",
+        extra_args=lambda leaf: leaf.add_argument(
+            "--clean",
+            action="store_true",
+            default=False,
+            help="Clean build directories before compiling",
+        ),
     )
-    build_parser.add_argument(
-        "--clean",
-        action="store_true",
-        default=False,
-        help="Clean build directories before compiling",
-    )
-    build_half_group = build_parser.add_mutually_exclusive_group()
-    build_half_group.add_argument(
-        "--driver",
-        dest="half",
-        action="store_const",
-        const="driver",
-        help="Build/package only the driver .so (skips the gateware container).",
-    )
-    build_half_group.add_argument(
-        "--gateware",
-        dest="half",
-        action="store_const",
-        const="gateware",
-        help="Build/package only the FPGA .bit (skips cmake/vcpkg).",
-    )
-    build_parser.set_defaults(func=build_cmd, half="both")
 
     deploy_parser = peripherals_subparsers.add_parser(
         "deploy",
@@ -100,35 +116,18 @@ def add_commands(subparsers: argparse._SubParsersAction):
             "Builds first unless --package is provided."
         ),
     )
-    deploy_parser.add_argument(
-        "peripheral_dir",
-        nargs="?",
-        default=".",
-        help="Path to the peripheral plugin directory (defaults to cwd)",
+    _add_half_subcommands(
+        deploy_parser,
+        func=deploy_cmd,
+        action_label="Build/deploy",
+        extra_args=lambda leaf: leaf.add_argument(
+            "--package",
+            "-p",
+            type=str,
+            default=None,
+            help="Path to a pre-built .deb to deploy (skips local build and package steps)",
+        ),
     )
-    deploy_parser.add_argument(
-        "--package",
-        "-p",
-        type=str,
-        default=None,
-        help="Path to a pre-built .deb to deploy (skips local build and package steps)",
-    )
-    deploy_half_group = deploy_parser.add_mutually_exclusive_group()
-    deploy_half_group.add_argument(
-        "--driver",
-        dest="half",
-        action="store_const",
-        const="driver",
-        help="Build/deploy only the driver .so (skips the gateware container).",
-    )
-    deploy_half_group.add_argument(
-        "--gateware",
-        dest="half",
-        action="store_const",
-        const="gateware",
-        help="Build/deploy only the FPGA .bit (skips cmake/vcpkg).",
-    )
-    deploy_parser.set_defaults(func=deploy_cmd, half="both")
 
     # `peripherals gateware <verb> [args...]` — pass-through dispatcher to
     # axon-peripheral-sdk inside the gateware container. argparse.REMAINDER
@@ -485,7 +484,11 @@ def build_peripheral_deb(
                 "echo 'Peripheral plugin installed. Restart scifi-server to load it.'\n"
                 "exit 0\n"
             )
-        os.chmod(postinstall_path, 0o755)
+        # 0o644 is sufficient: fpm embeds this file's *contents* as the .deb's
+        # postinst maintainer script (via --after-install), and dpkg makes
+        # maintainer scripts executable itself at install time. The staging
+        # file's own exec bit never reaches the package.
+        os.chmod(postinstall_path, 0o644)
 
         # 5. Run fpm inside the cdrx/fpm-ubuntu image (matches apps' packaging path).
         dist_dir = os.path.join(peripheral_dir, "dist")
