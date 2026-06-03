@@ -10,7 +10,7 @@ Behavior (per AC-6):
   1. Calls build_license_docker_args(env); LicenseUnsetError propagates.
   2. Issues `docker run --rm --user dev -v <abs>:/home/workspace
      -w /home/workspace <license-args> <image_tag> /bin/bash -lc
-     'axon-peripheral-sdk build --project src/gateware --pdc devkit --impl impl_1'`.
+     'axon-peripheral-sdk build --project src/gateware'`.
   3. Non-zero exit -> raises subprocess.CalledProcessError.
   4. After success, globs <peripheral_dir>/src/gateware/build/bitstreams/sdk_*.bit
      and returns the newest by mtime (warns on multi-match).
@@ -67,8 +67,8 @@ def test_runner_builds_docker_run_argv_with_project_flag(
     gateware, peripheral_dir, monkeypatch
 ):
     """Case 10/13: captured docker-run argv has the correct shape and ends
-    with the exact axon-peripheral-sdk invocation (the AC-6 / FINDING-1
-    regression: `--project src/gateware --pdc devkit --impl impl_1`).
+    with the exact axon-peripheral-sdk invocation (`--project src/gateware`;
+    the SDK no longer accepts `--pdc`/`--impl`).
     """
     pd, license_file = peripheral_dir
     recorded: list[list[str]] = []
@@ -117,10 +117,7 @@ def test_runner_builds_docker_run_argv_with_project_flag(
     bash_idx = argv.index("/bin/bash")
     assert argv[bash_idx + 1] == "-lc"
     sdk_cmd = argv[bash_idx + 2]
-    assert (
-        sdk_cmd
-        == "axon-peripheral-sdk build --project src/gateware --pdc devkit --impl impl_1"
-    )
+    assert sdk_cmd == "axon-peripheral-sdk build --project src/gateware"
 
     # And the returned path is the .bit we dropped.
     assert result.endswith("sdk_topbuild.bit")

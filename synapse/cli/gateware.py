@@ -115,9 +115,7 @@ def build_license_docker_args(
     return args
 
 
-_SDK_BUILD_CMD = (
-    "axon-peripheral-sdk build --project src/gateware --pdc devkit --impl impl_1"
-)
+_SDK_BUILD_CMD = "axon-peripheral-sdk build --project src/gateware"
 
 
 def run_gateware_build(
