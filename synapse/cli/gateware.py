@@ -212,6 +212,12 @@ def _gateware_passthrough(
         "/home/workspace",
         "--user",
         f"{host_uid}:{host_gid}",
+        # Tell the SDK which frontend launched it so its user-facing "next
+        # steps" hints and --help examples name `synapsectl peripherals
+        # gateware <verb>` (what the user actually typed) rather than the
+        # `axon-peripheral-sdk <verb>` binary we forward to inside the container.
+        "-e",
+        "AXON_PERIPHERAL_SDK_FRONTEND=synapsectl peripherals gateware",
         *license_args,
         gateware_image_tag,
         "axon-peripheral-sdk",

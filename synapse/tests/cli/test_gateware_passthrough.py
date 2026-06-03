@@ -763,6 +763,52 @@ def test_case_15_future_verb_forwarded_no_gate(peripherals, tmp_path, monkeypatc
 
 
 # ---------------------------------------------------------------------------
+# Frontend marker: the SDK is told which CLI launched it so its user-facing
+# "next steps" hints / --help examples name `synapsectl peripherals gateware`.
+# ---------------------------------------------------------------------------
+
+
+def test_frontend_env_marker_forwarded_to_sdk(peripherals, tmp_path, monkeypatch):
+    """The dispatcher must pass ``-e AXON_PERIPHERAL_SDK_FRONTEND=synapsectl
+    peripherals gateware`` so the SDK brands its hints/help with the frontend
+    prefix the user actually typed (rather than the forwarded binary name).
+
+    The marker must precede the gateware image tag (it's a ``docker run`` flag,
+    not an SDK arg) and must NOT leak into the verbatim SDK argv tail.
+    """
+    lic = _make_license_file(tmp_path)
+    recorder, _ = _install_dispatcher_stubs(
+        peripherals, monkeypatch, tmp_path, license_value=lic
+    )
+
+    with pytest.raises(SystemExit):
+        _dispatch(peripherals, ["new", "myproj"])
+
+    assert len(recorder.calls) == 1, (
+        f"exactly one docker-run subprocess call expected; got: {recorder.calls!r}"
+    )
+    argv = _docker_argv(recorder.calls[0])
+    marker = "AXON_PERIPHERAL_SDK_FRONTEND=synapsectl peripherals gateware"
+    assert marker in argv, (
+        f"docker argv must export the frontend marker {marker!r}; got: {argv!r}"
+    )
+    marker_idx = argv.index(marker)
+    assert argv[marker_idx - 1] == "-e", (
+        f"frontend marker must be introduced by '-e'; got argv[{marker_idx - 1}]: "
+        f"{argv[marker_idx - 1]!r}"
+    )
+    # It is a docker flag, not an SDK arg: must sit before the image tag and
+    # never appear in the forwarded SDK tail.
+    assert marker_idx < argv.index("fake-gw:latest-amd64"), (
+        "frontend marker must precede the image tag (it's a docker-run flag)"
+    )
+    tail = _tail_after_image_tag(argv, "fake-gw:latest-amd64")
+    assert tail == ["axon-peripheral-sdk", "new", "myproj"], (
+        f"SDK argv tail must stay verbatim (no marker leak); got: {tail!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # AC-14 case 16: POSIX-only -- os.getuid raises AttributeError -> SystemExit
 # ---------------------------------------------------------------------------
 
