@@ -377,6 +377,94 @@ def test_case_6_working_dir_is_home_workspace(peripherals, tmp_path, monkeypatch
 
 
 # ---------------------------------------------------------------------------
+# Implicit gateware project: workdir redirects to src/gateware when the
+# pass-through is invoked from a peripheral project root (manifest.json present).
+# The repo root stays bind-mounted at /home/workspace so `build` still sees the
+# whole repo; only the container's working directory moves into src/gateware so
+# every project-scoped SDK verb resolves peripheral.yaml from its cwd default.
+# ---------------------------------------------------------------------------
+
+
+def test_workdir_redirects_to_gateware_when_manifest_and_subdir_present(
+    peripherals, tmp_path, monkeypatch
+):
+    """manifest.json + src/gateware/ present -> ``-w /home/workspace/src/gateware``
+    while the bind-mount stays the repo root."""
+    lic = _make_license_file(tmp_path)
+    recorder, pd = _install_dispatcher_stubs(
+        peripherals, monkeypatch, tmp_path, license_value=lic
+    )
+    (pd / "manifest.json").write_text('{"name": "x"}')
+    (pd / "src" / "gateware").mkdir(parents=True)
+
+    # `validate` has no --project flag; it must find the project via cwd.
+    with pytest.raises(SystemExit):
+        _dispatch(peripherals, ["validate"])
+
+    argv = _docker_argv(recorder.calls[0])
+    w_idx = argv.index("-w")
+    assert argv[w_idx + 1] == "/home/workspace/src/gateware", (
+        f"-w must redirect into src/gateware; got: {argv[w_idx + 1]!r}"
+    )
+    # Mount is still the repo root, so `build` keeps full-repo visibility.
+    assert f"{os.path.abspath(str(pd))}:/home/workspace" in argv, (
+        f"bind-mount must stay the repo root; got: {argv!r}"
+    )
+    # argv is still forwarded verbatim -- no injected --project.
+    tail = _tail_after_image_tag(argv, "fake-gw:latest-amd64")
+    assert tail == ["axon-peripheral-sdk", "validate"], (
+        f"argv must stay verbatim (no --project injected); got: {tail!r}"
+    )
+
+
+def test_workdir_stays_root_when_manifest_present_but_no_gateware_subdir(
+    peripherals, tmp_path, monkeypatch
+):
+    """manifest.json present but no src/gateware/ -> ``-w /home/workspace``.
+
+    A driver-only peripheral has nowhere to redirect; keep the root workdir.
+    """
+    lic = _make_license_file(tmp_path)
+    recorder, pd = _install_dispatcher_stubs(
+        peripherals, monkeypatch, tmp_path, license_value=lic
+    )
+    (pd / "manifest.json").write_text('{"name": "x"}')
+
+    with pytest.raises(SystemExit):
+        _dispatch(peripherals, ["doctor"])
+
+    argv = _docker_argv(recorder.calls[0])
+    w_idx = argv.index("-w")
+    assert argv[w_idx + 1] == "/home/workspace", (
+        f"-w must stay /home/workspace without src/gateware; got: {argv[w_idx + 1]!r}"
+    )
+
+
+def test_workdir_stays_root_when_no_manifest_even_if_gateware_subdir_present(
+    peripherals, tmp_path, monkeypatch
+):
+    """No manifest.json (e.g. cwd already inside the project) -> ``-w /home/workspace``.
+
+    The redirect is keyed on manifest.json so running from inside src/gateware
+    (which has peripheral.yaml but no manifest.json) is left untouched.
+    """
+    lic = _make_license_file(tmp_path)
+    recorder, pd = _install_dispatcher_stubs(
+        peripherals, monkeypatch, tmp_path, license_value=lic
+    )
+    (pd / "src" / "gateware").mkdir(parents=True)
+
+    with pytest.raises(SystemExit):
+        _dispatch(peripherals, ["regenerate"])
+
+    argv = _docker_argv(recorder.calls[0])
+    w_idx = argv.index("-w")
+    assert argv[w_idx + 1] == "/home/workspace", (
+        f"-w must stay /home/workspace without manifest.json; got: {argv[w_idx + 1]!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # AC-14 case 7: subprocess.run called with a list, shell=False
 # ---------------------------------------------------------------------------
 

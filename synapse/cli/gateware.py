@@ -115,7 +115,12 @@ def build_license_docker_args(
     return args
 
 
-_SDK_BUILD_CMD = "axon-peripheral-sdk build --project src/gateware"
+# The gateware project lives in this subdir of a peripheral repo, by
+# convention shared with the structured build below and the pass-through's
+# implicit-project workdir redirect.
+_GATEWARE_PROJECT_SUBDIR = "src/gateware"
+
+_SDK_BUILD_CMD = f"axon-peripheral-sdk build --project {_GATEWARE_PROJECT_SUBDIR}"
 
 
 def run_gateware_build(
@@ -200,14 +205,31 @@ def _gateware_passthrough(
     except AttributeError:
         sys.exit(_NON_POSIX_MSG)
 
+    abs_peripheral_dir = os.path.abspath(peripheral_dir)
+
+    # When invoked from a peripheral project root (manifest.json present) that
+    # has a gateware subproject, run the SDK with its cwd inside src/gateware so
+    # every project-scoped verb resolves peripheral.yaml from its cwd default --
+    # including verbs with no --project flag (validate/regenerate/add-peripheral).
+    # The bind-mount stays the repo root, so `build` still sees the whole repo.
+    # The verb is never inspected: this is purely a directory-driven decision,
+    # so the pass-through keeps forwarding argv verbatim with no verb allowlist.
+    workdir = "/home/workspace"
+    if os.path.isfile(
+        os.path.join(abs_peripheral_dir, "manifest.json")
+    ) and os.path.isdir(
+        os.path.join(abs_peripheral_dir, *_GATEWARE_PROJECT_SUBDIR.split("/"))
+    ):
+        workdir = f"/home/workspace/{_GATEWARE_PROJECT_SUBDIR}"
+
     cmd = [
         "docker",
         "run",
         "--rm",
         "-v",
-        f"{os.path.abspath(peripheral_dir)}:/home/workspace",
+        f"{abs_peripheral_dir}:/home/workspace",
         "-w",
-        "/home/workspace",
+        workdir,
         "--user",
         f"{host_uid}:{host_gid}",
         # Tell the SDK which frontend launched it so its user-facing "next
