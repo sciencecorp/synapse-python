@@ -83,7 +83,7 @@ def main():
     peripherals.add_commands(subparsers)
     settings.add_commands(subparsers)
     deploy_model.add_commands(subparsers)
-    args = parser.parse_args()
+    args = peripherals.parse_args_with_passthrough(parser)
 
     # If we need to setup the device URI, do that now
     args = setup_device_uri(args)

@@ -135,6 +135,12 @@ def add_commands(subparsers: argparse._SubParsersAction):
     # truth for verbs and flags; synapsectl does NOT gate on a known-verb
     # list. peripheral_dir is intentionally NOT a positional here -- REMAINDER
     # would swallow it -- the dispatcher uses os.getcwd() instead.
+    #
+    # REMAINDER only starts capturing at the first positional, so a LEADING
+    # option (e.g. `gateware --install-completion`, a top-level SDK flag) is
+    # otherwise rejected by argparse before REMAINDER engages. The
+    # `_passthrough_extra` marker tells parse_args_with_passthrough to fold any
+    # such leftover tokens into `argv` instead of erroring -- see that helper.
     gateware_parser = peripherals_subparsers.add_parser(
         "gateware",
         help="Pass arguments through to axon-peripheral-sdk inside the gateware container.",
@@ -149,7 +155,28 @@ def add_commands(subparsers: argparse._SubParsersAction):
         nargs=argparse.REMAINDER,
         help="SDK verb and its arguments (forwarded verbatim).",
     )
-    gateware_parser.set_defaults(func=gateware_cmd)
+    gateware_parser.set_defaults(func=gateware_cmd, _passthrough_extra=True)
+
+
+def parse_args_with_passthrough(parser: argparse.ArgumentParser, argv=None):
+    """Parse CLI args, folding leftover tokens into a pass-through command's argv.
+
+    Plain ``parser.parse_args`` rejects a leading option after
+    ``peripherals gateware`` (e.g. ``--install-completion``) because
+    ``argparse.REMAINDER`` only captures from the first positional onward. We
+    parse with ``parse_known_args`` instead and, when the selected command is
+    flagged ``_passthrough_extra`` (the gateware dispatcher), append the
+    leftover tokens to its ``argv`` so they reach the SDK verbatim. For every
+    other command, leftovers remain a hard error -- preserving argparse's usual
+    ``unrecognized arguments`` behavior and typo-catching.
+    """
+    args, extra = parser.parse_known_args(argv)
+    if extra:
+        if getattr(args, "_passthrough_extra", False):
+            args.argv = list(getattr(args, "argv", None) or []) + list(extra)
+        else:
+            parser.error("unrecognized arguments: " + " ".join(extra))
+    return args
 
 
 # ---------------------------------------------------------------------------
@@ -802,8 +829,9 @@ def gateware_cmd(args) -> None:
 
     Order of operations (mirrors the plan's AC-13 spec):
 
-    1. Resolve LM_LICENSE_FILE -> docker flags. Unset license short-circuits
-       before any docker invocation.
+    1. Resolve LM_LICENSE_FILE -> docker flags. Forwarded when set; when unset
+       the SDK runs WITHOUT license args (only Radiant verbs like `build` need
+       a license, and the SDK enforces that itself) -- no short-circuit here.
     2. Resolve the peripheral dir to ``os.getcwd()``. REMAINDER captures
        every token after ``gateware``, so a positional ``peripheral_dir``
        cannot coexist with the pass-through; cwd is the only sensible default.
@@ -813,11 +841,27 @@ def gateware_cmd(args) -> None:
     5. Delegate to :func:`gateware._gateware_passthrough` and ``sys.exit`` on
        its return code.
     """
+    # Forward the Radiant license when set, but do NOT require it: the
+    # pass-through must stay usable for verbs that don't touch Radiant
+    # (help/doctor/list-profiles/generate/validate/sim). Only `build` runs
+    # Radiant, and the SDK's build preflight owns the "license required" error.
+    #
+    # Unset -> run with no license args, silently. Set-but-bad (a file path
+    # that doesn't exist makes build_license_docker_args raise FileNotFoundError
+    # from Path.resolve(strict=True)) -> warn so the misconfig isn't masked, but
+    # still omit the args and continue, so non-Radiant verbs work and `build`
+    # fails SDK-side with clear guidance.
     try:
         license_args = gateware.build_license_docker_args(os.environ)
-    except LicenseUnsetError as exc:
-        console.print(f"[bold red]Error:[/bold red] {exc}")
-        sys.exit(1)
+    except LicenseUnsetError:
+        license_args = []
+    except FileNotFoundError as exc:
+        console.print(
+            f"[yellow]Warning:[/yellow] LM_LICENSE_FILE is set but its license "
+            f"file was not found ({exc}); continuing without a license. Radiant "
+            f"commands (e.g. `build`) will fail until it points at a real file."
+        )
+        license_args = []
 
     peripheral_dir = os.path.abspath(os.getcwd())
 

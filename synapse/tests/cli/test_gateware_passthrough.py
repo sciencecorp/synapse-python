@@ -170,9 +170,15 @@ def _dispatch(peripherals, argv_tail):
 
     The dispatcher handler always ends in ``sys.exit``; the caller is
     responsible for wrapping in ``pytest.raises(SystemExit)``.
+
+    Routes through ``parse_args_with_passthrough`` (the real ``main()`` parse
+    path) rather than ``parser.parse_args`` so leading SDK options like
+    ``--install-completion`` are folded into ``argv`` instead of rejected.
     """
     parser = _build_root_parser(peripherals)
-    args = parser.parse_args(["peripherals", "gateware", *argv_tail])
+    args = peripherals.parse_args_with_passthrough(
+        parser, ["peripherals", "gateware", *argv_tail]
+    )
     args.func(args)
 
 
@@ -202,10 +208,8 @@ def _tail_after_image_tag(argv, image_tag):
 # ---------------------------------------------------------------------------
 
 
-def test_case_1_no_arg_verb_doctor_forwarded_verbatim(
-    peripherals, tmp_path, monkeypatch
-):
-    """1: ``gateware doctor`` -> argv tail is exactly
+def test_no_arg_verb_doctor_forwarded_verbatim(peripherals, tmp_path, monkeypatch):
+    """``gateware doctor`` -> argv tail is exactly
     ``["axon-peripheral-sdk", "doctor"]``."""
     lic = _make_license_file(tmp_path)
     recorder, _pd = _install_dispatcher_stubs(
@@ -237,10 +241,10 @@ def test_case_1_no_arg_verb_doctor_forwarded_verbatim(
 # ---------------------------------------------------------------------------
 
 
-def test_case_2_long_flag_value_validate_forwarded_verbatim(
+def test_long_flag_value_validate_forwarded_verbatim(
     peripherals, tmp_path, monkeypatch
 ):
-    """2: ``gateware validate --project src/gateware`` -> tail is exactly
+    """``gateware validate --project src/gateware`` -> tail is exactly
     ``["axon-peripheral-sdk", "validate", "--project", "src/gateware"]``."""
     lic = _make_license_file(tmp_path)
     recorder, _ = _install_dispatcher_stubs(
@@ -266,10 +270,8 @@ def test_case_2_long_flag_value_validate_forwarded_verbatim(
 # ---------------------------------------------------------------------------
 
 
-def test_case_3_short_flag_with_double_colon_preserved(
-    peripherals, tmp_path, monkeypatch
-):
-    """3: ``gateware sim -k some::test_id`` -> the ``::`` is preserved
+def test_short_flag_with_double_colon_preserved(peripherals, tmp_path, monkeypatch):
+    """``gateware sim -k some::test_id`` -> the ``::`` is preserved
     byte-for-byte in argv form.
 
     Under shell-string concatenation the ``::`` might survive too, but a
@@ -303,8 +305,8 @@ def test_case_3_short_flag_with_double_colon_preserved(
 # ---------------------------------------------------------------------------
 
 
-def test_case_4_user_flag_matches_patched_uid_gid(peripherals, tmp_path, monkeypatch):
-    """4: ``--user <uid>:<gid>`` is built from os.getuid()/os.getgid()."""
+def test_user_flag_matches_patched_uid_gid(peripherals, tmp_path, monkeypatch):
+    """``--user <uid>:<gid>`` is built from os.getuid()/os.getgid()."""
     lic = _make_license_file(tmp_path)
     recorder, _ = _install_dispatcher_stubs(
         peripherals, monkeypatch, tmp_path, license_value=lic, uid=4242, gid=8484
@@ -327,10 +329,8 @@ def test_case_4_user_flag_matches_patched_uid_gid(peripherals, tmp_path, monkeyp
 # ---------------------------------------------------------------------------
 
 
-def test_case_5_bind_mount_is_peripheral_dir_abspath(
-    peripherals, tmp_path, monkeypatch
-):
-    """5: ``-v <abspath(peripheral_dir)>:/home/workspace`` is present."""
+def test_bind_mount_is_peripheral_dir_abspath(peripherals, tmp_path, monkeypatch):
+    """``-v <abspath(peripheral_dir)>:/home/workspace`` is present."""
     lic = _make_license_file(tmp_path)
     recorder, pd = _install_dispatcher_stubs(
         peripherals, monkeypatch, tmp_path, license_value=lic
@@ -358,8 +358,8 @@ def test_case_5_bind_mount_is_peripheral_dir_abspath(
 # ---------------------------------------------------------------------------
 
 
-def test_case_6_working_dir_is_home_workspace(peripherals, tmp_path, monkeypatch):
-    """6: ``-w /home/workspace`` is present in the docker argv."""
+def test_working_dir_is_home_workspace(peripherals, tmp_path, monkeypatch):
+    """``-w /home/workspace`` is present in the docker argv."""
     lic = _make_license_file(tmp_path)
     recorder, _ = _install_dispatcher_stubs(
         peripherals, monkeypatch, tmp_path, license_value=lic
@@ -469,10 +469,8 @@ def test_workdir_stays_root_when_no_manifest_even_if_gateware_subdir_present(
 # ---------------------------------------------------------------------------
 
 
-def test_case_7_subprocess_run_is_argv_list_no_shell(
-    peripherals, tmp_path, monkeypatch
-):
-    """7: ``subprocess.run`` first arg is a list; ``shell`` is not True."""
+def test_subprocess_run_is_argv_list_no_shell(peripherals, tmp_path, monkeypatch):
+    """``subprocess.run`` first arg is a list; ``shell`` is not True."""
     lic = _make_license_file(tmp_path)
     recorder, _ = _install_dispatcher_stubs(
         peripherals, monkeypatch, tmp_path, license_value=lic
@@ -498,8 +496,8 @@ def test_case_7_subprocess_run_is_argv_list_no_shell(
 # ---------------------------------------------------------------------------
 
 
-def test_case_8_floating_license_emits_env_no_bind(peripherals, tmp_path, monkeypatch):
-    """8: ``LM_LICENSE_FILE=27000@licenseserver`` -> only ``-e`` is added.
+def test_floating_license_emits_env_no_bind(peripherals, tmp_path, monkeypatch):
+    """``LM_LICENSE_FILE=27000@licenseserver`` -> only ``-e`` is added.
 
     No license-file ``-v`` bind-mount; the env var is forwarded as-is.
     """
@@ -534,10 +532,8 @@ def test_case_8_floating_license_emits_env_no_bind(peripherals, tmp_path, monkey
 # ---------------------------------------------------------------------------
 
 
-def test_case_9_file_path_license_emits_bind_and_env(
-    peripherals, tmp_path, monkeypatch
-):
-    """9: ``LM_LICENSE_FILE=<existing file>`` -> ``-v <real>:/opt/lattice/license.dat:ro``
+def test_file_path_license_emits_bind_and_env(peripherals, tmp_path, monkeypatch):
+    """``LM_LICENSE_FILE=<existing file>`` -> ``-v <real>:/opt/lattice/license.dat:ro``
     AND ``-e LM_LICENSE_FILE=/opt/lattice/license.dat``."""
     lic = _make_license_file(tmp_path)  # real on-disk file
     recorder, _ = _install_dispatcher_stubs(
@@ -573,59 +569,78 @@ def test_case_9_file_path_license_emits_bind_and_env(
 # ---------------------------------------------------------------------------
 
 
-def test_case_10_unset_license_does_not_invoke_subprocess(
-    peripherals, gateware_mod, tmp_path, monkeypatch, capsys
+def test_unset_license_still_runs_without_license_args(
+    peripherals, gateware_mod, tmp_path, monkeypatch
 ):
-    """10: ``LM_LICENSE_FILE`` unset -> dispatcher raises
-    ``LicenseUnsetError`` (or wraps it in SystemExit) AND subprocess.run is
-    never called.
+    """``LM_LICENSE_FILE`` unset -> the pass-through STILL runs the SDK,
+    forwarding no license ``-v``/``-e`` args.
 
-    AC-13's call sequence shows ``build_license_docker_args(os.environ)``
-    runs BEFORE any docker invocation; an unset license must therefore
-    short-circuit the dispatcher before subprocess.run is touched.
-
-    Strengthening: this case has to reach the LICENSE branch, not the
-    argparse-invalid-choice branch (which would also raise SystemExit(2)
-    today because the `gateware` subcommand isn't registered yet). We
-    assert the error message mentions ``LM_LICENSE_FILE`` and does NOT
-    contain argparse's ``invalid choice`` text, proving the dispatcher
-    actually reached the license-resolution step.
+    The license is only needed by verbs that actually run Radiant (``build``);
+    requiring it up front here would block ``help``/``doctor``/``generate``/
+    ``validate``/``sim``, none of which touch Radiant. So an unset license must
+    NOT short-circuit the dispatcher — the SDK's ``build`` preflight is the
+    single place that requires a license. We assert subprocess.run IS invoked
+    with the verb forwarded verbatim and no license mount/env present.
     """
     recorder, _ = _install_dispatcher_stubs(
         peripherals, monkeypatch, tmp_path, license_value=None
     )
 
-    with pytest.raises((SystemExit, gateware_mod.LicenseUnsetError)) as excinfo:
+    with pytest.raises(SystemExit):
         _dispatch(peripherals, ["doctor"])
 
-    # If the dispatcher chose to wrap in SystemExit, the exit code must be
-    # non-zero; raw LicenseUnsetError is also acceptable.
-    if isinstance(excinfo.value, SystemExit):
-        assert excinfo.value.code not in (0, None), (
-            f"unset license must exit non-zero; got code: {excinfo.value.code!r}"
-        )
-
-    assert recorder.calls == [], (
-        f"subprocess.run must NOT be invoked when LM_LICENSE_FILE is unset; "
-        f"got: {recorder.calls!r}"
+    assert len(recorder.calls) == 1, (
+        f"unset license must NOT block the pass-through; subprocess.run should "
+        f"still run the SDK; got: {recorder.calls!r}"
+    )
+    argv = _docker_argv(recorder.calls[0])
+    tail = _tail_after_image_tag(argv, "fake-gw:latest-amd64")
+    assert tail == ["axon-peripheral-sdk", "doctor"], (
+        f"verb must be forwarded verbatim; got: {tail!r}"
+    )
+    flat = " ".join(argv)
+    assert "LM_LICENSE_FILE" not in flat, (
+        f"no license env may be forwarded when unset; got: {argv!r}"
+    )
+    assert "/opt/lattice/license.dat" not in flat, (
+        f"no license bind-mount when unset; got: {argv!r}"
     )
 
-    # Anti-tautology: the error must come from the LICENSE branch, not
-    # argparse's invalid-choice path. argparse would emit "invalid choice"
-    # to stderr and never touch the license-resolution code.
-    captured = capsys.readouterr()
-    msg = (captured.out + captured.err + str(excinfo.value)).lower()
-    assert "invalid choice" not in msg, (
-        f"case 10 must reach the license-resolution branch, NOT argparse's "
-        f"invalid-choice path (which fires today because `gateware` is not "
-        f"yet a registered subcommand). The presence of 'invalid choice' "
-        f"means AC-13's subparser registration hasn't happened yet. "
-        f"got: {captured.out + captured.err!r} value={excinfo.value!r}"
+
+def test_set_but_missing_license_warns_and_still_runs(
+    peripherals, tmp_path, monkeypatch, capsys
+):
+    """LM_LICENSE_FILE set to a NON-EXISTENT file -> the pass-through warns (the
+    misconfig is surfaced, not silently masked) but STILL runs the SDK with no
+    license args.
+
+    build_license_docker_args raises FileNotFoundError (from
+    Path.resolve(strict=True)), NOT LicenseUnsetError, for a set-but-bad path;
+    the dispatcher must catch it too so non-Radiant verbs keep working (only
+    `build` fails SDK-side)."""
+    recorder, _ = _install_dispatcher_stubs(
+        peripherals,
+        monkeypatch,
+        tmp_path,
+        license_value=str(tmp_path / "does_not_exist.dat"),
     )
-    assert "lm_license_file" in msg, (
-        f"unset-license error must mention 'LM_LICENSE_FILE' so users know "
-        f"what env var to set; got: {captured.out + captured.err!r} "
-        f"value={excinfo.value!r}"
+
+    with pytest.raises(SystemExit):
+        _dispatch(peripherals, ["doctor"])
+
+    assert len(recorder.calls) == 1, (
+        "a set-but-missing license must NOT block the pass-through"
+    )
+    argv = _docker_argv(recorder.calls[0])
+    tail = _tail_after_image_tag(argv, "fake-gw:latest-amd64")
+    assert tail == ["axon-peripheral-sdk", "doctor"], f"verb verbatim; got: {tail!r}"
+    flat = " ".join(argv)
+    assert "LM_LICENSE_FILE" not in flat and "/opt/lattice/license.dat" not in flat, (
+        f"no license args forwarded for a bad path; got: {argv!r}"
+    )
+    out = capsys.readouterr().out
+    assert "Warning" in out and "LM_LICENSE_FILE" in out, (
+        f"a set-but-missing license must emit a warning; got: {out!r}"
     )
 
 
@@ -634,10 +649,8 @@ def test_case_10_unset_license_does_not_invoke_subprocess(
 # ---------------------------------------------------------------------------
 
 
-def test_case_11_gateware_help_consumed_by_argparse(
-    peripherals, tmp_path, monkeypatch, capsys
-):
-    """11: ``peripherals gateware --help`` -> argparse exits 0, prints
+def test_gateware_help_consumed_by_argparse(peripherals, tmp_path, monkeypatch, capsys):
+    """``peripherals gateware --help`` -> argparse exits 0, prints
     synapsectl-side gateware help; subprocess.run NOT called.
 
     AC-13's `--help` dichotomy: when `--help` is the FIRST token after
@@ -675,8 +688,8 @@ def test_case_11_gateware_help_consumed_by_argparse(
 # ---------------------------------------------------------------------------
 
 
-def test_case_12_verb_help_is_forwarded_to_sdk(peripherals, tmp_path, monkeypatch):
-    """12: ``peripherals gateware doctor --help`` -> REMAINDER captures
+def test_verb_help_is_forwarded_to_sdk(peripherals, tmp_path, monkeypatch):
+    """``peripherals gateware doctor --help`` -> REMAINDER captures
     BOTH tokens; subprocess.run IS called with the verb + --help in the tail.
 
     Companion to case 11: when at least one non-``--help`` positional
@@ -707,8 +720,8 @@ def test_case_12_verb_help_is_forwarded_to_sdk(peripherals, tmp_path, monkeypatc
 # ---------------------------------------------------------------------------
 
 
-def test_case_13_peripherals_help_lists_three_subcommands(peripherals, capsys):
-    """13: ``peripherals --help`` lists exactly ``build``, ``deploy``,
+def test_peripherals_help_lists_three_subcommands(peripherals, capsys):
+    """``peripherals --help`` lists exactly ``build``, ``deploy``,
     ``gateware`` as subcommand entries -- no hard-coded SDK verbs.
 
     Locks the contract that synapsectl does NOT enumerate SDK verbs at
@@ -766,10 +779,10 @@ def test_case_13_peripherals_help_lists_three_subcommands(peripherals, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_case_14_invalid_subcommand_is_argparse_error_no_subprocess(
+def test_invalid_subcommand_is_argparse_error_no_subprocess(
     peripherals, tmp_path, monkeypatch, capsys
 ):
-    """14: ``peripherals nonsense`` (NOT build/deploy/gateware) -> argparse
+    """``peripherals nonsense`` (NOT build/deploy/gateware) -> argparse
     ``SystemExit(2)`` with 'invalid choice' in stderr. subprocess.run NOT
     invoked.
 
@@ -824,8 +837,8 @@ def test_case_14_invalid_subcommand_is_argparse_error_no_subprocess(
 # ---------------------------------------------------------------------------
 
 
-def test_case_15_future_verb_forwarded_no_gate(peripherals, tmp_path, monkeypatch):
-    """15: ``gateware future-verb-2027`` -> REMAINDER captures the unknown
+def test_future_verb_forwarded_no_gate(peripherals, tmp_path, monkeypatch):
+    """``gateware future-verb-2027`` -> REMAINDER captures the unknown
     verb; subprocess.run IS called with the verb in the docker argv tail.
 
     This proves the dispatcher does NOT gate on a known-verb list -- a
@@ -901,9 +914,7 @@ def test_frontend_env_marker_forwarded_to_sdk(peripherals, tmp_path, monkeypatch
 # ---------------------------------------------------------------------------
 
 
-def test_case_16_non_posix_host_exits_no_subprocess(
-    peripherals, tmp_path, monkeypatch, capsys
-):
+def test_non_posix_host_exits_no_subprocess(peripherals, tmp_path, monkeypatch, capsys):
     """16 (AC-13 POSIX-only): ``os.getuid`` raises ``AttributeError`` ->
     dispatcher exits non-zero, subprocess.run NOT called.
 
@@ -946,4 +957,89 @@ def test_case_16_non_posix_host_exits_no_subprocess(
         f"non-POSIX error message must reference axon-peripheral-sdk as the "
         f"alternative invocation path; "
         f"got: {captured.out + captured.err!r} value={excinfo.value!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Leading SDK options (e.g. --install-completion) forwarded verbatim.
+# argparse.REMAINDER only captures from the first positional, so a leading
+# option is folded into argv by parse_args_with_passthrough instead of being
+# rejected as "unrecognized arguments".
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("opt", ["--install-completion", "--show-completion"])
+def test_leading_sdk_option_forwarded_verbatim(peripherals, tmp_path, monkeypatch, opt):
+    """``gateware --install-completion`` -> tail is exactly
+    ``["axon-peripheral-sdk", "--install-completion"]`` (no argparse rejection)."""
+    lic = _make_license_file(tmp_path)
+    recorder, _ = _install_dispatcher_stubs(
+        peripherals, monkeypatch, tmp_path, license_value=lic
+    )
+
+    with pytest.raises(SystemExit):
+        _dispatch(peripherals, [opt])
+
+    argv = _docker_argv(recorder.calls[0])
+    tail = _tail_after_image_tag(argv, "fake-gw:latest-amd64")
+    assert tail == ["axon-peripheral-sdk", opt], (
+        f"leading SDK option must be forwarded verbatim; got: {tail!r}"
+    )
+
+
+def test_non_passthrough_command_still_errors_on_unknown_args(peripherals):
+    """parse_args_with_passthrough preserves the strict error for non-gateware
+    commands -- only the gateware pass-through folds leftovers into argv."""
+    parser = _build_root_parser(peripherals)
+    with pytest.raises(SystemExit) as excinfo:
+        peripherals.parse_args_with_passthrough(
+            parser, ["peripherals", "build", "both", "--bogus-flag"]
+        )
+    assert excinfo.value.code == 2, (
+        "unknown args on a non-pass-through command must stay an argparse error"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pseudo-TTY allocation so the SDK's rich/typer output keeps its colors.
+# ---------------------------------------------------------------------------
+
+
+def test_tty_flag_added_when_stdout_is_tty(
+    peripherals, gateware_mod, tmp_path, monkeypatch
+):
+    """When stdout is a tty, ``-t`` is present right after ``docker run --rm``."""
+    lic = _make_license_file(tmp_path)
+    recorder, _ = _install_dispatcher_stubs(
+        peripherals, monkeypatch, tmp_path, license_value=lic
+    )
+    monkeypatch.setattr(gateware_mod, "_stdout_is_tty", lambda: True)
+
+    with pytest.raises(SystemExit):
+        _dispatch(peripherals, ["doctor"])
+
+    argv = _docker_argv(recorder.calls[0])
+    assert "-t" in argv, f"-t must be present when stdout is a tty; got: {argv!r}"
+    rm_idx = argv.index("--rm")
+    assert argv[rm_idx + 1] == "-t", (
+        f"-t must immediately follow 'docker run --rm'; got: {argv!r}"
+    )
+
+
+def test_tty_flag_absent_when_stdout_not_tty(
+    peripherals, gateware_mod, tmp_path, monkeypatch
+):
+    """When stdout is NOT a tty (pipe/CI), ``-t`` is omitted so output stays clean."""
+    lic = _make_license_file(tmp_path)
+    recorder, _ = _install_dispatcher_stubs(
+        peripherals, monkeypatch, tmp_path, license_value=lic
+    )
+    monkeypatch.setattr(gateware_mod, "_stdout_is_tty", lambda: False)
+
+    with pytest.raises(SystemExit):
+        _dispatch(peripherals, ["doctor"])
+
+    argv = _docker_argv(recorder.calls[0])
+    assert "-t" not in argv, (
+        f"-t must be omitted when stdout is not a tty; got: {argv!r}"
     )

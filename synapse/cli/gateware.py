@@ -179,6 +179,11 @@ def run_gateware_build(
     return chosen
 
 
+def _stdout_is_tty() -> bool:
+    """Whether our stdout is a terminal (indirection kept for monkeypatching)."""
+    return sys.stdout.isatty()
+
+
 def _gateware_passthrough(
     argv: Sequence[str],
     peripheral_dir: str,
@@ -222,10 +227,17 @@ def _gateware_passthrough(
     ):
         workdir = f"/home/workspace/{_GATEWARE_PROJECT_SUBDIR}"
 
+    # Allocate a pseudo-TTY when our own stdout is a terminal so the SDK's
+    # rich/typer output keeps its colors (inside a plain `docker run` pipe the
+    # SDK sees a non-tty and strips them). Guarded on isatty so piped/redirected
+    # output stays clean and CI never gets a TTY it can't attach.
+    tty_flag = ["-t"] if _stdout_is_tty() else []
+
     cmd = [
         "docker",
         "run",
         "--rm",
+        *tty_flag,
         "-v",
         f"{abs_peripheral_dir}:/home/workspace",
         "-w",
