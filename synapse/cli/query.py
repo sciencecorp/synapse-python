@@ -146,6 +146,7 @@ class StreamingQueryClient:
 
         self.console.log(
             f"[cyan] Starting impedance_stream with {electrode_count} electordes"
+            f" on peripheral {query.peripheral_id}"
         )
 
         measurements_received = 0

@@ -1,6 +1,7 @@
 {
   "query_type": "kImpedance",
   "impedance_query": {
+    "peripheral_id": 1,
     "electrode_ids": [116, 118]
   }
 }
