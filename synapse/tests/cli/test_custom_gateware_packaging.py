@@ -98,3 +98,11 @@ def test_read_usb_pid_rejects_non_int(gateware, tmp_path):
     _write_summary(bit, {"project": {"usb_pid": "4"}})
     with pytest.raises(ValueError):
         gateware.read_usb_pid(str(bit))
+
+
+def test_read_usb_pid_non_object_summary_raises(gateware, tmp_path):
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("bit")
+    _write_summary(bit, [1, 2])
+    with pytest.raises(ValueError):
+        gateware.read_usb_pid(str(bit))

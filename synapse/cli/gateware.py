@@ -213,7 +213,7 @@ def read_usb_pid(bit_path: str) -> int:
             summary = json.load(fp)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Bitstream summary {path} is not valid JSON: {exc}")
-    project = summary.get("project")
+    project = summary.get("project") if isinstance(summary, dict) else None
     usb_pid = project.get("usb_pid") if isinstance(project, dict) else None
     if not isinstance(usb_pid, int) or isinstance(usb_pid, bool):
         raise ValueError(
