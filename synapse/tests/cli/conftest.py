@@ -41,3 +41,31 @@ def _install_cli_import_stubs() -> None:
 
 
 _install_cli_import_stubs()
+
+
+def fake_fpm_run(dist_dir: str, calls: list):
+    """Return a ``subprocess.run`` stub that records argv and fakes fpm.
+
+    When the recorded argv contains ``fpm`` (the real call runs fpm inside a
+    docker image, so ``"fpm"`` is an element of the docker argv), drop a
+    ``<name>_<version>_arm64.deb`` into *dist_dir* so the caller's post-fpm
+    "did a .deb land?" verification passes. All other argv (docker clean,
+    runtime extraction) are recorded and succeed as no-ops.
+    """
+    import os
+    import subprocess as _subprocess
+
+    def run(argv, *args, **kwargs):
+        argv_list = list(argv) if isinstance(argv, (list, tuple)) else [argv]
+        calls.append(argv_list)
+        if "fpm" in argv_list:
+            name = argv_list[argv_list.index("-n") + 1]
+            version = argv_list[argv_list.index("-v") + 1]
+            os.makedirs(dist_dir, exist_ok=True)
+            with open(
+                os.path.join(dist_dir, f"{name}_{version}_arm64.deb"), "w"
+            ) as fh:
+                fh.write("fake-deb")
+        return _subprocess.CompletedProcess(argv_list, 0, b"", b"")
+
+    return run

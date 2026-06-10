@@ -134,3 +134,79 @@ def test_find_deb_package_no_match_returns_none(buildmod, tmp_path, capsys):
     (tmp_path / "other_0.1.0_arm64.deb").write_text("deb")
     assert buildmod.find_deb_package(str(tmp_path), "via") is None
     assert "could not find" in capsys.readouterr().out.lower()
+
+
+# ---------------------------------------------------------------------------
+# peripherals.build_gateware_deb
+# ---------------------------------------------------------------------------
+
+# synapse/tests/cli/ is a package (has __init__.py), so import the helper
+# package-qualified rather than relying on pytest's rootdir sys.path insert.
+from synapse.tests.cli.conftest import fake_fpm_run
+
+
+def _spy_mkdtemp(peripherals, monkeypatch, holder: list):
+    real_mkdtemp = peripherals.tempfile.mkdtemp
+
+    def spy(*args, **kwargs):
+        d = real_mkdtemp(*args, **kwargs)
+        holder.append(d)
+        return d
+
+    monkeypatch.setattr(peripherals.tempfile, "mkdtemp", spy)
+
+
+def test_build_gateware_deb_stages_bit_fragment_and_depends(
+    peripherals, tmp_path, monkeypatch
+):
+    pd = tmp_path / "plugin"
+    pd.mkdir()
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("BITSTREAM")
+    manifest = {"name": "scifi-my-chip", "version": "0.2.0"}
+
+    staging: list = []
+    _spy_mkdtemp(peripherals, monkeypatch, staging)
+    calls: list = []
+    dist_dir = os.path.join(str(pd), "dist")
+    monkeypatch.setattr(peripherals.subprocess, "run", fake_fpm_run(dist_dir, calls))
+
+    ok = peripherals.build_gateware_deb(
+        str(pd), manifest, bit_path=str(bit), usb_pid=4, version="0.2.0"
+    )
+    assert ok is True
+    assert len(staging) == 1
+
+    bit_dst = os.path.join(
+        staging[0], "opt", "scifi", "bitstreams", "custom", "scifi-my-chip.bit"
+    )
+    frag_dst = os.path.join(
+        staging[0], "opt", "scifi", "bitstreams", "custom",
+        "scifi-my-chip.manifest.json",
+    )
+    assert os.path.exists(bit_dst), "bitstream staged under custom/ as <name>.bit"
+    with open(frag_dst, "r", encoding="utf-8") as fh:
+        frag = json.load(fh)
+    assert frag == {
+        "name": "scifi-my-chip",
+        "usb_pid": 4,
+        "artifact": "custom/scifi-my-chip.bit",
+    }
+
+    fpm_call = next(c for c in calls if "fpm" in c)
+    assert fpm_call[fpm_call.index("-n") + 1] == "scifi-my-chip-gateware"
+    assert fpm_call[fpm_call.index("--depends") + 1] == "axonprobe-bitstreams"
+    # fpm input must be "opt" (not "."): postinstall.sh must NOT ship in the
+    # payload, or the driver and gateware debs would dpkg-conflict on
+    # /postinstall.sh.
+    assert fpm_call[-1] == "opt"
+
+
+def test_build_gateware_deb_missing_bit_errors(peripherals, tmp_path, capsys):
+    pd = tmp_path / "plugin"
+    pd.mkdir()
+    ok = peripherals.build_gateware_deb(
+        str(pd), {"name": "x"}, bit_path=str(tmp_path / "nope.bit"), usb_pid=1
+    )
+    assert ok is False
+    assert "not found" in capsys.readouterr().out.lower()

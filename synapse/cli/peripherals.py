@@ -17,6 +17,7 @@ Build and deploy mirror `synapsectl apps`:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -585,6 +586,153 @@ def build_peripheral_deb(
             return False
 
         console.print("[green]Plugin .deb created successfully![/green]")
+        return True
+
+    except subprocess.CalledProcessError as exc:
+        console.print(f"[bold red]Error:[/bold red] fpm failed: {exc}")
+        return False
+    # Leave staging_dir on disk for inspection if something goes wrong;
+    # /tmp eventually cleans itself.
+
+
+# Suffix appended to the plugin name to form the gateware package name.
+GATEWARE_DEB_SUFFIX = "-gateware"
+# Owns /opt/scifi/bitstreams and the canonical manifest the fragment's
+# relative `artifact` resolves against.
+BITSTREAMS_PACKAGE = "axonprobe-bitstreams"
+
+
+def build_gateware_deb(
+    peripheral_dir: str,
+    manifest: dict,
+    *,
+    bit_path: str,
+    usb_pid: int,
+    version: str = "0.1.0",
+) -> bool:
+    """Stage the custom bitstream + manifest fragment, then fpm a .deb.
+
+    Layout inside the ``<name>-gateware`` .deb:
+      /opt/scifi/bitstreams/custom/<name>.bit
+      /opt/scifi/bitstreams/custom/<name>.manifest.json
+
+    The fragment carries ``{"name", "usb_pid", "artifact"}`` with ``artifact``
+    relative to /opt/scifi/bitstreams (canonical-manifest convention);
+    scifi-probe-updater globs custom/*.manifest.json to list flashable
+    custom gateware per probe.
+    """
+    plugin_name = manifest["name"]
+    package_name = f"{plugin_name}{GATEWARE_DEB_SUFFIX}"
+
+    if not os.path.exists(bit_path):
+        console.print(
+            f"[bold red]Error:[/bold red] Gateware .bit not found at {bit_path}"
+        )
+        return False
+
+    staging_dir = tempfile.mkdtemp(prefix="synapse-gateware-package-")
+    try:
+        custom_dir = os.path.join(staging_dir, "opt", "scifi", "bitstreams", "custom")
+        os.makedirs(custom_dir, exist_ok=True)
+        shutil.copy2(bit_path, os.path.join(custom_dir, f"{plugin_name}.bit"))
+
+        fragment = {
+            "name": plugin_name,
+            "usb_pid": usb_pid,
+            "artifact": f"custom/{plugin_name}.bit",
+        }
+        fragment_path = os.path.join(custom_dir, f"{plugin_name}.manifest.json")
+        with open(fragment_path, "w", encoding="utf-8") as fp:
+            json.dump(fragment, fp, indent=2)
+            fp.write("\n")
+
+        postinstall_path = os.path.join(staging_dir, "postinstall.sh")
+        with open(postinstall_path, "w", encoding="utf-8") as fp:
+            fp.write(
+                "#!/bin/bash\n"
+                "set -e\n"
+                "echo 'Custom gateware installed. Flash probes from the device "
+                "UI (Probe Updates) or scifi-probe-updater.'\n"
+                "exit 0\n"
+            )
+        # Contents are embedded as the deb's postinst (via --after-install);
+        # dpkg makes maintainer scripts executable itself.
+        os.chmod(postinstall_path, 0o644)
+
+        dist_dir = os.path.join(peripheral_dir, "dist")
+        os.makedirs(dist_dir, exist_ok=True)
+
+        # Input is "opt" (not ".") so postinstall.sh is NOT packaged as a
+        # payload file — the driver deb installs alongside this one, and two
+        # packages shipping /postinstall.sh would dpkg-conflict.
+        fpm_args = [
+            "fpm",
+            "-s",
+            "dir",
+            "-t",
+            "deb",
+            "-n",
+            package_name,
+            "-f",
+            "-v",
+            version,
+            "-C",
+            "/pkg",
+            "--deb-no-default-config-files",
+            "--vendor",
+            "Science Corporation",
+            "--description",
+            "Synapse peripheral custom gateware",
+            "--architecture",
+            "arm64",
+            "--category",
+            SECTION_LABEL,
+            "--depends",
+            BITSTREAMS_PACKAGE,
+            "--after-install",
+            "/pkg/postinstall.sh",
+            "opt",
+        ]
+
+        console.print(
+            f"[yellow]Packaging gateware .deb (Docker image: {FPM_IMAGE}) ...[/yellow]"
+        )
+        docker_fpm_cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            "linux/amd64",
+            "--volume",
+            f"{staging_dir}:/pkg",
+            "--volume",
+            f"{dist_dir}:/out",
+            "-w",
+            "/out",
+            FPM_IMAGE,
+        ] + fpm_args
+
+        subprocess.run(
+            docker_fpm_cmd,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        deb_files = [
+            f
+            for f in os.listdir(dist_dir)
+            if f.startswith(f"{package_name}_") and f.endswith(".deb")
+        ]
+        if not deb_files:
+            console.print(
+                f"[bold red]Error:[/bold red] fpm completed but no {package_name} "
+                f".deb found in {dist_dir}."
+            )
+            return False
+
+        console.print("[green]Gateware .deb created successfully![/green]")
         return True
 
     except subprocess.CalledProcessError as exc:
