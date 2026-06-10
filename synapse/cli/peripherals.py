@@ -415,163 +415,159 @@ def build_peripheral_deb(
     so_filename = _expected_so_filename(manifest)
 
     staging_dir = tempfile.mkdtemp(prefix="synapse-peripheral-package-")
-    try:
-        # 1. Stage the plugin .so at /usr/lib/scifi/plugins/<name>.so
-        if not os.path.exists(so_path):
-            console.print(
-                f"[bold red]Error:[/bold red] Plugin .so not found at {so_path}"
-            )
-            return False
-        plugin_dst = os.path.join(staging_dir, "usr", "lib", "scifi", "plugins")
-        os.makedirs(plugin_dst, exist_ok=True)
-        shutil.copy2(so_path, os.path.join(plugin_dst, so_filename))
-
-        # 2. Stage libscifi-peripheral-sdk.so* from the builder image at /usr/lib.
-        # The SDK ships via `apt-get install scifi-peripheral-sdk` inside the
-        # builder Dockerfile, so it's the same source the linker resolved against
-        # at build time — guaranteeing ABI alignment for the plugin.
-        sdk_dst = os.path.join(staging_dir, "usr", "lib")
-        os.makedirs(sdk_dst, exist_ok=True)
-
-        # Prefer libs already produced on disk next to the .so (the driver
-        # builder may stage them there). Fall back to extracting from the
-        # builder image only if none are present locally.
-        local_libs_dir = os.path.join(peripheral_dir, "build", "aarch64")
-        local_libs = (
-            [
-                f
-                for f in os.listdir(local_libs_dir)
-                if f.startswith("libscifi-peripheral-sdk.so")
-            ]
-            if os.path.isdir(local_libs_dir)
-            else []
-        )
-        if local_libs:
-            for fname in local_libs:
-                shutil.copy2(
-                    os.path.join(local_libs_dir, fname),
-                    os.path.join(sdk_dst, fname),
-                )
-        else:
-            try:
-                image_tag = build_docker_image(
-                    peripheral_dir, "axon-peripheral", roles=["driver"]
-                )["driver"]
-            except (
-                subprocess.CalledProcessError,
-                FileNotFoundError,
-                KeyError,
-            ) as exc:
-                console.print(
-                    f"[bold red]Error:[/bold red] Failed to build driver Docker image: {exc}"
-                )
-                return False
-            arch_suffix = detect_arch()
-            platform_opt = (
-                "linux/arm64" if arch_suffix == "arm64" else "linux/amd64"
-            )
-
-            console.print(
-                f"[yellow]Extracting SDK runtime from Docker image [bold]{image_tag}[/bold]...[/yellow]"
-            )
-            extract_cmd = [
-                "docker",
-                "run",
-                "--rm",
-                "--platform",
-                platform_opt,
-                "-v",
-                f"{sdk_dst}:/out",
-                image_tag,
-                "/bin/bash",
-                "-c",
-                r"find /usr/lib -maxdepth 1 -name 'libscifi-peripheral-sdk.so*' -exec cp -a {} /out/ \;",
-            ]
-            try:
-                subprocess.run(extract_cmd, check=True)
-            except subprocess.CalledProcessError as exc:
-                console.print(
-                    f"[bold red]Error:[/bold red] Failed to extract SDK runtime: {exc}"
-                )
-                return False
-
-            sdk_files = [
-                f
-                for f in os.listdir(sdk_dst)
-                if f.startswith("libscifi-peripheral-sdk.so")
-            ]
-            if not sdk_files:
-                console.print(
-                    "[bold red]Error:[/bold red] SDK runtime libraries not found in builder image. "
-                    "Make sure your Dockerfile installs scifi-peripheral-sdk."
-                )
-                return False
-
-        # 3. Postinstall: nudge the user to restart scifi-server.
-        # Restarting automatically could interrupt an active recording session,
-        # so leave it manual.
-        postinstall_path = os.path.join(staging_dir, "postinstall.sh")
-        with open(postinstall_path, "w", encoding="utf-8") as fp:
-            fp.write(
-                "#!/bin/bash\n"
-                "set -e\n"
-                "echo 'Peripheral plugin installed. Restart scifi-server to load it.'\n"
-                "exit 0\n"
-            )
-        # 0o644 is sufficient: fpm embeds this file's *contents* as the .deb's
-        # postinst maintainer script (via --after-install), and dpkg makes
-        # maintainer scripts executable itself at install time. The staging
-        # file's own exec bit never reaches the package.
-        os.chmod(postinstall_path, 0o644)
-
-        # 4. Run fpm inside the cdrx/fpm-ubuntu image (matches apps' packaging path).
-        dist_dir = os.path.join(peripheral_dir, "dist")
-        os.makedirs(dist_dir, exist_ok=True)
-
-        fpm_args = [
-            "fpm",
-            "-s",
-            "dir",
-            "-t",
-            "deb",
-            "-n",
-            plugin_name,
-            "-f",
-            "-v",
-            version,
-            "-C",
-            "/pkg",
-            "--deb-no-default-config-files",
-            "--vendor",
-            "Science Corporation",
-            "--description",
-            "Synapse peripheral plugin",
-            "--architecture",
-            "arm64",
-            "--category",
-            SECTION_LABEL,
-            "--after-install",
-            "/pkg/postinstall.sh",
-            # Input is "usr" (not ".") so postinstall.sh is NOT packaged as a
-            # payload file — the -gateware deb installs alongside this one,
-            # and two packages shipping /postinstall.sh would dpkg-conflict.
-            "usr",
-        ]
-
-        console.print(
-            f"[yellow]Packaging plugin .deb (Docker image: {FPM_IMAGE}) ...[/yellow]"
-        )
-        if not _run_fpm(staging_dir, dist_dir, fpm_args, plugin_name):
-            return False
-
-        console.print("[green]Plugin .deb created successfully![/green]")
-        return True
-
-    except subprocess.CalledProcessError as exc:
-        console.print(f"[bold red]Error:[/bold red] fpm failed: {exc}")
-        return False
     # Leave staging_dir on disk for inspection if something goes wrong;
     # /tmp eventually cleans itself.
+
+    # 1. Stage the plugin .so at /usr/lib/scifi/plugins/<name>.so
+    if not os.path.exists(so_path):
+        console.print(
+            f"[bold red]Error:[/bold red] Plugin .so not found at {so_path}"
+        )
+        return False
+    plugin_dst = os.path.join(staging_dir, "usr", "lib", "scifi", "plugins")
+    os.makedirs(plugin_dst, exist_ok=True)
+    shutil.copy2(so_path, os.path.join(plugin_dst, so_filename))
+
+    # 2. Stage libscifi-peripheral-sdk.so* from the builder image at /usr/lib.
+    # The SDK ships via `apt-get install scifi-peripheral-sdk` inside the
+    # builder Dockerfile, so it's the same source the linker resolved against
+    # at build time — guaranteeing ABI alignment for the plugin.
+    sdk_dst = os.path.join(staging_dir, "usr", "lib")
+    os.makedirs(sdk_dst, exist_ok=True)
+
+    # Prefer libs already produced on disk next to the .so (the driver
+    # builder may stage them there). Fall back to extracting from the
+    # builder image only if none are present locally.
+    local_libs_dir = os.path.join(peripheral_dir, "build", "aarch64")
+    local_libs = (
+        [
+            f
+            for f in os.listdir(local_libs_dir)
+            if f.startswith("libscifi-peripheral-sdk.so")
+        ]
+        if os.path.isdir(local_libs_dir)
+        else []
+    )
+    if local_libs:
+        for fname in local_libs:
+            shutil.copy2(
+                os.path.join(local_libs_dir, fname),
+                os.path.join(sdk_dst, fname),
+            )
+    else:
+        try:
+            image_tag = build_docker_image(
+                peripheral_dir, "axon-peripheral", roles=["driver"]
+            )["driver"]
+        except (
+            subprocess.CalledProcessError,
+            FileNotFoundError,
+            KeyError,
+        ) as exc:
+            console.print(
+                f"[bold red]Error:[/bold red] Failed to build driver Docker image: {exc}"
+            )
+            return False
+        arch_suffix = detect_arch()
+        platform_opt = (
+            "linux/arm64" if arch_suffix == "arm64" else "linux/amd64"
+        )
+
+        console.print(
+            f"[yellow]Extracting SDK runtime from Docker image [bold]{image_tag}[/bold]...[/yellow]"
+        )
+        extract_cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            platform_opt,
+            "-v",
+            f"{sdk_dst}:/out",
+            image_tag,
+            "/bin/bash",
+            "-c",
+            r"find /usr/lib -maxdepth 1 -name 'libscifi-peripheral-sdk.so*' -exec cp -a {} /out/ \;",
+        ]
+        try:
+            subprocess.run(extract_cmd, check=True)
+        except subprocess.CalledProcessError as exc:
+            console.print(
+                f"[bold red]Error:[/bold red] Failed to extract SDK runtime: {exc}"
+            )
+            return False
+
+        sdk_files = [
+            f
+            for f in os.listdir(sdk_dst)
+            if f.startswith("libscifi-peripheral-sdk.so")
+        ]
+        if not sdk_files:
+            console.print(
+                "[bold red]Error:[/bold red] SDK runtime libraries not found in builder image. "
+                "Make sure your Dockerfile installs scifi-peripheral-sdk."
+            )
+            return False
+
+    # 3. Postinstall: nudge the user to restart scifi-server.
+    # Restarting automatically could interrupt an active recording session,
+    # so leave it manual.
+    postinstall_path = os.path.join(staging_dir, "postinstall.sh")
+    with open(postinstall_path, "w", encoding="utf-8") as fp:
+        fp.write(
+            "#!/bin/bash\n"
+            "set -e\n"
+            "echo 'Peripheral plugin installed. Restart scifi-server to load it.'\n"
+            "exit 0\n"
+        )
+    # 0o644 is sufficient: fpm embeds this file's *contents* as the .deb's
+    # postinst maintainer script (via --after-install), and dpkg makes
+    # maintainer scripts executable itself at install time. The staging
+    # file's own exec bit never reaches the package.
+    os.chmod(postinstall_path, 0o644)
+
+    # 4. Run fpm inside the cdrx/fpm-ubuntu image (matches apps' packaging path).
+    dist_dir = os.path.join(peripheral_dir, "dist")
+    os.makedirs(dist_dir, exist_ok=True)
+
+    fpm_args = [
+        "fpm",
+        "-s",
+        "dir",
+        "-t",
+        "deb",
+        "-n",
+        plugin_name,
+        "-f",
+        "-v",
+        version,
+        "-C",
+        "/pkg",
+        "--deb-no-default-config-files",
+        "--vendor",
+        "Science Corporation",
+        "--description",
+        "Synapse peripheral plugin",
+        "--architecture",
+        "arm64",
+        "--category",
+        SECTION_LABEL,
+        "--after-install",
+        "/pkg/postinstall.sh",
+        # Input is "usr" (not ".") so postinstall.sh is NOT packaged as a
+        # payload file — the -gateware deb installs alongside this one,
+        # and two packages shipping /postinstall.sh would dpkg-conflict.
+        "usr",
+    ]
+
+    console.print(
+        f"[yellow]Packaging plugin .deb (Docker image: {FPM_IMAGE}) ...[/yellow]"
+    )
+    if not _run_fpm(staging_dir, dist_dir, fpm_args, plugin_name):
+        return False
+
+    console.print("[green]Plugin .deb created successfully![/green]")
+    return True
 
 
 # Suffix appended to the plugin name to form the gateware package name.
@@ -610,83 +606,79 @@ def build_gateware_deb(
         return False
 
     staging_dir = tempfile.mkdtemp(prefix="synapse-gateware-package-")
-    try:
-        custom_dir = os.path.join(staging_dir, "opt", "scifi", "bitstreams", "custom")
-        os.makedirs(custom_dir, exist_ok=True)
-        shutil.copy2(bit_path, os.path.join(custom_dir, f"{plugin_name}.bit"))
-
-        fragment = {
-            "name": plugin_name,
-            "usb_pid": usb_pid,
-            "artifact": f"custom/{plugin_name}.bit",
-        }
-        fragment_path = os.path.join(custom_dir, f"{plugin_name}.manifest.json")
-        with open(fragment_path, "w", encoding="utf-8") as fp:
-            json.dump(fragment, fp, indent=2)
-            fp.write("\n")
-
-        postinstall_path = os.path.join(staging_dir, "postinstall.sh")
-        with open(postinstall_path, "w", encoding="utf-8") as fp:
-            fp.write(
-                "#!/bin/bash\n"
-                "set -e\n"
-                "echo 'Custom gateware installed. Flash probes from the device "
-                "UI (Probe Updates) or scifi-probe-updater.'\n"
-                "exit 0\n"
-            )
-        # Contents are embedded as the deb's postinst (via --after-install);
-        # dpkg makes maintainer scripts executable itself.
-        os.chmod(postinstall_path, 0o644)
-
-        dist_dir = os.path.join(peripheral_dir, "dist")
-        os.makedirs(dist_dir, exist_ok=True)
-
-        # Input is "opt" (not ".") so postinstall.sh is NOT packaged as a
-        # payload file — the driver deb installs alongside this one, and two
-        # packages shipping /postinstall.sh would dpkg-conflict.
-        fpm_args = [
-            "fpm",
-            "-s",
-            "dir",
-            "-t",
-            "deb",
-            "-n",
-            package_name,
-            "-f",
-            "-v",
-            version,
-            "-C",
-            "/pkg",
-            "--deb-no-default-config-files",
-            "--vendor",
-            "Science Corporation",
-            "--description",
-            "Synapse peripheral custom gateware",
-            "--architecture",
-            "arm64",
-            "--category",
-            SECTION_LABEL,
-            "--depends",
-            BITSTREAMS_PACKAGE,
-            "--after-install",
-            "/pkg/postinstall.sh",
-            "opt",
-        ]
-
-        console.print(
-            f"[yellow]Packaging gateware .deb (Docker image: {FPM_IMAGE}) ...[/yellow]"
-        )
-        if not _run_fpm(staging_dir, dist_dir, fpm_args, package_name):
-            return False
-
-        console.print("[green]Gateware .deb created successfully![/green]")
-        return True
-
-    except subprocess.CalledProcessError as exc:
-        console.print(f"[bold red]Error:[/bold red] fpm failed: {exc}")
-        return False
     # Leave staging_dir on disk for inspection if something goes wrong;
     # /tmp eventually cleans itself.
+
+    custom_dir = os.path.join(staging_dir, "opt", "scifi", "bitstreams", "custom")
+    os.makedirs(custom_dir, exist_ok=True)
+    shutil.copy2(bit_path, os.path.join(custom_dir, f"{plugin_name}.bit"))
+
+    fragment = {
+        "name": plugin_name,
+        "usb_pid": usb_pid,
+        "artifact": f"custom/{plugin_name}.bit",
+    }
+    fragment_path = os.path.join(custom_dir, f"{plugin_name}.manifest.json")
+    with open(fragment_path, "w", encoding="utf-8") as fp:
+        json.dump(fragment, fp, indent=2)
+        fp.write("\n")
+
+    postinstall_path = os.path.join(staging_dir, "postinstall.sh")
+    with open(postinstall_path, "w", encoding="utf-8") as fp:
+        fp.write(
+            "#!/bin/bash\n"
+            "set -e\n"
+            "echo 'Custom gateware installed. Flash probes from the device "
+            "UI (Probe Updates) or scifi-probe-updater.'\n"
+            "exit 0\n"
+        )
+    # Contents are embedded as the deb's postinst (via --after-install);
+    # dpkg makes maintainer scripts executable itself.
+    os.chmod(postinstall_path, 0o644)
+
+    dist_dir = os.path.join(peripheral_dir, "dist")
+    os.makedirs(dist_dir, exist_ok=True)
+
+    # Input is "opt" (not ".") so postinstall.sh is NOT packaged as a
+    # payload file — the driver deb installs alongside this one, and two
+    # packages shipping /postinstall.sh would dpkg-conflict.
+    fpm_args = [
+        "fpm",
+        "-s",
+        "dir",
+        "-t",
+        "deb",
+        "-n",
+        package_name,
+        "-f",
+        "-v",
+        version,
+        "-C",
+        "/pkg",
+        "--deb-no-default-config-files",
+        "--vendor",
+        "Science Corporation",
+        "--description",
+        "Synapse peripheral custom gateware",
+        "--architecture",
+        "arm64",
+        "--category",
+        SECTION_LABEL,
+        "--depends",
+        BITSTREAMS_PACKAGE,
+        "--after-install",
+        "/pkg/postinstall.sh",
+        "opt",
+    ]
+
+    console.print(
+        f"[yellow]Packaging gateware .deb (Docker image: {FPM_IMAGE}) ...[/yellow]"
+    )
+    if not _run_fpm(staging_dir, dist_dir, fpm_args, package_name):
+        return False
+
+    console.print("[green]Gateware .deb created successfully![/green]")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -913,7 +905,12 @@ def deploy_cmd(args) -> None:
         return
 
     for deb in deb_packages:
-        deploy_package(args.uri, deb)
+        if not deploy_package(args.uri, deb):
+            console.print(
+                f"[bold red]Error:[/bold red] Deploy failed for {deb}; "
+                "skipping any remaining packages."
+            )
+            return
 
 
 # ---------------------------------------------------------------------------

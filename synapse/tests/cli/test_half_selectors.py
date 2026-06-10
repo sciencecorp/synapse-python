@@ -183,6 +183,7 @@ def _install_common_stubs(peripherals, monkeypatch, tmp_path, *, fake_bit=None):
 
     def fake_deploy_package(uri, deb_path):
         recorders.deploy_calls.append((uri, deb_path))
+        return True
 
     monkeypatch.setattr(peripherals, "build_peripheral_so", fake_build_so)
     monkeypatch.setattr(peripherals, "build_peripheral_deb", fake_build_deb)
@@ -928,6 +929,27 @@ def test_case_Q_deploy_both_streams_two_debs(peripherals, tmp_path, monkeypatch)
     assert uris == ["10.0.0.1", "10.0.0.1"]
     assert paths[0].endswith("intan_rhd2132_arm64.deb")
     assert paths[1].endswith("intan_rhd2132-gateware_arm64.deb")
+
+
+def test_case_Q2_deploy_stops_after_failed_driver_deploy(
+    peripherals, tmp_path, monkeypatch, capsys
+):
+    """Q2: if the driver deb deploy fails, the gateware deb is NOT streamed."""
+    pd = _make_peripheral_dir(tmp_path)
+    recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
+
+    def failing_deploy(uri, deb_path):
+        recorders.deploy_calls.append((uri, deb_path))
+        return False
+
+    monkeypatch.setattr(peripherals, "deploy_package", failing_deploy)
+
+    peripherals.deploy_cmd(_deploy_args(pd, half="both", uri="10.0.0.1"))
+
+    assert len(recorders.deploy_calls) == 1, (
+        "gateware deb must not stream after the driver deploy failed"
+    )
+    assert "deploy failed" in capsys.readouterr().out.lower()
 
 
 def test_case_R_gateware_build_aborts_without_usb_pid(
