@@ -199,26 +199,6 @@ def _expected_so_filename(manifest: dict) -> str:
     return f"{manifest['name']}.so"
 
 
-def _expected_bit_filename(manifest: dict) -> str:
-    """Return the basename of the .bit this plugin produces.
-
-    Reads manifest.install.gateware_target if present (e.g.
-    "/usr/lib/scifi/gateware/via.bit" → "via.bit"),
-    otherwise falls back to the .so stem (e.g.
-    "via.so" → "via.bit"), which itself falls back
-    to "<manifest.name>.bit" when install.target is also absent.
-
-    An empty-string gateware_target is treated as "not set" and falls
-    through to the .so-stem fallback.
-    """
-    install = manifest.get("install") or {}
-    target = install.get("gateware_target")
-    if target:
-        return os.path.basename(target)
-    so_stem = os.path.splitext(_expected_so_filename(manifest))[0]
-    return f"{so_stem}.bit"
-
-
 # ---------------------------------------------------------------------------
 # Build .so
 # ---------------------------------------------------------------------------
@@ -364,144 +344,170 @@ def build_peripheral_so(
 # ---------------------------------------------------------------------------
 
 
+def _run_fpm(
+    staging_dir: str, dist_dir: str, fpm_args: list, package_name: str
+) -> bool:
+    """Run fpm inside the packaging image and verify a .deb landed.
+
+    *fpm_args* is the complete fpm argv (starting with ``"fpm"``). Returns
+    False (with console errors, including fpm's stderr) on failure.
+    """
+    docker_fpm_cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "--platform",
+        "linux/amd64",
+        "-v",
+        f"{staging_dir}:/pkg",
+        "-v",
+        f"{dist_dir}:/out",
+        "-w",
+        "/out",
+        FPM_IMAGE,
+    ] + fpm_args
+
+    try:
+        subprocess.run(
+            docker_fpm_cmd,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        console.print(f"[bold red]Error:[/bold red] fpm failed: {exc}")
+        if exc.stderr:
+            console.print(exc.stderr)
+        return False
+
+    deb_files = [
+        f
+        for f in os.listdir(dist_dir)
+        if f.startswith(f"{package_name}_") and f.endswith(".deb")
+    ]
+    if not deb_files:
+        console.print(
+            f"[bold red]Error:[/bold red] fpm completed but no {package_name} "
+            f".deb found in {dist_dir}."
+        )
+        return False
+    return True
+
+
 def build_peripheral_deb(
     peripheral_dir: str,
     manifest: dict,
     *,
-    bit_path: Optional[str] = None,
-    so_path: Optional[str] = None,
+    so_path: str,
     version: str = "0.1.0",
 ) -> bool:
-    """Stage plugin artifacts + SDK runtime, then run fpm to produce a .deb.
+    """Stage the driver .so + SDK runtime, then run fpm to produce a .deb.
 
-    Layout inside the .deb (entries present per the supplied paths):
-      /usr/lib/scifi/plugins/<so_basename>     ← when so_path is provided
-      /usr/lib/scifi/gateware/<bit_basename>   ← when bit_path is provided
-      /usr/lib/libscifi-peripheral-sdk.so.*    ← only when so_path is provided
+    Layout inside the .deb:
+      /usr/lib/scifi/plugins/<so_basename>
+      /usr/lib/libscifi-peripheral-sdk.so.*
 
     Section is set to `synapse-peripherals` so scifi-server's DeployApp gate
     accepts it (sibling accept-list entry next to `synapse-apps`).
     """
-    if so_path is None and bit_path is None:
-        console.print(
-            "[bold red]Error:[/bold red] build_peripheral_deb requires at least one of "
-            "so_path or bit_path."
-        )
-        return False
-
     plugin_name = manifest["name"]
     so_filename = _expected_so_filename(manifest)
-    bit_filename = _expected_bit_filename(manifest)
 
     staging_dir = tempfile.mkdtemp(prefix="synapse-peripheral-package-")
     try:
         # 1. Stage the plugin .so at /usr/lib/scifi/plugins/<name>.so
-        if so_path is not None:
-            if not os.path.exists(so_path):
-                console.print(
-                    f"[bold red]Error:[/bold red] Plugin .so not found at {so_path}"
-                )
-                return False
-            plugin_dst = os.path.join(staging_dir, "usr", "lib", "scifi", "plugins")
-            os.makedirs(plugin_dst, exist_ok=True)
-            shutil.copy2(so_path, os.path.join(plugin_dst, so_filename))
-
-        # 1b. Stage the gateware .bit at /usr/lib/scifi/gateware/<name>.bit
-        if bit_path is not None:
-            if not os.path.exists(bit_path):
-                console.print(
-                    f"[bold red]Error:[/bold red] Gateware .bit not found at {bit_path}"
-                )
-                return False
-            gw_dst = os.path.join(staging_dir, "usr", "lib", "scifi", "gateware")
-            os.makedirs(gw_dst, exist_ok=True)
-            shutil.copy2(bit_path, os.path.join(gw_dst, bit_filename))
+        if not os.path.exists(so_path):
+            console.print(
+                f"[bold red]Error:[/bold red] Plugin .so not found at {so_path}"
+            )
+            return False
+        plugin_dst = os.path.join(staging_dir, "usr", "lib", "scifi", "plugins")
+        os.makedirs(plugin_dst, exist_ok=True)
+        shutil.copy2(so_path, os.path.join(plugin_dst, so_filename))
 
         # 2. Stage libscifi-peripheral-sdk.so* from the builder image at /usr/lib.
-        # Only when the driver half is part of this .deb — a gateware-only
-        # package has no need for the C++ runtime. The SDK ships via
-        # `apt-get install scifi-peripheral-sdk` inside the builder Dockerfile,
-        # so it's the same source the linker resolved against at build time —
-        # guaranteeing ABI alignment for the plugin.
-        if so_path is not None:
-            sdk_dst = os.path.join(staging_dir, "usr", "lib")
-            os.makedirs(sdk_dst, exist_ok=True)
+        # The SDK ships via `apt-get install scifi-peripheral-sdk` inside the
+        # builder Dockerfile, so it's the same source the linker resolved against
+        # at build time — guaranteeing ABI alignment for the plugin.
+        sdk_dst = os.path.join(staging_dir, "usr", "lib")
+        os.makedirs(sdk_dst, exist_ok=True)
 
-            # Prefer libs already produced on disk next to the .so (the driver
-            # builder may stage them there). Fall back to extracting from the
-            # builder image only if none are present locally.
-            local_libs_dir = os.path.join(peripheral_dir, "build", "aarch64")
-            local_libs = (
-                [
-                    f
-                    for f in os.listdir(local_libs_dir)
-                    if f.startswith("libscifi-peripheral-sdk.so")
-                ]
-                if os.path.isdir(local_libs_dir)
-                else []
-            )
-            if local_libs:
-                for fname in local_libs:
-                    shutil.copy2(
-                        os.path.join(local_libs_dir, fname),
-                        os.path.join(sdk_dst, fname),
-                    )
-            else:
-                try:
-                    image_tag = build_docker_image(
-                        peripheral_dir, "axon-peripheral", roles=["driver"]
-                    )["driver"]
-                except (
-                    subprocess.CalledProcessError,
-                    FileNotFoundError,
-                    KeyError,
-                ) as exc:
-                    console.print(
-                        f"[bold red]Error:[/bold red] Failed to build driver Docker image: {exc}"
-                    )
-                    return False
-                arch_suffix = detect_arch()
-                platform_opt = (
-                    "linux/arm64" if arch_suffix == "arm64" else "linux/amd64"
+        # Prefer libs already produced on disk next to the .so (the driver
+        # builder may stage them there). Fall back to extracting from the
+        # builder image only if none are present locally.
+        local_libs_dir = os.path.join(peripheral_dir, "build", "aarch64")
+        local_libs = (
+            [
+                f
+                for f in os.listdir(local_libs_dir)
+                if f.startswith("libscifi-peripheral-sdk.so")
+            ]
+            if os.path.isdir(local_libs_dir)
+            else []
+        )
+        if local_libs:
+            for fname in local_libs:
+                shutil.copy2(
+                    os.path.join(local_libs_dir, fname),
+                    os.path.join(sdk_dst, fname),
                 )
-
+        else:
+            try:
+                image_tag = build_docker_image(
+                    peripheral_dir, "axon-peripheral", roles=["driver"]
+                )["driver"]
+            except (
+                subprocess.CalledProcessError,
+                FileNotFoundError,
+                KeyError,
+            ) as exc:
                 console.print(
-                    f"[yellow]Extracting SDK runtime from Docker image [bold]{image_tag}[/bold]...[/yellow]"
+                    f"[bold red]Error:[/bold red] Failed to build driver Docker image: {exc}"
                 )
-                extract_cmd = [
-                    "docker",
-                    "run",
-                    "--rm",
-                    "--platform",
-                    platform_opt,
-                    "-v",
-                    f"{sdk_dst}:/out",
-                    image_tag,
-                    "/bin/bash",
-                    "-c",
-                    r"find /usr/lib -maxdepth 1 -name 'libscifi-peripheral-sdk.so*' -exec cp -a {} /out/ \;",
-                ]
-                try:
-                    subprocess.run(extract_cmd, check=True)
-                except subprocess.CalledProcessError as exc:
-                    console.print(
-                        f"[bold red]Error:[/bold red] Failed to extract SDK runtime: {exc}"
-                    )
-                    return False
+                return False
+            arch_suffix = detect_arch()
+            platform_opt = (
+                "linux/arm64" if arch_suffix == "arm64" else "linux/amd64"
+            )
 
-                sdk_files = [
-                    f
-                    for f in os.listdir(sdk_dst)
-                    if f.startswith("libscifi-peripheral-sdk.so")
-                ]
-                if not sdk_files:
-                    console.print(
-                        "[bold red]Error:[/bold red] SDK runtime libraries not found in builder image. "
-                        "Make sure your Dockerfile installs scifi-peripheral-sdk."
-                    )
-                    return False
+            console.print(
+                f"[yellow]Extracting SDK runtime from Docker image [bold]{image_tag}[/bold]...[/yellow]"
+            )
+            extract_cmd = [
+                "docker",
+                "run",
+                "--rm",
+                "--platform",
+                platform_opt,
+                "-v",
+                f"{sdk_dst}:/out",
+                image_tag,
+                "/bin/bash",
+                "-c",
+                r"find /usr/lib -maxdepth 1 -name 'libscifi-peripheral-sdk.so*' -exec cp -a {} /out/ \;",
+            ]
+            try:
+                subprocess.run(extract_cmd, check=True)
+            except subprocess.CalledProcessError as exc:
+                console.print(
+                    f"[bold red]Error:[/bold red] Failed to extract SDK runtime: {exc}"
+                )
+                return False
 
-        # 4. Postinstall: nudge the user to restart scifi-server.
+            sdk_files = [
+                f
+                for f in os.listdir(sdk_dst)
+                if f.startswith("libscifi-peripheral-sdk.so")
+            ]
+            if not sdk_files:
+                console.print(
+                    "[bold red]Error:[/bold red] SDK runtime libraries not found in builder image. "
+                    "Make sure your Dockerfile installs scifi-peripheral-sdk."
+                )
+                return False
+
+        # 3. Postinstall: nudge the user to restart scifi-server.
         # Restarting automatically could interrupt an active recording session,
         # so leave it manual.
         postinstall_path = os.path.join(staging_dir, "postinstall.sh")
@@ -518,7 +524,7 @@ def build_peripheral_deb(
         # file's own exec bit never reaches the package.
         os.chmod(postinstall_path, 0o644)
 
-        # 5. Run fpm inside the cdrx/fpm-ubuntu image (matches apps' packaging path).
+        # 4. Run fpm inside the cdrx/fpm-ubuntu image (matches apps' packaging path).
         dist_dir = os.path.join(peripheral_dir, "dist")
         os.makedirs(dist_dir, exist_ok=True)
 
@@ -546,43 +552,16 @@ def build_peripheral_deb(
             SECTION_LABEL,
             "--after-install",
             "/pkg/postinstall.sh",
-            ".",
+            # Input is "usr" (not ".") so postinstall.sh is NOT packaged as a
+            # payload file — the -gateware deb installs alongside this one,
+            # and two packages shipping /postinstall.sh would dpkg-conflict.
+            "usr",
         ]
 
         console.print(
             f"[yellow]Packaging plugin .deb (Docker image: {FPM_IMAGE}) ...[/yellow]"
         )
-        docker_fpm_cmd = [
-            "docker",
-            "run",
-            "--rm",
-            "--platform",
-            "linux/amd64",
-            "-v",
-            f"{staging_dir}:/pkg",
-            "-v",
-            f"{dist_dir}:/out",
-            "-w",
-            "/out",
-            FPM_IMAGE,
-        ] + fpm_args
-
-        subprocess.run(
-            docker_fpm_cmd,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        # Verify a .deb actually landed.
-        deb_files = [
-            f for f in os.listdir(dist_dir) if f.endswith(".deb") and "arm64" in f
-        ]
-        if not deb_files:
-            console.print(
-                f"[bold red]Error:[/bold red] fpm completed but no .deb found in {dist_dir}."
-            )
+        if not _run_fpm(staging_dir, dist_dir, fpm_args, plugin_name):
             return False
 
         console.print("[green]Plugin .deb created successfully![/green]")
@@ -697,39 +676,7 @@ def build_gateware_deb(
         console.print(
             f"[yellow]Packaging gateware .deb (Docker image: {FPM_IMAGE}) ...[/yellow]"
         )
-        docker_fpm_cmd = [
-            "docker",
-            "run",
-            "--rm",
-            "--platform",
-            "linux/amd64",
-            "-v",
-            f"{staging_dir}:/pkg",
-            "-v",
-            f"{dist_dir}:/out",
-            "-w",
-            "/out",
-            FPM_IMAGE,
-        ] + fpm_args
-
-        subprocess.run(
-            docker_fpm_cmd,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        deb_files = [
-            f
-            for f in os.listdir(dist_dir)
-            if f.startswith(f"{package_name}_") and f.endswith(".deb")
-        ]
-        if not deb_files:
-            console.print(
-                f"[bold red]Error:[/bold red] fpm completed but no {package_name} "
-                f".deb found in {dist_dir}."
-            )
+        if not _run_fpm(staging_dir, dist_dir, fpm_args, package_name):
             return False
 
         console.print("[green]Gateware .deb created successfully![/green]")
@@ -794,6 +741,77 @@ def _run_gateware_half(peripheral_dir: str) -> Optional[str]:
         return None
 
 
+def _gateware_usb_pid(bit_path: str) -> Optional[int]:
+    """Read the probe USB product id from the bitstream's summary, or None."""
+    try:
+        return gateware.read_usb_pid(bit_path)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[bold red]Error:[/bold red] {exc}")
+        return None
+
+
+def _build_debs(
+    peripheral_dir: str, manifest: dict, half: str, *, clean: bool = False
+) -> Optional[list]:
+    """Build the requested halves; return built .deb paths or None on failure.
+
+    Driver deb first, then the -gateware deb — deploy streams them in this
+    order so the plugin lands before its gateware shows up as flashable.
+    """
+    plugin_name = manifest["name"]
+    version = manifest.get("version", "0.1.0")
+    do_driver = half in ("driver", "both")
+    do_gateware = half in ("gateware", "both")
+    dist_dir = os.path.join(peripheral_dir, "dist")
+    debs: list = []
+
+    if do_gateware and clean:
+        try:
+            gateware_image_tag = build_docker_image(
+                peripheral_dir, "axon-peripheral", roles=["gateware"]
+            )["gateware"]
+        except (subprocess.CalledProcessError, FileNotFoundError, KeyError) as exc:
+            console.print(
+                f"[bold red]Error:[/bold red] Failed to build gateware Docker image: {exc}"
+            )
+            return None
+        _clean_gateware_tree(peripheral_dir, gateware_image_tag)
+
+    if do_driver:
+        so_filename = _expected_so_filename(manifest)
+        if not build_peripheral_so(
+            peripheral_dir, plugin_name, so_filename, clean=clean
+        ):
+            return None
+        so_path = os.path.join(peripheral_dir, "build/aarch64", so_filename)
+        if not build_peripheral_deb(
+            peripheral_dir, manifest, so_path=so_path, version=version
+        ):
+            return None
+        deb = find_deb_package(dist_dir, plugin_name)
+        if deb is None:
+            return None
+        debs.append(deb)
+
+    if do_gateware:
+        bit_path = _run_gateware_half(peripheral_dir)
+        if bit_path is None:
+            return None
+        usb_pid = _gateware_usb_pid(bit_path)
+        if usb_pid is None:
+            return None
+        if not build_gateware_deb(
+            peripheral_dir, manifest, bit_path=bit_path, usb_pid=usb_pid, version=version
+        ):
+            return None
+        deb = find_deb_package(dist_dir, f"{plugin_name}{GATEWARE_DEB_SUFFIX}")
+        if deb is None:
+            return None
+        debs.append(deb)
+
+    return debs
+
+
 # ---------------------------------------------------------------------------
 # `peripherals build`
 # ---------------------------------------------------------------------------
@@ -811,64 +829,25 @@ def build_cmd(args) -> None:
     if not manifest:
         return
 
-    plugin_name = manifest["name"]
-    version = manifest.get("version", "0.1.0")
-    so_filename = _expected_so_filename(manifest)
-    half = getattr(args, "half", "both")
-    do_driver = half in ("driver", "both")
-    do_gateware = half in ("gateware", "both")
-
     console.print(
-        f"[bold]Building peripheral plugin:[/bold] [yellow]{plugin_name}[/yellow] "
-        f"(artifact: [cyan]{so_filename}[/cyan])"
+        f"[bold]Building peripheral plugin:[/bold] [yellow]{manifest['name']}[/yellow]"
     )
 
-    if do_gateware and args.clean:
-        try:
-            gateware_image_tag = build_docker_image(
-                peripheral_dir, "axon-peripheral", roles=["gateware"]
-            )["gateware"]
-        except (subprocess.CalledProcessError, FileNotFoundError, KeyError) as exc:
-            console.print(
-                f"[bold red]Error:[/bold red] Failed to build gateware Docker image: {exc}"
-            )
-            return
-        _clean_gateware_tree(peripheral_dir, gateware_image_tag)
-
-    so_path: Optional[str] = None
-    bit_path: Optional[str] = None
-
-    if do_driver:
-        if not build_peripheral_so(
-            peripheral_dir, plugin_name, so_filename, clean=args.clean
-        ):
-            return
-        so_path = os.path.join(peripheral_dir, "build/aarch64", so_filename)
-
-    if do_gateware:
-        bit_path = _run_gateware_half(peripheral_dir)
-        if bit_path is None:
-            return
-
-    if not build_peripheral_deb(
-        peripheral_dir,
-        manifest,
-        so_path=so_path,
-        bit_path=bit_path,
-        version=version,
-    ):
+    debs = _build_debs(
+        peripheral_dir, manifest, getattr(args, "half", "both"), clean=args.clean
+    )
+    if debs is None:
         return
 
-    deb_path = find_deb_package(os.path.join(peripheral_dir, "dist"))
-    if not deb_path:
-        return
-
+    package_lines = "\n".join(f"Package: [bold]{d}[/bold]" for d in debs)
     console.print(
         Panel(
             f"[green]Build complete![/green]\n\n"
-            f"Plugin: [bold]{plugin_name}[/bold] v{version}\n"
-            f"Package: [bold]{deb_path}[/bold]\n\n"
-            f"Deploy with: [cyan]synapsectl -u <device> peripherals deploy .[/cyan]",
+            f"Plugin: [bold]{manifest['name']}[/bold] "
+            f"v{manifest.get('version', '0.1.0')}\n"
+            f"{package_lines}\n\n"
+            f"Deploy with: [cyan]synapsectl -u <device> peripherals deploy "
+            f"{getattr(args, 'half', 'both')} .[/cyan]",
             title="Build Successful",
             border_style="green",
             box=box.DOUBLE,
@@ -898,14 +877,14 @@ def deploy_cmd(args) -> None:
                 f"[yellow]Warning: --{half} ignored when --package is provided; "
                 f"deploying the supplied .deb as-is.[/yellow]"
             )
-        deb_package: Optional[str] = os.path.abspath(args.package)
-        if not os.path.exists(deb_package):
+        deb_packages = [os.path.abspath(args.package)]
+        if not os.path.exists(deb_packages[0]):
             console.print(
-                f"[bold red]Error:[/bold red] Provided package not found: {deb_package}"
+                f"[bold red]Error:[/bold red] Provided package not found: {deb_packages[0]}"
             )
             return
         console.print(
-            f"[bold]Deploying pre-built plugin:[/bold] [yellow]{os.path.basename(deb_package)}[/yellow]"
+            f"[bold]Deploying pre-built plugin:[/bold] [yellow]{os.path.basename(deb_packages[0])}[/yellow]"
         )
     else:
         if not ensure_docker():
@@ -916,50 +895,25 @@ def deploy_cmd(args) -> None:
         if not manifest:
             return
 
-        plugin_name = manifest["name"]
-        version = manifest.get("version", "0.1.0")
-        so_filename = _expected_so_filename(manifest)
-        do_driver = half in ("driver", "both")
-        do_gateware = half in ("gateware", "both")
-
         console.print(
-            f"[bold]Deploying peripheral plugin:[/bold] [yellow]{plugin_name}[/yellow]"
+            f"[bold]Deploying peripheral plugin:[/bold] [yellow]{manifest['name']}[/yellow]"
         )
 
-        so_path: Optional[str] = None
-        bit_path: Optional[str] = None
-
-        if do_driver:
-            if not build_peripheral_so(peripheral_dir, plugin_name, so_filename):
-                return
-            so_path = os.path.join(peripheral_dir, "build/aarch64", so_filename)
-
-        if do_gateware:
-            bit_path = _run_gateware_half(peripheral_dir)
-            if bit_path is None:
-                return
-
-        if not build_peripheral_deb(
-            peripheral_dir,
-            manifest,
-            so_path=so_path,
-            bit_path=bit_path,
-            version=version,
-        ):
+        debs = _build_debs(peripheral_dir, manifest, half)
+        if debs is None:
             return
-
-        deb_package = find_deb_package(os.path.join(peripheral_dir, "dist"))
-        if not deb_package:
-            return
+        deb_packages = debs
 
     if not args.uri:
         console.print(
-            "[yellow]No URI provided. Package created but not deployed.[/yellow]"
+            "[yellow]No URI provided. Package(s) created but not deployed.[/yellow]"
         )
-        console.print(f"[green]Package available at:[/green] {deb_package}")
+        for deb in deb_packages:
+            console.print(f"[green]Package available at:[/green] {deb}")
         return
 
-    deploy_package(args.uri, deb_package)
+    for deb in deb_packages:
+        deploy_package(args.uri, deb)
 
 
 # ---------------------------------------------------------------------------
