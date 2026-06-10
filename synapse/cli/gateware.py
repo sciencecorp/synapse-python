@@ -10,6 +10,7 @@ invocation, the :func:`run_gateware_build` runner that wraps
 from __future__ import annotations
 
 import glob
+import json
 import os
 import re
 import subprocess
@@ -177,6 +178,49 @@ def run_gateware_build(
             f"[yellow]Multiple bitstreams matched; selected newest: {chosen}[/yellow]"
         )
     return chosen
+
+
+def summary_path_for(bit_path: str) -> str:
+    """Return the same-stem ``.summary.json`` path for *bit_path*.
+
+    The gateware build emits ``sdk_<x>.summary.json`` next to each
+    ``sdk_<x>.bit``.
+    """
+    stem, _ = os.path.splitext(bit_path)
+    return f"{stem}.summary.json"
+
+
+def read_usb_pid(bit_path: str) -> int:
+    """Return ``['project']['usb_pid']`` from the bitstream's summary JSON.
+
+    The custom-bitstream manifest fragment needs the probe USB product id the
+    gateware targets; the gateware toolchain records it in the build summary.
+
+    Raises:
+      FileNotFoundError: no ``<stem>.summary.json`` exists next to *bit_path*.
+      ValueError: the summary is not valid JSON, or ``project.usb_pid`` is
+        missing or not an integer.
+    """
+    path = summary_path_for(bit_path)
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"Bitstream summary not found: {path}. The gateware build is "
+            "expected to emit a .summary.json next to each .bit; rebuild "
+            "with an axon-peripheral-sdk that records project.usb_pid."
+        )
+    with open(path, "r", encoding="utf-8") as fp:
+        try:
+            summary = json.load(fp)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Bitstream summary {path} is not valid JSON: {exc}")
+    project = summary.get("project")
+    usb_pid = project.get("usb_pid") if isinstance(project, dict) else None
+    if not isinstance(usb_pid, int) or isinstance(usb_pid, bool):
+        raise ValueError(
+            f"Bitstream summary {path} is missing ['project']['usb_pid'] "
+            "(expected an integer USB product id)"
+        )
+    return usb_pid
 
 
 def _stdout_is_tty() -> bool:
