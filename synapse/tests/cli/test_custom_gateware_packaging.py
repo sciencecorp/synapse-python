@@ -136,6 +136,15 @@ def test_find_deb_package_no_match_returns_none(buildmod, tmp_path, capsys):
     assert "could not find" in capsys.readouterr().out.lower()
 
 
+def test_find_deb_package_version_anchored_prefix_skips_stale(buildmod, tmp_path):
+    # dist/ accumulates old versions; callers anchor the prefix with the
+    # version so a stale 0.1.0 deb never shadows the fresh 0.2.0 build.
+    (tmp_path / "via_0.1.0_arm64.deb").write_text("deb")
+    (tmp_path / "via_0.2.0_arm64.deb").write_text("deb")
+    found = buildmod.find_deb_package(str(tmp_path), "via_0.2.0")
+    assert found is not None and found.endswith(os.sep + "via_0.2.0_arm64.deb")
+
+
 # ---------------------------------------------------------------------------
 # peripherals.build_gateware_deb
 # ---------------------------------------------------------------------------

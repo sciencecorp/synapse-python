@@ -780,7 +780,7 @@ def _build_debs(
             peripheral_dir, manifest, so_path=so_path, version=version
         ):
             return None
-        deb = find_deb_package(dist_dir, plugin_name)
+        deb = find_deb_package(dist_dir, f"{plugin_name}_{version}")
         if deb is None:
             return None
         debs.append(deb)
@@ -796,7 +796,7 @@ def _build_debs(
             peripheral_dir, manifest, bit_path=bit_path, usb_pid=usb_pid, version=version
         ):
             return None
-        deb = find_deb_package(dist_dir, f"{plugin_name}{GATEWARE_DEB_SUFFIX}")
+        deb = find_deb_package(dist_dir, f"{plugin_name}{GATEWARE_DEB_SUFFIX}_{version}")
         if deb is None:
             return None
         debs.append(deb)

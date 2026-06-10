@@ -197,7 +197,8 @@ def _install_common_stubs(peripherals, monkeypatch, tmp_path, *, fake_bit=None):
     monkeypatch.setattr(peripherals.subprocess, "run", fake_subprocess_run)
     monkeypatch.setattr(peripherals, "deploy_package", fake_deploy_package)
 
-    # find_deb_package is called per deb with the package name.
+    # find_deb_package is called per deb with the version-anchored prefix
+    # (e.g. "intan_rhd2132_0.1.0"), so the returned path carries the version.
     monkeypatch.setattr(
         peripherals,
         "find_deb_package",
@@ -914,7 +915,13 @@ def test_case_O_gateware_only_build_emits_only_gateware_deb(
 
 
 def test_case_Q_deploy_both_streams_two_debs(peripherals, tmp_path, monkeypatch):
-    """Q: ``deploy both`` makes two DeployApp calls — driver deb first."""
+    """Q: ``deploy both`` makes two DeployApp calls — driver deb first.
+
+    _build_debs anchors the find_deb_package lookup on ``<name>_<version>``
+    (not just ``<name>``) so stale debs accumulated in dist/ across version
+    bumps can never shadow the freshly built one.  The fixture manifest version
+    is "0.1.0", so both paths must carry that version component.
+    """
     pd = _make_peripheral_dir(tmp_path)
     recorders = _install_common_stubs(peripherals, monkeypatch, tmp_path)
 
@@ -924,8 +931,8 @@ def test_case_Q_deploy_both_streams_two_debs(peripherals, tmp_path, monkeypatch)
     uris = [u for u, _ in recorders.deploy_calls]
     paths = [p for _, p in recorders.deploy_calls]
     assert uris == ["10.0.0.1", "10.0.0.1"]
-    assert paths[0].endswith("intan_rhd2132_arm64.deb")
-    assert paths[1].endswith("intan_rhd2132-gateware_arm64.deb")
+    assert paths[0].endswith("intan_rhd2132_0.1.0_arm64.deb")
+    assert paths[1].endswith("intan_rhd2132-gateware_0.1.0_arm64.deb")
 
 
 def test_case_Q2_deploy_stops_after_failed_driver_deploy(
