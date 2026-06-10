@@ -70,7 +70,6 @@ def _make_peripheral_dir(
     name: str = "intan_rhd2132",
     with_gateware: bool = True,
     with_install_target: bool = True,
-    with_gateware_target: bool = False,
 ):
     """Create a fake peripheral directory tree.
 
@@ -93,8 +92,6 @@ def _make_peripheral_dir(
     install: dict = {}
     if with_install_target:
         install["target"] = f"/usr/lib/scifi/plugins/{name}.so"
-    if with_gateware_target:
-        install["gateware_target"] = f"/usr/lib/scifi/gateware/{name}.bit"
     manifest = {"name": name, "version": "0.1.0"}
     if install:
         manifest["install"] = install
@@ -983,6 +980,3 @@ def test_case_R_gateware_build_aborts_without_usb_pid(
     assert "summary" in out
 
 
-# ---------------------------------------------------------------------------
-# (end of file — P1-P7 / _expected_bit_filename tests removed with that helper)
-# ---------------------------------------------------------------------------
