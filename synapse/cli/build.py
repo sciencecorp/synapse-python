@@ -635,15 +635,22 @@ def package_app(app_dir: str, app_name: str) -> bool:
     return build_deb_package(app_dir, app_name)
 
 
-def find_deb_package(dist_dir: str) -> str | None:
-    """Return the path to the .deb generated in *app_dir* or *None*."""
-    for file in os.listdir(dist_dir):
-        if file.endswith(".deb"):
-            return os.path.join(dist_dir, file)
+def find_deb_package(dist_dir: str, package_name: str | None = None) -> str | None:
+    """Return the path to a .deb generated in *dist_dir* or ``None``.
 
-    console.print(
-        f"[bold red]Error:[/bold red] Could not find .deb package in {dist_dir}"
-    )
+    With *package_name*, only ``<package_name>_*.deb`` matches — a peripheral
+    dist/ holds both the driver and the ``-gateware`` deb, and the driver name
+    is a strict prefix of the gateware name.
+    """
+    for file in sorted(os.listdir(dist_dir)):
+        if not file.endswith(".deb"):
+            continue
+        if package_name is not None and not file.startswith(f"{package_name}_"):
+            continue
+        return os.path.join(dist_dir, file)
+
+    wanted = f"{package_name} .deb package" if package_name else ".deb package"
+    console.print(f"[bold red]Error:[/bold red] Could not find {wanted} in {dist_dir}")
     return None
 
 

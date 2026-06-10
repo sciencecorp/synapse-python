@@ -106,3 +106,31 @@ def test_read_usb_pid_non_object_summary_raises(gateware, tmp_path):
     _write_summary(bit, [1, 2])
     with pytest.raises(ValueError):
         gateware.read_usb_pid(str(bit))
+
+
+# ---------------------------------------------------------------------------
+# build.find_deb_package package_name filtering
+# ---------------------------------------------------------------------------
+
+
+def test_find_deb_package_unfiltered_back_compat(buildmod, tmp_path):
+    (tmp_path / "anything_0.1.0_arm64.deb").write_text("deb")
+    found = buildmod.find_deb_package(str(tmp_path))
+    assert found is not None and found.endswith("anything_0.1.0_arm64.deb")
+
+
+def test_find_deb_package_filters_by_package_name(buildmod, tmp_path):
+    # A peripheral dist/ now holds BOTH debs; the driver name is a strict
+    # prefix of the gateware name, so matching must be on "<name>_".
+    (tmp_path / "via_0.1.0_arm64.deb").write_text("deb")
+    (tmp_path / "via-gateware_0.1.0_arm64.deb").write_text("deb")
+    driver = buildmod.find_deb_package(str(tmp_path), "via")
+    gw = buildmod.find_deb_package(str(tmp_path), "via-gateware")
+    assert driver is not None and driver.endswith(os.sep + "via_0.1.0_arm64.deb")
+    assert gw is not None and gw.endswith(os.sep + "via-gateware_0.1.0_arm64.deb")
+
+
+def test_find_deb_package_no_match_returns_none(buildmod, tmp_path, capsys):
+    (tmp_path / "other_0.1.0_arm64.deb").write_text("deb")
+    assert buildmod.find_deb_package(str(tmp_path), "via") is None
+    assert "could not find" in capsys.readouterr().out.lower()
