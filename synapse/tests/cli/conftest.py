@@ -59,8 +59,9 @@ def fake_fpm_run(dist_dir: str, calls: list):
         argv_list = list(argv) if isinstance(argv, (list, tuple)) else [argv]
         calls.append(argv_list)
         if "fpm" in argv_list:
-            name = argv_list[argv_list.index("-n") + 1]
-            version = argv_list[argv_list.index("-v") + 1]
+            fpm_argv = argv_list[argv_list.index("fpm"):]
+            name = fpm_argv[fpm_argv.index("-n") + 1]
+            version = fpm_argv[fpm_argv.index("-v") + 1]
             os.makedirs(dist_dir, exist_ok=True)
             with open(
                 os.path.join(dist_dir, f"{name}_{version}_arm64.deb"), "w"
