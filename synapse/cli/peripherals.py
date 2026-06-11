@@ -583,21 +583,23 @@ def build_gateware_deb(
     *,
     bit_path: str,
     usb_pid: int,
-    display_name: Optional[str] = None,
+    bitstream_name: Optional[str] = None,
     version: str = "0.1.0",
 ) -> bool:
     """Stage the custom bitstream + manifest fragment, then fpm a .deb.
 
     Layout inside the ``<name>-gateware`` .deb:
-      /opt/scifi/bitstreams/custom/<name>.bit
-      /opt/scifi/bitstreams/custom/<name>.manifest.json
+      /opt/scifi/bitstreams/custom/<plugin_name>.bit
+      /opt/scifi/bitstreams/custom/<plugin_name>.manifest.json
 
-    The fragment carries ``{"name", "display_name", "usb_pid", "artifact"}``
-    with ``artifact`` relative to /opt/scifi/bitstreams
-    (canonical-manifest convention); ``display_name`` is the human-facing
-    label from the gateware project (falls back to ``name`` when absent);
-    scifi-probe-updater globs custom/*.manifest.json to list flashable
-    custom gateware per probe.
+    The fragment carries ``{"name", "usb_pid", "artifact"}`` with ``artifact``
+    relative to /opt/scifi/bitstreams (canonical-manifest convention). Files
+    and the deb package are keyed on the plugin name for dpkg uniqueness;
+    ``name`` in the fragment is the flashable identity shown in the UI and
+    passed to ``scifi-probe-updater update --name`` — taken from the gateware
+    project (``bitstream_name``) and falling back to the plugin name when no
+    project name was available. scifi-probe-updater globs
+    custom/*.manifest.json to list flashable custom gateware per probe.
     """
     plugin_name = manifest["name"]
     package_name = f"{plugin_name}{GATEWARE_DEB_SUFFIX}"
@@ -617,8 +619,11 @@ def build_gateware_deb(
     shutil.copy2(bit_path, os.path.join(custom_dir, f"{plugin_name}.bit"))
 
     fragment = {
-        "name": plugin_name,
-        "display_name": display_name or plugin_name,
+        # The flashable identity shown in the UI and passed to
+        # `scifi-probe-updater update --name`: the gateware project's name
+        # (from the build summary), not the plugin's. Files and the deb
+        # stay keyed on the plugin name for dpkg uniqueness.
+        "name": bitstream_name or plugin_name,
         "usb_pid": usb_pid,
         "artifact": f"custom/{plugin_name}.bit",
     }
@@ -796,10 +801,9 @@ def _build_debs(
         usb_pid = _gateware_usb_pid(bit_path)
         if usb_pid is None:
             return None
-        display_name = gateware.read_project_name(bit_path)
         if not build_gateware_deb(
             peripheral_dir, manifest, bit_path=bit_path, usb_pid=usb_pid,
-            display_name=display_name, version=version
+            bitstream_name=gateware.read_project_name(bit_path), version=version
         ):
             return None
         deb = find_deb_package(dist_dir, f"{plugin_name}{GATEWARE_DEB_SUFFIX}_{version}")

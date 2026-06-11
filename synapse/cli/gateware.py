@@ -261,10 +261,13 @@ def read_usb_pid(bit_path: str) -> int:
 def read_project_name(bit_path: str) -> str | None:
     """Return ``['project']['name']`` from the bitstream's summary JSON, or None.
 
-    Used as the human-facing display name for custom gateware; unlike
-    :func:`read_usb_pid` this is best-effort — a missing or malformed value
-    degrades to None (callers fall back to the plugin name) rather than
-    failing the build.
+    This IS the custom bitstream's identity — the name placed in the manifest
+    fragment's ``name`` field and passed to ``scifi-probe-updater update
+    --name``. Unlike :func:`read_usb_pid` this is best-effort: a missing or
+    malformed value degrades to None and the call site falls back to the plugin
+    name. The name should be unique per device and systemd-instance-safe
+    (``[A-Za-z0-9._-]``) since it rides in
+    ``scifi-probe-update-custom@<serial>:<name>``.
     """
     path = summary_path_for(bit_path)
     try:

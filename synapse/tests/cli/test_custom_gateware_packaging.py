@@ -340,7 +340,7 @@ def test_build_gateware_deb_stages_bit_fragment_and_depends(
     monkeypatch.setattr(peripherals.subprocess, "run", fake_fpm_run(dist_dir, calls))
 
     ok = peripherals.build_gateware_deb(
-        str(pd), manifest, bit_path=str(bit), usb_pid=4, display_name="my-gateware",
+        str(pd), manifest, bit_path=str(bit), usb_pid=4, bitstream_name="my-gateware",
         version="0.2.0"
     )
     assert ok is True
@@ -353,12 +353,11 @@ def test_build_gateware_deb_stages_bit_fragment_and_depends(
         staging[0], "opt", "scifi", "bitstreams", "custom",
         "scifi-my-chip.manifest.json",
     )
-    assert os.path.exists(bit_dst), "bitstream staged under custom/ as <name>.bit"
+    assert os.path.exists(bit_dst), "bitstream staged under custom/ as <plugin_name>.bit"
     with open(frag_dst, "r", encoding="utf-8") as fh:
         frag = json.load(fh)
     assert frag == {
-        "name": "scifi-my-chip",
-        "display_name": "my-gateware",
+        "name": "my-gateware",
         "usb_pid": 4,
         "artifact": "custom/scifi-my-chip.bit",
     }
@@ -372,10 +371,10 @@ def test_build_gateware_deb_stages_bit_fragment_and_depends(
     assert fpm_call[-1] == "opt"
 
 
-def test_build_gateware_deb_omit_display_name_falls_back_to_plugin_name(
+def test_build_gateware_deb_omit_bitstream_name_falls_back_to_plugin_name(
     peripherals, tmp_path, monkeypatch
 ):
-    """Omitting display_name causes the fragment to use the plugin name as display_name."""
+    """Omitting bitstream_name causes the fragment's 'name' to use the plugin name."""
     pd = tmp_path / "plugin"
     pd.mkdir()
     bit = tmp_path / "sdk_x.bit"
@@ -398,7 +397,7 @@ def test_build_gateware_deb_omit_display_name_falls_back_to_plugin_name(
     )
     with open(frag_dst, "r", encoding="utf-8") as fh:
         frag = json.load(fh)
-    assert frag["display_name"] == "scifi-my-chip"
+    assert frag == {"name": "scifi-my-chip", "usb_pid": 4, "artifact": "custom/scifi-my-chip.bit"}
 
 
 def test_build_gateware_deb_missing_bit_errors(peripherals, tmp_path, capsys):
