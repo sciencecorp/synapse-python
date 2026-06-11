@@ -169,7 +169,7 @@ def _install_common_stubs(peripherals, monkeypatch, tmp_path, *, fake_bit=None):
             bit = str(path)
         stem, _ = os.path.splitext(bit)
         with open(f"{stem}.summary.json", "w", encoding="utf-8") as fh:
-            json.dump({"project": {"name": "gateware", "usb_pid": 4}}, fh)
+            json.dump({"usb_pid": "0x0004", "project": {"name": "gateware"}}, fh)
         return bit
 
     def fake_subprocess_run(argv, *args, **kwargs):

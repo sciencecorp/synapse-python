@@ -196,27 +196,30 @@ def read_usb_pid(bit_path: str) -> int:
     The custom-bitstream manifest fragment needs the probe USB product id the
     gateware targets; the gateware toolchain records it in the build summary.
 
-    Two summary shapes are accepted:
+    Only the **axon-peripheral-sdk 1.0.2+** shape is accepted:
 
-    - **SDK < 1.0.2** (legacy): ``{"project": {"usb_pid": 4, ...}, ...}``
-    - **SDK 1.0.2+**: ``{"usb_pid": "0x000B", "project": {"name": "..."}, ...}``
+    .. code-block:: json
 
-    In both cases ``project.usb_pid`` is preferred when present; the top-level
-    ``usb_pid`` is the fallback.  Both integer and hex-string values (e.g.
-    ``"0x000B"`` or ``"11"``) are accepted and normalised to ``int``.
+        {"usb_pid": "0x000B", "project": {"name": "..."}, ...}
+
+    ``usb_pid`` MUST be at the **top level** of the summary object and MUST be
+    a **hex string** (e.g. ``"0x000B"`` or ``"000B"``).  Any non-string value
+    (int, bool, null, object) is rejected.  ``project.usb_pid`` is no longer
+    consulted.
 
     Raises:
       FileNotFoundError: no ``<stem>.summary.json`` exists next to *bit_path*.
-      ValueError: the summary is not valid JSON; ``usb_pid`` is absent from
-        both locations; or the value cannot be interpreted as a uint16 in the
-        range 1..0xFFFF (0 and negatives are rejected; booleans are rejected).
+      ValueError: the summary is not valid JSON; not a JSON object; top-level
+        ``usb_pid`` is absent or is not a hex string; or the parsed value is
+        outside the range 1..0xFFFF.
     """
     path = summary_path_for(bit_path)
     if not os.path.exists(path):
         raise FileNotFoundError(
             f"Bitstream summary not found: {path}. The gateware build is "
             "expected to emit a .summary.json next to each .bit; rebuild "
-            "with an axon-peripheral-sdk that records project.usb_pid."
+            "with an axon-peripheral-sdk that emits a top-level usb_pid "
+            'hex string (e.g. "0x000B").'
         )
     with open(path, "r", encoding="utf-8") as fp:
         try:
@@ -224,29 +227,33 @@ def read_usb_pid(bit_path: str) -> int:
         except json.JSONDecodeError as exc:
             raise ValueError(f"Bitstream summary {path} is not valid JSON: {exc}")
 
-    project = summary.get("project") if isinstance(summary, dict) else None
-    raw = None
-    if isinstance(project, dict) and "usb_pid" in project:
-        raw = project["usb_pid"]
-    elif isinstance(summary, dict) and "usb_pid" in summary:
-        # axon-peripheral-sdk 1.0.2 emits usb_pid at the top level (as a hex
-        # string, e.g. "0x000B"); prefer project.usb_pid when both exist.
-        raw = summary["usb_pid"]
+    if not isinstance(summary, dict):
+        raise ValueError(
+            f"Bitstream summary {path} is not a JSON object; "
+            "expected a top-level usb_pid hex string (e.g. \"0x000B\")."
+        )
 
-    usb_pid = None
-    if isinstance(raw, int) and not isinstance(raw, bool):
-        usb_pid = raw
-    elif isinstance(raw, str):
-        try:
-            usb_pid = int(raw, 0)  # accepts "0x000B" and "11"
-        except ValueError:
-            usb_pid = None
+    raw = summary.get("usb_pid")
 
-    if usb_pid is None or not (0 < usb_pid <= 0xFFFF):
+    if not isinstance(raw, str):
         raise ValueError(
             f"Bitstream summary {path} has no usable usb_pid "
-            "(looked at ['project']['usb_pid'] and top-level ['usb_pid']; "
-            "expected an integer or hex-string USB product id in 1..0xFFFF)"
+            "(top-level ['usb_pid'] must be a hex string, e.g. \"0x000B\"; "
+            f"got {raw!r})"
+        )
+
+    try:
+        usb_pid = int(raw, 16)
+    except ValueError:
+        raise ValueError(
+            f"Bitstream summary {path} usb_pid {raw!r} is not a valid hex "
+            "string (expected e.g. \"0x000B\")"
+        )
+
+    if not (0 < usb_pid <= 0xFFFF):
+        raise ValueError(
+            f"Bitstream summary {path} usb_pid {raw!r} ({usb_pid}) is out of "
+            "range; expected a hex string in 1..0xFFFF (e.g. \"0x000B\")"
         )
     return usb_pid
 

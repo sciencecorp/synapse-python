@@ -60,9 +60,26 @@ def test_summary_path_for_same_stem(gateware, tmp_path):
 
 
 def test_read_usb_pid_happy_path(gateware, tmp_path):
+    """SDK 1.0.2 shape: top-level hex string, project without usb_pid."""
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(bit, {"project": {"name": "gateware", "usb_pid": 4}})
+    _write_summary(
+        bit,
+        {
+            "schema_version": 1,
+            "sdk_version": "1.0.2",
+            "usb_pid": "0x000B",
+            "project": {"name": "gateware", "git_sha": "e6890a3"},
+        },
+    )
+    assert gateware.read_usb_pid(str(bit)) == 11
+
+
+def test_read_usb_pid_happy_path_0x0004(gateware, tmp_path):
+    """Top-level hex string "0x0004" -> 4."""
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("bit")
+    _write_summary(bit, {"usb_pid": "0x0004", "project": {"name": "gateware"}})
     assert gateware.read_usb_pid(str(bit)) == 4
 
 
@@ -93,10 +110,10 @@ def test_read_usb_pid_missing_key_raises(gateware, tmp_path):
 
 
 def test_read_usb_pid_rejects_bool(gateware, tmp_path):
-    """Booleans must be rejected even though bool is a subclass of int."""
+    """Booleans at top level must be rejected (bool is not a hex string)."""
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(bit, {"project": {"usb_pid": True}})
+    _write_summary(bit, {"usb_pid": True, "project": {"name": "gateware"}})
     with pytest.raises(ValueError) as exc_info:
         gateware.read_usb_pid(str(bit))
     assert "usb_pid" in str(exc_info.value)
@@ -111,101 +128,90 @@ def test_read_usb_pid_non_object_summary_raises(gateware, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# New shapes / validation — SDK 1.0.2 contract
+# Strict contract: top-level hex string only (SDK 1.0.2 shape)
 # ---------------------------------------------------------------------------
 
 
-def test_read_usb_pid_toplevel_hex_string(gateware, tmp_path):
-    """SDK 1.0.2 shape: usb_pid at top level as a hex string."""
+def test_read_usb_pid_old_project_shape_raises(gateware, tmp_path):
+    """The OLD shape {"project": {"usb_pid": 4}} (no top-level) -> ValueError.
+
+    Contract decision: project.usb_pid is no longer consulted; the top-level
+    hex-string is the only accepted form.
+    """
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(
-        bit,
-        {
-            "schema_version": 1,
-            "sdk_version": "1.0.2",
-            "usb_pid": "0x000B",
-            "project": {"name": "gateware", "git_sha": "e6890a3"},
-        },
-    )
-    assert gateware.read_usb_pid(str(bit)) == 11
+    _write_summary(bit, {"project": {"usb_pid": 4}})
+    with pytest.raises(ValueError) as exc_info:
+        gateware.read_usb_pid(str(bit))
+    assert "usb_pid" in str(exc_info.value)
 
 
-def test_read_usb_pid_toplevel_int(gateware, tmp_path):
-    """Top-level usb_pid as a plain integer is accepted."""
+def test_read_usb_pid_toplevel_int_raises(gateware, tmp_path):
+    """Top-level usb_pid as a plain integer -> ValueError (must be hex string)."""
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
     _write_summary(bit, {"usb_pid": 11, "project": {"name": "gateware"}})
-    assert gateware.read_usb_pid(str(bit)) == 11
+    with pytest.raises(ValueError) as exc_info:
+        gateware.read_usb_pid(str(bit))
+    assert "usb_pid" in str(exc_info.value)
 
 
-def test_read_usb_pid_project_hex_string(gateware, tmp_path):
-    """project.usb_pid as a hex string is accepted."""
+def test_read_usb_pid_toplevel_bool_raises(gateware, tmp_path):
+    """Top-level bool -> ValueError (bool is not a hex string)."""
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(bit, {"project": {"usb_pid": "0x0004"}})
-    assert gateware.read_usb_pid(str(bit)) == 4
+    _write_summary(bit, {"usb_pid": True, "project": {"name": "gateware"}})
+    with pytest.raises(ValueError) as exc_info:
+        gateware.read_usb_pid(str(bit))
+    assert "usb_pid" in str(exc_info.value)
 
 
-def test_read_usb_pid_project_wins_over_toplevel(gateware, tmp_path):
-    """When both locations are present, project.usb_pid takes precedence."""
+def test_read_usb_pid_rejects_unparseable_string(gateware, tmp_path):
+    """Non-hex string at top level -> ValueError mentioning usb_pid."""
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(
-        bit,
-        {"usb_pid": "0x000B", "project": {"usb_pid": 7}},
-    )
-    assert gateware.read_usb_pid(str(bit)) == 7
-
-
-def test_read_usb_pid_rejects_invalid_string(gateware, tmp_path):
-    """Non-numeric strings must raise ValueError mentioning usb_pid."""
-    bit = tmp_path / "sdk_x.bit"
-    bit.write_text("bit")
-    _write_summary(bit, {"project": {"usb_pid": "abc"}})
+    _write_summary(bit, {"usb_pid": "xyz", "project": {"name": "gateware"}})
     with pytest.raises(ValueError) as exc_info:
         gateware.read_usb_pid(str(bit))
     assert "usb_pid" in str(exc_info.value)
 
 
 def test_read_usb_pid_rejects_empty_string(gateware, tmp_path):
-    """Empty string must raise ValueError mentioning usb_pid."""
+    """Empty string at top level -> ValueError mentioning usb_pid."""
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(bit, {"project": {"usb_pid": ""}})
+    _write_summary(bit, {"usb_pid": "", "project": {"name": "gateware"}})
     with pytest.raises(ValueError) as exc_info:
         gateware.read_usb_pid(str(bit))
     assert "usb_pid" in str(exc_info.value)
 
 
-def test_read_usb_pid_rejects_zero(gateware, tmp_path):
-    """Zero is out of range for a USB PID (must be 1..0xFFFF)."""
+def test_read_usb_pid_rejects_zero_hex_string(gateware, tmp_path):
+    """\"0x0000\" is out of range (must be 1..0xFFFF)."""
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(bit, {"project": {"usb_pid": 0}})
+    _write_summary(bit, {"usb_pid": "0x0000", "project": {"name": "gateware"}})
     with pytest.raises(ValueError) as exc_info:
         gateware.read_usb_pid(str(bit))
     assert "usb_pid" in str(exc_info.value)
 
 
-def test_read_usb_pid_rejects_negative(gateware, tmp_path):
-    """Negative values are out of range."""
+def test_read_usb_pid_rejects_overflow_hex_string(gateware, tmp_path):
+    """\"0x10000\" is above uint16 range."""
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(bit, {"project": {"usb_pid": -1}})
+    _write_summary(bit, {"usb_pid": "0x10000", "project": {"name": "gateware"}})
     with pytest.raises(ValueError) as exc_info:
         gateware.read_usb_pid(str(bit))
     assert "usb_pid" in str(exc_info.value)
 
 
-def test_read_usb_pid_rejects_overflow(gateware, tmp_path):
-    """Values above 0xFFFF are out of uint16 range."""
+def test_read_usb_pid_accepts_max_ffff(gateware, tmp_path):
+    """\"0xFFFF\" is the maximum valid value -> 65535."""
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(bit, {"project": {"usb_pid": 0x10000}})
-    with pytest.raises(ValueError) as exc_info:
-        gateware.read_usb_pid(str(bit))
-    assert "usb_pid" in str(exc_info.value)
+    _write_summary(bit, {"usb_pid": "0xFFFF", "project": {"name": "gateware"}})
+    assert gateware.read_usb_pid(str(bit)) == 65535
 
 
 # ---------------------------------------------------------------------------
