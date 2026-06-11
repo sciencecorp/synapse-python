@@ -902,6 +902,7 @@ def test_case_O_gateware_only_build_emits_only_gateware_deb(
         frag = json.load(fh)
     assert frag == {
         "name": "intan_rhd2132",
+        "display_name": "gateware",
         "usb_pid": 4,
         "artifact": "custom/intan_rhd2132.bit",
     }

@@ -215,6 +215,59 @@ def test_read_usb_pid_accepts_max_ffff(gateware, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# gateware.read_project_name
+# ---------------------------------------------------------------------------
+
+
+def test_read_project_name_happy_path(gateware, tmp_path):
+    """SDK 1.0.2 shape: project.name is a non-empty string."""
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("bit")
+    _write_summary(
+        bit,
+        {
+            "usb_pid": "0x000B",
+            "project": {"name": "gateware", "git_sha": "e6890a3"},
+        },
+    )
+    assert gateware.read_project_name(str(bit)) == "gateware"
+
+
+def test_read_project_name_missing_summary_returns_none(gateware, tmp_path):
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("bit")
+    assert gateware.read_project_name(str(bit)) is None
+
+
+def test_read_project_name_missing_project_returns_none(gateware, tmp_path):
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("bit")
+    _write_summary(bit, {"usb_pid": "0x000B"})
+    assert gateware.read_project_name(str(bit)) is None
+
+
+def test_read_project_name_missing_name_returns_none(gateware, tmp_path):
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("bit")
+    _write_summary(bit, {"usb_pid": "0x000B", "project": {"git_sha": "abc123"}})
+    assert gateware.read_project_name(str(bit)) is None
+
+
+def test_read_project_name_empty_string_returns_none(gateware, tmp_path):
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("bit")
+    _write_summary(bit, {"usb_pid": "0x000B", "project": {"name": ""}})
+    assert gateware.read_project_name(str(bit)) is None
+
+
+def test_read_project_name_invalid_json_returns_none(gateware, tmp_path):
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("bit")
+    _write_summary(bit, "{not json")
+    assert gateware.read_project_name(str(bit)) is None
+
+
+# ---------------------------------------------------------------------------
 # build.find_deb_package package_name filtering
 # ---------------------------------------------------------------------------
 
@@ -287,7 +340,8 @@ def test_build_gateware_deb_stages_bit_fragment_and_depends(
     monkeypatch.setattr(peripherals.subprocess, "run", fake_fpm_run(dist_dir, calls))
 
     ok = peripherals.build_gateware_deb(
-        str(pd), manifest, bit_path=str(bit), usb_pid=4, version="0.2.0"
+        str(pd), manifest, bit_path=str(bit), usb_pid=4, display_name="my-gateware",
+        version="0.2.0"
     )
     assert ok is True
     assert len(staging) == 1
@@ -304,6 +358,7 @@ def test_build_gateware_deb_stages_bit_fragment_and_depends(
         frag = json.load(fh)
     assert frag == {
         "name": "scifi-my-chip",
+        "display_name": "my-gateware",
         "usb_pid": 4,
         "artifact": "custom/scifi-my-chip.bit",
     }
@@ -315,6 +370,35 @@ def test_build_gateware_deb_stages_bit_fragment_and_depends(
     # payload, or the driver and gateware debs would dpkg-conflict on
     # /postinstall.sh.
     assert fpm_call[-1] == "opt"
+
+
+def test_build_gateware_deb_omit_display_name_falls_back_to_plugin_name(
+    peripherals, tmp_path, monkeypatch
+):
+    """Omitting display_name causes the fragment to use the plugin name as display_name."""
+    pd = tmp_path / "plugin"
+    pd.mkdir()
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("BITSTREAM")
+    manifest = {"name": "scifi-my-chip", "version": "0.2.0"}
+
+    staging: list = []
+    _spy_mkdtemp(peripherals, monkeypatch, staging)
+    calls: list = []
+    dist_dir = os.path.join(str(pd), "dist")
+    monkeypatch.setattr(peripherals.subprocess, "run", fake_fpm_run(dist_dir, calls))
+
+    ok = peripherals.build_gateware_deb(
+        str(pd), manifest, bit_path=str(bit), usb_pid=4, version="0.2.0"
+    )
+    assert ok is True
+    frag_dst = os.path.join(
+        staging[0], "opt", "scifi", "bitstreams", "custom",
+        "scifi-my-chip.manifest.json",
+    )
+    with open(frag_dst, "r", encoding="utf-8") as fh:
+        frag = json.load(fh)
+    assert frag["display_name"] == "scifi-my-chip"
 
 
 def test_build_gateware_deb_missing_bit_errors(peripherals, tmp_path, capsys):

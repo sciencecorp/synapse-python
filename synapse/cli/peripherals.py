@@ -583,6 +583,7 @@ def build_gateware_deb(
     *,
     bit_path: str,
     usb_pid: int,
+    display_name: Optional[str] = None,
     version: str = "0.1.0",
 ) -> bool:
     """Stage the custom bitstream + manifest fragment, then fpm a .deb.
@@ -591,8 +592,10 @@ def build_gateware_deb(
       /opt/scifi/bitstreams/custom/<name>.bit
       /opt/scifi/bitstreams/custom/<name>.manifest.json
 
-    The fragment carries ``{"name", "usb_pid", "artifact"}`` with ``artifact``
-    relative to /opt/scifi/bitstreams (canonical-manifest convention);
+    The fragment carries ``{"name", "display_name", "usb_pid", "artifact"}``
+    with ``artifact`` relative to /opt/scifi/bitstreams
+    (canonical-manifest convention); ``display_name`` is the human-facing
+    label from the gateware project (falls back to ``name`` when absent);
     scifi-probe-updater globs custom/*.manifest.json to list flashable
     custom gateware per probe.
     """
@@ -615,6 +618,7 @@ def build_gateware_deb(
 
     fragment = {
         "name": plugin_name,
+        "display_name": display_name or plugin_name,
         "usb_pid": usb_pid,
         "artifact": f"custom/{plugin_name}.bit",
     }
@@ -792,8 +796,10 @@ def _build_debs(
         usb_pid = _gateware_usb_pid(bit_path)
         if usb_pid is None:
             return None
+        display_name = gateware.read_project_name(bit_path)
         if not build_gateware_deb(
-            peripheral_dir, manifest, bit_path=bit_path, usb_pid=usb_pid, version=version
+            peripheral_dir, manifest, bit_path=bit_path, usb_pid=usb_pid,
+            display_name=display_name, version=version
         ):
             return None
         deb = find_deb_package(dist_dir, f"{plugin_name}{GATEWARE_DEB_SUFFIX}_{version}")

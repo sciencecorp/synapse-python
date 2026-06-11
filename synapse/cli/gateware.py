@@ -258,6 +258,32 @@ def read_usb_pid(bit_path: str) -> int:
     return usb_pid
 
 
+def read_project_name(bit_path: str) -> str | None:
+    """Return ``['project']['name']`` from the bitstream's summary JSON, or None.
+
+    Used as the human-facing display name for custom gateware; unlike
+    :func:`read_usb_pid` this is best-effort — a missing or malformed value
+    degrades to None (callers fall back to the plugin name) rather than
+    failing the build.
+    """
+    path = summary_path_for(bit_path)
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            summary = json.load(fp)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(summary, dict):
+        return None
+    project = summary.get("project")
+    if not isinstance(project, dict):
+        return None
+    name = project.get("name")
+    if not isinstance(name, str) or not name:
+        return None
+    return name
+
+
 def _stdout_is_tty() -> bool:
     """Whether our stdout is a terminal (indirection kept for monkeypatching)."""
     return sys.stdout.isatty()
