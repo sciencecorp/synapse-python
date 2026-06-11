@@ -191,15 +191,25 @@ def summary_path_for(bit_path: str) -> str:
 
 
 def read_usb_pid(bit_path: str) -> int:
-    """Return ``['project']['usb_pid']`` from the bitstream's summary JSON.
+    """Return the USB product id from the bitstream's summary JSON, as an int.
 
     The custom-bitstream manifest fragment needs the probe USB product id the
     gateware targets; the gateware toolchain records it in the build summary.
 
+    Two summary shapes are accepted:
+
+    - **SDK < 1.0.2** (legacy): ``{"project": {"usb_pid": 4, ...}, ...}``
+    - **SDK 1.0.2+**: ``{"usb_pid": "0x000B", "project": {"name": "..."}, ...}``
+
+    In both cases ``project.usb_pid`` is preferred when present; the top-level
+    ``usb_pid`` is the fallback.  Both integer and hex-string values (e.g.
+    ``"0x000B"`` or ``"11"``) are accepted and normalised to ``int``.
+
     Raises:
       FileNotFoundError: no ``<stem>.summary.json`` exists next to *bit_path*.
-      ValueError: the summary is not valid JSON, or ``project.usb_pid`` is
-        missing or not an integer.
+      ValueError: the summary is not valid JSON; ``usb_pid`` is absent from
+        both locations; or the value cannot be interpreted as a uint16 in the
+        range 1..0xFFFF (0 and negatives are rejected; booleans are rejected).
     """
     path = summary_path_for(bit_path)
     if not os.path.exists(path):
@@ -213,12 +223,30 @@ def read_usb_pid(bit_path: str) -> int:
             summary = json.load(fp)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Bitstream summary {path} is not valid JSON: {exc}")
+
     project = summary.get("project") if isinstance(summary, dict) else None
-    usb_pid = project.get("usb_pid") if isinstance(project, dict) else None
-    if not isinstance(usb_pid, int) or isinstance(usb_pid, bool):
+    raw = None
+    if isinstance(project, dict) and "usb_pid" in project:
+        raw = project["usb_pid"]
+    elif isinstance(summary, dict) and "usb_pid" in summary:
+        # axon-peripheral-sdk 1.0.2 emits usb_pid at the top level (as a hex
+        # string, e.g. "0x000B"); prefer project.usb_pid when both exist.
+        raw = summary["usb_pid"]
+
+    usb_pid = None
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        usb_pid = raw
+    elif isinstance(raw, str):
+        try:
+            usb_pid = int(raw, 0)  # accepts "0x000B" and "11"
+        except ValueError:
+            usb_pid = None
+
+    if usb_pid is None or not (0 < usb_pid <= 0xFFFF):
         raise ValueError(
-            f"Bitstream summary {path} is missing ['project']['usb_pid'] "
-            "(expected an integer USB product id)"
+            f"Bitstream summary {path} has no usable usb_pid "
+            "(looked at ['project']['usb_pid'] and top-level ['usb_pid']; "
+            "expected an integer or hex-string USB product id in 1..0xFFFF)"
         )
     return usb_pid
 
