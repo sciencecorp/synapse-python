@@ -570,11 +570,18 @@ def build_peripheral_deb(
     return True
 
 
-# Suffix appended to the plugin name to form the gateware package name.
-GATEWARE_DEB_SUFFIX = "-gateware"
+# Gateware debs are keyed by the bitstream identifier (not the plugin), so
+# redeploying the same identifier from any repo replaces the previous
+# install instead of dpkg-conflicting with it.
+GATEWARE_DEB_PREFIX = "axon-gateware-"
 # Owns /opt/scifi/bitstreams and the canonical manifest the fragment's
 # relative `artifact` resolves against.
 BITSTREAMS_PACKAGE = "axonprobe-bitstreams"
+
+
+def _gateware_package_name(identifier: str) -> str:
+    """Debianize the bitstream identifier into the gateware package name."""
+    return f"{GATEWARE_DEB_PREFIX}{identifier.lower().replace('_', '-')}"
 
 
 def build_gateware_deb(
@@ -584,25 +591,28 @@ def build_gateware_deb(
     bit_path: str,
     usb_pid: int,
     bitstream_name: Optional[str] = None,
+    git_hash: Optional[str] = None,
     version: str = "0.1.0",
 ) -> bool:
     """Stage the custom bitstream + manifest fragment, then fpm a .deb.
 
-    Layout inside the ``<name>-gateware`` .deb:
-      /opt/scifi/bitstreams/custom/<plugin_name>.bit
-      /opt/scifi/bitstreams/custom/<plugin_name>.manifest.json
+    The deb package is named ``axon-gateware-<debianized-identifier>`` where
+    the identifier is ``bitstream_name`` (falling back to the plugin name).
+    On-device files land at:
+      /opt/scifi/bitstreams/custom/<identifier>.bit
+      /opt/scifi/bitstreams/custom/<identifier>.manifest.json
 
-    The fragment carries ``{"name", "usb_pid", "artifact"}`` with ``artifact``
-    relative to /opt/scifi/bitstreams (canonical-manifest convention). Files
-    and the deb package are keyed on the plugin name for dpkg uniqueness;
-    ``name`` in the fragment is the flashable identity shown in the UI and
-    passed to ``scifi-probe-updater update --name`` — taken from the gateware
-    project (``bitstream_name``) and falling back to the plugin name when no
-    project name was available. scifi-probe-updater globs
-    custom/*.manifest.json to list flashable custom gateware per probe.
+    The fragment carries ``{"name", "usb_pid", "artifact"}`` (plus
+    ``"git_hash"`` when provided) with ``artifact`` relative to
+    /opt/scifi/bitstreams (canonical-manifest convention). Redeploying the
+    same identifier from any repo replaces the previous install (dpkg
+    override semantics) instead of conflicting with a plugin-name-keyed
+    package. scifi-probe-updater globs custom/*.manifest.json to list
+    flashable custom gateware per probe.
     """
     plugin_name = manifest["name"]
-    package_name = f"{plugin_name}{GATEWARE_DEB_SUFFIX}"
+    identifier = bitstream_name or plugin_name
+    package_name = _gateware_package_name(identifier)
 
     if not os.path.exists(bit_path):
         console.print(
@@ -616,18 +626,16 @@ def build_gateware_deb(
 
     custom_dir = os.path.join(staging_dir, "opt", "scifi", "bitstreams", "custom")
     os.makedirs(custom_dir, exist_ok=True)
-    shutil.copy2(bit_path, os.path.join(custom_dir, f"{plugin_name}.bit"))
+    shutil.copy2(bit_path, os.path.join(custom_dir, f"{identifier}.bit"))
 
-    fragment = {
-        # The flashable identity shown in the UI and passed to
-        # `scifi-probe-updater update --name`: the gateware project's name
-        # (from the build summary), not the plugin's. Files and the deb
-        # stay keyed on the plugin name for dpkg uniqueness.
-        "name": bitstream_name or plugin_name,
+    fragment: dict = {
+        "name": identifier,
         "usb_pid": usb_pid,
-        "artifact": f"custom/{plugin_name}.bit",
+        "artifact": f"custom/{identifier}.bit",
     }
-    fragment_path = os.path.join(custom_dir, f"{plugin_name}.manifest.json")
+    if git_hash:
+        fragment["git_hash"] = git_hash
+    fragment_path = os.path.join(custom_dir, f"{identifier}.manifest.json")
     with open(fragment_path, "w", encoding="utf-8") as fp:
         json.dump(fragment, fp, indent=2)
         fp.write("\n")
@@ -801,12 +809,18 @@ def _build_debs(
         usb_pid = _gateware_usb_pid(bit_path)
         if usb_pid is None:
             return None
+        identifier = gateware.read_identifier(bit_path) or plugin_name
         if not build_gateware_deb(
-            peripheral_dir, manifest, bit_path=bit_path, usb_pid=usb_pid,
-            bitstream_name=gateware.read_project_name(bit_path), version=version
+            peripheral_dir,
+            manifest,
+            bit_path=bit_path,
+            usb_pid=usb_pid,
+            version=version,
+            bitstream_name=identifier,
+            git_hash=gateware.read_git_sha(bit_path),
         ):
             return None
-        deb = find_deb_package(dist_dir, f"{plugin_name}{GATEWARE_DEB_SUFFIX}_{version}")
+        deb = find_deb_package(dist_dir, f"{_gateware_package_name(identifier)}_{version}")
         if deb is None:
             return None
         debs.append(deb)

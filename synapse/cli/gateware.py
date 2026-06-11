@@ -258,16 +258,44 @@ def read_usb_pid(bit_path: str) -> int:
     return usb_pid
 
 
-def read_project_name(bit_path: str) -> str | None:
-    """Return ``['project']['name']`` from the bitstream's summary JSON, or None.
+def read_identifier(bit_path: str) -> str | None:
+    """Return ``<target_profile>_<project.name>`` from the bitstream's summary.
 
-    This IS the custom bitstream's identity — the name placed in the manifest
-    fragment's ``name`` field and passed to ``scifi-probe-updater update
-    --name``. Unlike :func:`read_usb_pid` this is best-effort: a missing or
-    malformed value degrades to None and the call site falls back to the plugin
-    name. The name should be unique per device and systemd-instance-safe
-    (``[A-Za-z0-9._-]``) since it rides in
+    This is the custom bitstream's identity: the on-device file names, the
+    manifest fragment's ``name``, the ``axon-gateware-*`` deb name,
+    ``scifi-probe-updater update --name``, and the systemd instance all key
+    on it, and deploying the same identifier again overrides the previous
+    install. Best-effort: returns None (callers fall back to the plugin
+    name) when the summary or either field is missing/malformed. Values
+    should stay within ``[A-Za-z0-9._-]`` — the identifier rides in
     ``scifi-probe-update-custom@<serial>:<name>``.
+    """
+    path = summary_path_for(bit_path)
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            summary = json.load(fp)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(summary, dict):
+        return None
+    target_profile = summary.get("target_profile")
+    if not isinstance(target_profile, str) or not target_profile:
+        return None
+    project = summary.get("project")
+    if not isinstance(project, dict):
+        return None
+    project_name = project.get("name")
+    if not isinstance(project_name, str) or not project_name:
+        return None
+    return f"{target_profile}_{project_name}"
+
+
+def read_git_sha(bit_path: str) -> str | None:
+    """Return ``['project']['git_sha']`` from the bitstream's summary JSON, or None.
+
+    Best-effort: returns None when the summary or the field is
+    missing/malformed.
     """
     path = summary_path_for(bit_path)
     try:
@@ -281,10 +309,10 @@ def read_project_name(bit_path: str) -> str | None:
     project = summary.get("project")
     if not isinstance(project, dict):
         return None
-    name = project.get("name")
-    if not isinstance(name, str) or not name:
+    git_sha = project.get("git_sha")
+    if not isinstance(git_sha, str) or not git_sha:
         return None
-    return name
+    return git_sha
 
 
 def _stdout_is_tty() -> bool:

@@ -215,56 +215,84 @@ def test_read_usb_pid_accepts_max_ffff(gateware, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# gateware.read_project_name
+# gateware.read_identifier
 # ---------------------------------------------------------------------------
 
 
-def test_read_project_name_happy_path(gateware, tmp_path):
-    """SDK 1.0.2 shape: project.name is a non-empty string."""
+def test_read_identifier_happy_path(gateware, tmp_path):
+    """SDK 1.0.2 shape: target_profile + project.name -> '<profile>_<name>'."""
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
     _write_summary(
         bit,
         {
             "usb_pid": "0x000B",
+            "target_profile": "via-devkit",
             "project": {"name": "gateware", "git_sha": "e6890a3"},
         },
     )
-    assert gateware.read_project_name(str(bit)) == "gateware"
+    assert gateware.read_identifier(str(bit)) == "via-devkit_gateware"
 
 
-def test_read_project_name_missing_summary_returns_none(gateware, tmp_path):
+def test_read_identifier_missing_target_profile_returns_none(gateware, tmp_path):
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    assert gateware.read_project_name(str(bit)) is None
+    _write_summary(bit, {"usb_pid": "0x000B", "project": {"name": "gateware"}})
+    assert gateware.read_identifier(str(bit)) is None
 
 
-def test_read_project_name_missing_project_returns_none(gateware, tmp_path):
+def test_read_identifier_missing_project_name_returns_none(gateware, tmp_path):
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(bit, {"usb_pid": "0x000B"})
-    assert gateware.read_project_name(str(bit)) is None
+    _write_summary(bit, {"usb_pid": "0x000B", "target_profile": "via-devkit", "project": {}})
+    assert gateware.read_identifier(str(bit)) is None
 
 
-def test_read_project_name_missing_name_returns_none(gateware, tmp_path):
+def test_read_identifier_missing_summary_returns_none(gateware, tmp_path):
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(bit, {"usb_pid": "0x000B", "project": {"git_sha": "abc123"}})
-    assert gateware.read_project_name(str(bit)) is None
+    assert gateware.read_identifier(str(bit)) is None
 
 
-def test_read_project_name_empty_string_returns_none(gateware, tmp_path):
-    bit = tmp_path / "sdk_x.bit"
-    bit.write_text("bit")
-    _write_summary(bit, {"usb_pid": "0x000B", "project": {"name": ""}})
-    assert gateware.read_project_name(str(bit)) is None
-
-
-def test_read_project_name_invalid_json_returns_none(gateware, tmp_path):
+def test_read_identifier_invalid_json_returns_none(gateware, tmp_path):
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
     _write_summary(bit, "{not json")
-    assert gateware.read_project_name(str(bit)) is None
+    assert gateware.read_identifier(str(bit)) is None
+
+
+# ---------------------------------------------------------------------------
+# gateware.read_git_sha
+# ---------------------------------------------------------------------------
+
+
+def test_read_git_sha_happy_path(gateware, tmp_path):
+    """SDK 1.0.2 shape: project.git_sha is a non-empty string."""
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("bit")
+    _write_summary(
+        bit,
+        {
+            "usb_pid": "0x000B",
+            "target_profile": "via-devkit",
+            "project": {"name": "gateware", "git_sha": "e6890a3"},
+        },
+    )
+    assert gateware.read_git_sha(str(bit)) == "e6890a3"
+
+
+def test_read_git_sha_missing_git_sha_returns_none(gateware, tmp_path):
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("bit")
+    _write_summary(bit, {"usb_pid": "0x000B", "project": {"name": "gateware"}})
+    assert gateware.read_git_sha(str(bit)) is None
+
+
+def test_read_git_sha_empty_string_returns_none(gateware, tmp_path):
+    bit = tmp_path / "sdk_x.bit"
+    bit.write_text("bit")
+    _write_summary(bit, {"usb_pid": "0x000B", "project": {"name": "gateware", "git_sha": ""}})
+    assert gateware.read_git_sha(str(bit)) is None
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +355,7 @@ def _spy_mkdtemp(peripherals, monkeypatch, holder: list):
 def test_build_gateware_deb_stages_bit_fragment_and_depends(
     peripherals, tmp_path, monkeypatch
 ):
+    """With bitstream_name and git_hash: files/fragment keyed on identifier."""
     pd = tmp_path / "plugin"
     pd.mkdir()
     bit = tmp_path / "sdk_x.bit"
@@ -340,30 +369,32 @@ def test_build_gateware_deb_stages_bit_fragment_and_depends(
     monkeypatch.setattr(peripherals.subprocess, "run", fake_fpm_run(dist_dir, calls))
 
     ok = peripherals.build_gateware_deb(
-        str(pd), manifest, bit_path=str(bit), usb_pid=4, bitstream_name="my-gateware",
+        str(pd), manifest, bit_path=str(bit), usb_pid=4,
+        bitstream_name="via-devkit_gateware", git_hash="e6890a3",
         version="0.2.0"
     )
     assert ok is True
     assert len(staging) == 1
 
     bit_dst = os.path.join(
-        staging[0], "opt", "scifi", "bitstreams", "custom", "scifi-my-chip.bit"
+        staging[0], "opt", "scifi", "bitstreams", "custom", "via-devkit_gateware.bit"
     )
     frag_dst = os.path.join(
         staging[0], "opt", "scifi", "bitstreams", "custom",
-        "scifi-my-chip.manifest.json",
+        "via-devkit_gateware.manifest.json",
     )
-    assert os.path.exists(bit_dst), "bitstream staged under custom/ as <plugin_name>.bit"
+    assert os.path.exists(bit_dst), "bitstream staged under custom/ as <identifier>.bit"
     with open(frag_dst, "r", encoding="utf-8") as fh:
         frag = json.load(fh)
     assert frag == {
-        "name": "my-gateware",
+        "name": "via-devkit_gateware",
         "usb_pid": 4,
-        "artifact": "custom/scifi-my-chip.bit",
+        "artifact": "custom/via-devkit_gateware.bit",
+        "git_hash": "e6890a3",
     }
 
     fpm_call = next(c for c in calls if "fpm" in c)
-    assert fpm_call[fpm_call.index("-n") + 1] == "scifi-my-chip-gateware"
+    assert fpm_call[fpm_call.index("-n") + 1] == "axon-gateware-via-devkit-gateware"
     assert fpm_call[fpm_call.index("--depends") + 1] == "axonprobe-bitstreams"
     # fpm input must be "opt" (not "."): postinstall.sh must NOT ship in the
     # payload, or the driver and gateware debs would dpkg-conflict on
@@ -374,7 +405,7 @@ def test_build_gateware_deb_stages_bit_fragment_and_depends(
 def test_build_gateware_deb_omit_bitstream_name_falls_back_to_plugin_name(
     peripherals, tmp_path, monkeypatch
 ):
-    """Omitting bitstream_name causes the fragment's 'name' to use the plugin name."""
+    """Omitting bitstream_name: files/fragment keyed on plugin name, no git_hash key."""
     pd = tmp_path / "plugin"
     pd.mkdir()
     bit = tmp_path / "sdk_x.bit"
@@ -391,13 +422,22 @@ def test_build_gateware_deb_omit_bitstream_name_falls_back_to_plugin_name(
         str(pd), manifest, bit_path=str(bit), usb_pid=4, version="0.2.0"
     )
     assert ok is True
+
+    bit_dst = os.path.join(
+        staging[0], "opt", "scifi", "bitstreams", "custom", "scifi-my-chip.bit"
+    )
     frag_dst = os.path.join(
         staging[0], "opt", "scifi", "bitstreams", "custom",
         "scifi-my-chip.manifest.json",
     )
+    assert os.path.exists(bit_dst), "fallback: bit staged as <plugin_name>.bit"
     with open(frag_dst, "r", encoding="utf-8") as fh:
         frag = json.load(fh)
+    # 3-key fragment, NO git_hash key
     assert frag == {"name": "scifi-my-chip", "usb_pid": 4, "artifact": "custom/scifi-my-chip.bit"}
+
+    fpm_call = next(c for c in calls if "fpm" in c)
+    assert fpm_call[fpm_call.index("-n") + 1] == "axon-gateware-scifi-my-chip"
 
 
 def test_build_gateware_deb_missing_bit_errors(peripherals, tmp_path, capsys):

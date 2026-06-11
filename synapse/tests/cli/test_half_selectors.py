@@ -169,7 +169,7 @@ def _install_common_stubs(peripherals, monkeypatch, tmp_path, *, fake_bit=None):
             bit = str(path)
         stem, _ = os.path.splitext(bit)
         with open(f"{stem}.summary.json", "w", encoding="utf-8") as fh:
-            json.dump({"usb_pid": "0x0004", "project": {"name": "gateware"}}, fh)
+            json.dump({"usb_pid": "0x0004", "target_profile": "via-devkit", "project": {"name": "gateware", "git_sha": "e6890a3"}}, fh)
         return bit
 
     def fake_subprocess_run(argv, *args, **kwargs):
@@ -804,12 +804,12 @@ def test_case_M_both_emits_driver_deb_and_gateware_deb(
     )
 
     assert any(
-        f.endswith(os.path.join("opt/scifi/bitstreams/custom", "intan_rhd2132.bit"))
+        f.endswith(os.path.join("opt/scifi/bitstreams/custom", "via-devkit_gateware.bit"))
         for f in gateware_files
     ), f"gateware deb stages the bit under custom/; got: {gateware_files!r}"
     assert any(
         f.endswith(
-            os.path.join("opt/scifi/bitstreams/custom", "intan_rhd2132.manifest.json")
+            os.path.join("opt/scifi/bitstreams/custom", "via-devkit_gateware.manifest.json")
         )
         for f in gateware_files
     ), f"gateware deb stages the manifest fragment; got: {gateware_files!r}"
@@ -823,7 +823,7 @@ def test_case_M_both_emits_driver_deb_and_gateware_deb(
         if "fpm" in c:
             fpm_argv = c[c.index("fpm"):]
             fpm_names.append(fpm_argv[fpm_argv.index("-n") + 1])
-    assert fpm_names == ["intan_rhd2132", "intan_rhd2132-gateware"]
+    assert fpm_names == ["intan_rhd2132", "axon-gateware-via-devkit-gateware"]
 
 
 def test_case_N_driver_deb_fpm_input_excludes_postinstall(
@@ -888,22 +888,23 @@ def test_case_O_gateware_only_build_emits_only_gateware_deb(
     assert len(staging_dirs) == 1
     files = _captured_staging_files(staging_dirs[0])
     assert any(
-        f.endswith(os.path.join("opt/scifi/bitstreams/custom", "intan_rhd2132.bit"))
+        f.endswith(os.path.join("opt/scifi/bitstreams/custom", "via-devkit_gateware.bit"))
         for f in files
     ), f"gateware deb stages the bit; got: {files!r}"
     with open(
         os.path.join(
             staging_dirs[0],
-            "opt", "scifi", "bitstreams", "custom", "intan_rhd2132.manifest.json",
+            "opt", "scifi", "bitstreams", "custom", "via-devkit_gateware.manifest.json",
         ),
         "r",
         encoding="utf-8",
     ) as fh:
         frag = json.load(fh)
     assert frag == {
-        "name": "gateware",
+        "name": "via-devkit_gateware",
         "usb_pid": 4,
-        "artifact": "custom/intan_rhd2132.bit",
+        "artifact": "custom/via-devkit_gateware.bit",
+        "git_hash": "e6890a3",
     }
     assert not any(f.endswith(".so") for f in files)
     assert not any("libscifi-peripheral-sdk" in f for f in files)
@@ -932,7 +933,7 @@ def test_case_Q_deploy_both_streams_two_debs(peripherals, tmp_path, monkeypatch)
     paths = [p for _, p in recorders.deploy_calls]
     assert uris == ["10.0.0.1", "10.0.0.1"]
     assert paths[0].endswith("intan_rhd2132_0.1.0_arm64.deb")
-    assert paths[1].endswith("intan_rhd2132-gateware_0.1.0_arm64.deb")
+    assert paths[1].endswith("axon-gateware-via-devkit-gateware_0.1.0_arm64.deb")
 
 
 def test_case_Q2_deploy_stops_after_failed_driver_deploy(
