@@ -131,8 +131,14 @@ def run_gateware_build(
 ) -> str:
     """Invoke ``axon-peripheral-sdk build`` inside the gateware container.
 
-    Returns the absolute path to the newest ``sdk_*.bit`` emitted under
-    ``<peripheral_dir>/src/gateware/build/bitstreams/``.
+    Returns the absolute path to the newest ``sdk_*_extracted.bit`` emitted
+    under ``<peripheral_dir>/src/gateware/build/bitstreams/``. This is the
+    *extracted* bitstream variant the SDK writes alongside the raw
+    ``sdk_*.bit``; the extracted form is what gets flashed to the probe, and
+    it carries its own same-stem ``.summary.json`` (same schema as the raw
+    one). Selecting it specifically — rather than the broader ``sdk_*.bit``
+    glob, which would also match the extracted file and pick by mtime —
+    keeps the choice deterministic.
 
     Raises:
       LicenseUnsetError: if ``LM_LICENSE_FILE`` is unset (propagated from
@@ -162,13 +168,18 @@ def run_gateware_build(
     subprocess.run(argv, check=True)
 
     bit_glob = os.path.join(
-        abs_peripheral_dir, "src", "gateware", "build", "bitstreams", "sdk_*.bit"
+        abs_peripheral_dir,
+        "src",
+        "gateware",
+        "build",
+        "bitstreams",
+        "sdk_*_extracted.bit",
     )
     matches = glob.glob(bit_glob)
     if not matches:
         raise FileNotFoundError(
-            "axon-peripheral-sdk build completed but no sdk_*.bit was emitted "
-            "under src/gateware/build/bitstreams/"
+            "axon-peripheral-sdk build completed but no sdk_*_extracted.bit was "
+            "emitted under src/gateware/build/bitstreams/"
         )
 
     matches.sort(key=os.path.getmtime, reverse=True)

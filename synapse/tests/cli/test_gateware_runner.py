@@ -12,9 +12,12 @@ Behavior (per AC-6):
      -w /home/workspace <license-args> <image_tag> /bin/bash -lc
      'axon-peripheral-sdk build --project src/gateware'`.
   3. Non-zero exit -> raises subprocess.CalledProcessError.
-  4. After success, globs <peripheral_dir>/src/gateware/build/bitstreams/sdk_*.bit
-     and returns the newest by mtime (warns on multi-match).
-  5. Empty glob -> FileNotFoundError with message mentioning "sdk_*.bit".
+  4. After success, globs
+     <peripheral_dir>/src/gateware/build/bitstreams/sdk_*_extracted.bit
+     and returns the newest by mtime (warns on multi-match). The *extracted*
+     variant is what gets flashed; the raw sdk_*.bit is ignored.
+  5. Empty glob -> FileNotFoundError with message mentioning
+     "sdk_*_extracted.bit".
 
 Sub-phase 4.4 (Tester): the xfail marker is removed — these tests now run
 as live AC-6 acceptance gates and must fail until the Implementer lands
@@ -75,9 +78,9 @@ def test_runner_builds_docker_run_argv_with_project_flag(
 
     def fake_run(argv, *args, **kwargs):
         recorded.append(list(argv))
-        # Drop a fake .bit so the post-run glob succeeds.
+        # Drop a fake extracted .bit so the post-run glob succeeds.
         bs = _bitstreams_dir(pd)
-        bit = os.path.join(bs, "sdk_topbuild.bit")
+        bit = os.path.join(bs, "sdk_topbuild_extracted.bit")
         with open(bit, "w") as fp:
             fp.write("bitstream")
         return subprocess.CompletedProcess(argv, 0, b"", b"")
@@ -119,8 +122,8 @@ def test_runner_builds_docker_run_argv_with_project_flag(
     sdk_cmd = argv[bash_idx + 2]
     assert sdk_cmd == "axon-peripheral-sdk build --project src/gateware"
 
-    # And the returned path is the .bit we dropped.
-    assert result.endswith("sdk_topbuild.bit")
+    # And the returned path is the extracted .bit we dropped.
+    assert result.endswith("sdk_topbuild_extracted.bit")
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +139,7 @@ def test_runner_forwards_floating_license_arg(gateware, peripheral_dir, monkeypa
     def fake_run(argv, *args, **kwargs):
         recorded.append(list(argv))
         bs = _bitstreams_dir(pd)
-        with open(os.path.join(bs, "sdk_topbuild.bit"), "w") as fp:
+        with open(os.path.join(bs, "sdk_topbuild_extracted.bit"), "w") as fp:
             fp.write("x")
         return subprocess.CompletedProcess(argv, 0, b"", b"")
 
@@ -195,11 +198,11 @@ def test_runner_raises_when_license_unset_and_does_not_invoke_docker(
 def test_runner_returns_newest_bit_when_multiple_emitted(
     gateware, peripheral_dir, monkeypatch
 ):
-    """Case 11: glob with two .bit files of different mtimes -> newest wins."""
+    """Case 11: glob with two extracted .bit files of different mtimes -> newest wins."""
     pd, license_file = peripheral_dir
     bs = _bitstreams_dir(pd)
-    older = os.path.join(bs, "sdk_old.bit")
-    newer = os.path.join(bs, "sdk_new.bit")
+    older = os.path.join(bs, "sdk_old_extracted.bit")
+    newer = os.path.join(bs, "sdk_new_extracted.bit")
     with open(older, "w") as fp:
         fp.write("old")
     time.sleep(0.05)
@@ -250,4 +253,42 @@ def test_runner_raises_with_glob_in_message_when_no_bit_emitted(
             env={"LM_LICENSE_FILE": str(license_file)},
         )
 
-    assert "sdk_*.bit" in str(excinfo.value)
+    assert "sdk_*_extracted.bit" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Extracted-bitstream selection: the raw sdk_*.bit is ignored
+# ---------------------------------------------------------------------------
+
+
+def test_runner_ignores_raw_bit_and_picks_extracted(
+    gateware, peripheral_dir, monkeypatch
+):
+    """When both the raw sdk_*.bit and its sdk_*_extracted.bit sit side by
+    side, the runner must select the extracted variant — even when the raw
+    .bit is newer by mtime (the raw glob would otherwise win on mtime).
+    """
+    pd, license_file = peripheral_dir
+    bs = _bitstreams_dir(pd)
+    raw = os.path.join(bs, "sdk_topbuild.bit")
+    extracted = os.path.join(bs, "sdk_topbuild_extracted.bit")
+    with open(raw, "w") as fp:
+        fp.write("raw")
+    with open(extracted, "w") as fp:
+        fp.write("extracted")
+    # Make the raw .bit strictly newer so a mtime-only selection would pick it.
+    os.utime(extracted, (1_000_000, 1_000_000))
+    os.utime(raw, (2_000_000, 2_000_000))
+
+    def fake_run(argv, *args, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(gateware.subprocess, "run", fake_run)
+
+    result = gateware.run_gateware_build(
+        str(pd),
+        "myplugin-gateware:latest-arm64",
+        env={"LM_LICENSE_FILE": str(license_file)},
+    )
+
+    assert os.path.abspath(result) == os.path.abspath(extracted)
