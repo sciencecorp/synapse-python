@@ -71,7 +71,13 @@ def create_metadata(file_path, console):
 
 
 def deploy_package(ip_address, deb_package_path):
-    """Deploy the package to the device"""
+    """Deploy a .deb package to the device via gRPC DeployApp streaming.
+
+    Returns True when the package was streamed and all device responses were
+    received without error; False on any failure (connection, gRPC, or I/O).
+    Callers can use the return value to decide whether to continue with
+    subsequent packages.
+    """
     package_filename = os.path.basename(deb_package_path)
     console.clear_live()
 
@@ -178,6 +184,7 @@ def deploy_package(ip_address, deb_package_path):
                 response_panel.renderable = Group(*display_items)
                 response_panel.border_style = "red"
                 live.refresh()
+                return False
 
         except Exception as e:
             # For the outer exception, also preserve any progress made
@@ -195,6 +202,9 @@ def deploy_package(ip_address, deb_package_path):
             response_panel.renderable = Group(*display_items)
             response_panel.border_style = "red"
             live.refresh()
+            return False
+
+    return True
 
 
 def deploy_cmd(args):

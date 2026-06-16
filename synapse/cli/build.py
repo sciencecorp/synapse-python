@@ -3,10 +3,11 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
-from typing import Any
+from typing import Any, Literal
 
 from rich import box
 from rich.console import Console
@@ -15,7 +16,7 @@ from rich.panel import Panel
 console = Console()
 
 
-def validate_manifest(manifest_path: str) -> dict[str, Any] | bool:
+def validate_manifest(manifest_path: str) -> dict[str, Any] | Literal[False]:
     """Return the parsed ``manifest.json`` dictionary or ``False`` on error."""
 
     try:
@@ -71,42 +72,137 @@ def ensure_docker() -> bool:
         return False
 
 
-def build_docker_image(app_dir: str, app_name: str | None = None) -> str:
-    """(Re)build the cross-compile SDK Docker image and return its tag."""
+_ARG_HOST_UID_RE = re.compile(r"^ARG HOST_UID\b", re.MULTILINE)
+
+
+def _resolve_host_uid() -> int:
+    """Return the invoking user's UID, falling back to 1000 on non-POSIX hosts."""
+    try:
+        return os.getuid()
+    except AttributeError:
+        console.print(
+            "[yellow]Warning:[/yellow] os.getuid() unavailable on this host; "
+            "falling back to HOST_UID=1000."
+        )
+        return 1000
+
+
+def _dockerfile_needs_host_uid(dockerfile_path: str) -> bool:
+    """Return True iff *dockerfile_path* declares ``ARG HOST_UID`` at line start."""
+    with open(dockerfile_path, "r", encoding="utf-8") as fp:
+        return bool(_ARG_HOST_UID_RE.search(fp.read()))
+
+
+def build_docker_image(
+    app_dir: str,
+    app_name: str | None = None,
+    roles: list[str] | None = None,
+) -> dict[str, str]:
+    """(Re)build the cross-compile SDK Docker image(s) and return role -> tag.
+
+    Discovers every ``*.Dockerfile`` directly under ``<app_dir>/Dockerfiles/``
+    and builds each as ``<app_name>-<role>:latest-<arch>`` where ``role`` is
+    the filename stem (e.g. ``gateware.Dockerfile`` -> ``gateware``). Returns
+    a dict mapping role -> image tag.
+
+    Back-compat: if ``<app_dir>/Dockerfiles/`` does not exist and
+    ``<app_dir>/Dockerfile`` does, builds the single legacy image tagged
+    ``<app_name>:latest-<arch>`` (no role suffix) and returns
+    ``{"driver": "<that tag>"}``.
+
+    If ``Dockerfiles/`` exists but is empty, or if neither path exists,
+    raises :class:`FileNotFoundError`.
+
+    For each Dockerfile whose contents contain a line matching
+    ``^ARG HOST_UID\\b`` the build additionally receives
+    ``--build-arg HOST_UID=<os.getuid()>``. On non-POSIX hosts (where
+    ``os.getuid()`` is unavailable) the value falls back to ``1000``.
+
+    Args:
+        app_dir, app_name: as before.
+        roles: when provided, restricts the build to Dockerfiles whose role
+            (filename stem) is in this list. If a requested role is not found
+            on disk, raises FileNotFoundError. When None (default), builds
+            every discovered Dockerfile. The back-compat legacy single-
+            ``./Dockerfile`` path is treated as role "driver"; pass
+            ``roles=["driver"]`` (or None) to consume it; passing
+            ``roles=["gateware"]`` against a legacy repo with no
+            ``Dockerfiles/`` raises FileNotFoundError.
+    """
 
     if app_name is None:
         app_name = os.path.basename(app_dir)
 
     arch_suffix = detect_arch()  # "arm64" or "amd64"
 
-    # Look for a Dockerfile at the top level of the app directory
-    dockerfile_path = os.path.join(app_dir, "Dockerfile")
+    dockerfiles_dir = os.path.join(app_dir, "Dockerfiles")
+    legacy_dockerfile = os.path.join(app_dir, "Dockerfile")
 
-    if not os.path.exists(dockerfile_path):
+    # Discovery: Dockerfiles/ wins over the legacy root ./Dockerfile.
+    discovered: list[tuple[str, str]] = []
+    is_legacy = False
+    if os.path.isdir(dockerfiles_dir):
+        for entry in sorted(os.listdir(dockerfiles_dir)):
+            if entry.endswith(".Dockerfile"):
+                role = entry[: -len(".Dockerfile")]
+                discovered.append((role, os.path.join(dockerfiles_dir, entry)))
+    elif os.path.exists(legacy_dockerfile):
+        discovered.append(("driver", legacy_dockerfile))
+        is_legacy = True
+
+    if not discovered:
         raise FileNotFoundError(
-            f"Expected Dockerfile not found at {dockerfile_path}. "
-            "Ensure your application provides the required Dockerfile."
+            f"Expected Dockerfile not found at {legacy_dockerfile} or any "
+            f"*.Dockerfile under {dockerfiles_dir}. Ensure your application "
+            "provides the required Dockerfile."
         )
 
-    image_tag = f"{app_name}:latest-{arch_suffix}"
+    if roles is not None:
+        requested = set(roles)
+        available = {role for role, _ in discovered}
+        missing = requested - available
+        if missing:
+            raise FileNotFoundError(
+                f"Requested roles {sorted(missing)} not found in {dockerfiles_dir}. "
+                f"Available roles: {sorted(available)}."
+            )
+        discovered = [(role, path) for role, path in discovered if role in requested]
 
-    console.print(f"[yellow]Building Docker image [bold]{image_tag}[/bold]...[/yellow]")
-    subprocess.run(
-        [
-            "docker",
-            "build",
-            "-t",
-            image_tag,
-            "-f",
-            dockerfile_path,
-            ".",
-        ],
-        check=True,
-        cwd=app_dir,
-    )
+    tags: dict[str, str] = {}
+    for role, dockerfile_path in discovered:
+        image_tag = (
+            f"{app_name}:latest-{arch_suffix}"
+            if is_legacy
+            else f"{app_name}-{role}:latest-{arch_suffix}"
+        )
 
-    console.print(f"[green]Successfully built Docker image {image_tag}[/green]")
-    return image_tag
+        build_args: list[str] = []
+        if _dockerfile_needs_host_uid(dockerfile_path):
+            host_uid = _resolve_host_uid()
+            build_args.extend(["--build-arg", f"HOST_UID={host_uid}"])
+
+        console.print(
+            f"[yellow]Building Docker image [bold]{image_tag}[/bold]...[/yellow]"
+        )
+        subprocess.run(
+            [
+                "docker",
+                "build",
+                "-t",
+                image_tag,
+                "-f",
+                dockerfile_path,
+                *build_args,
+                ".",
+            ],
+            check=True,
+            cwd=app_dir,
+        )
+
+        console.print(f"[green]Successfully built Docker image {image_tag}[/green]")
+        tags[role] = image_tag
+
+    return tags
 
 
 def build_app(
@@ -127,12 +223,9 @@ def build_app(
 
     console.print("[yellow]Binary not found, attempting to build...[/yellow]")
 
-    arch_suffix = detect_arch()
-    image_tag = f"{os.path.basename(app_dir)}:latest-{arch_suffix}"
-
     # Build (or rebuild) the Docker image – this function is idempotent.
     try:
-        image_tag = build_docker_image(app_dir, app_name)
+        image_tag = build_docker_image(app_dir, app_name)["driver"]
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         console.print(
             f"[bold red]Error:[/bold red] Failed to build Docker image: {exc}"
@@ -317,10 +410,14 @@ WantedBy=multi-user.target
 
         lifecycle_scripts_tmp: list[str] = []
 
+        # 0o644 suffices for all three: fpm embeds each file's *contents* as a
+        # .deb maintainer script (--after-install / --before-remove /
+        # --after-remove below), and dpkg makes maintainer scripts executable
+        # itself at install time. The staging files' exec bits never ship.
         postinstall_path = os.path.join(staging_dir, "postinstall.sh")
         with open(postinstall_path, "w", encoding="utf-8") as fp:
             fp.write("#!/bin/bash\nset -e\nsystemctl daemon-reload\n")
-        os.chmod(postinstall_path, 0o755)
+        os.chmod(postinstall_path, 0o644)
         lifecycle_scripts_tmp.append(postinstall_path)
 
         preremove_path = os.path.join(staging_dir, "preremove.sh")
@@ -328,13 +425,13 @@ WantedBy=multi-user.target
             fp.write(
                 f"#!/bin/bash\nset -e\nsystemctl stop {app_name} || true\nsystemctl disable {app_name} || true\n"
             )
-        os.chmod(preremove_path, 0o755)
+        os.chmod(preremove_path, 0o644)
         lifecycle_scripts_tmp.append(preremove_path)
 
         postremove_path = os.path.join(staging_dir, "postremove.sh")
         with open(postremove_path, "w", encoding="utf-8") as fp:
             fp.write("#!/bin/bash\nset -e\nsystemctl daemon-reload\n")
-        os.chmod(postremove_path, 0o755)
+        os.chmod(postremove_path, 0o644)
         lifecycle_scripts_tmp.append(postremove_path)
 
         lib_dst_dir = os.path.join(staging_dir, "opt", "scifi", "lib")
@@ -538,15 +635,22 @@ def package_app(app_dir: str, app_name: str) -> bool:
     return build_deb_package(app_dir, app_name)
 
 
-def find_deb_package(dist_dir: str) -> str | None:
-    """Return the path to the .deb generated in *app_dir* or *None*."""
-    for file in os.listdir(dist_dir):
-        if file.endswith(".deb"):
-            return os.path.join(dist_dir, file)
+def find_deb_package(dist_dir: str, package_name: str | None = None) -> str | None:
+    """Return the path to a .deb generated in *dist_dir* or ``None``.
 
-    console.print(
-        f"[bold red]Error:[/bold red] Could not find .deb package in {dist_dir}"
-    )
+    With *package_name*, only ``<package_name>_*.deb`` matches — a peripheral
+    dist/ holds both the driver and the ``-gateware`` deb, and the driver name
+    is a strict prefix of the gateware name.
+    """
+    for file in sorted(os.listdir(dist_dir)):
+        if not file.endswith(".deb"):
+            continue
+        if package_name is not None and not file.startswith(f"{package_name}_"):
+            continue
+        return os.path.join(dist_dir, file)
+
+    wanted = f"{package_name} .deb package" if package_name else ".deb package"
+    console.print(f"[bold red]Error:[/bold red] Could not find {wanted} in {dist_dir}")
     return None
 
 
