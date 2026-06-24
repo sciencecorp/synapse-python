@@ -13,6 +13,7 @@ from google.protobuf.json_format import Parse
 from rich.console import Console
 
 from synapse.cli.query import StreamingQueryClient
+from synapse.cli import impedance_csv
 from synapse.utils.log import log_entry_to_str
 from synapse.cli.device_info_display import DeviceInfoDisplay
 from synapse.utils.proto import load_device_config
@@ -140,26 +141,24 @@ def query(args):
             console.print("Running query:")
             console.print(query_proto)
 
-            result: QueryResponse = syn.Device(args.uri, args.verbose).query(
-                query_proto
-            )
+            device = syn.Device(args.uri, args.verbose)
+            result: QueryResponse = device.query(query_proto)
             if result:
                 console.print(text_format.MessageToString(result))
 
                 if result.HasField("impedance_response"):
                     measurements = result.impedance_response
+                    peripheral_name = impedance_csv.resolve_peripheral_name(
+                        device, query_proto.impedance_query
+                    )
                     # Write impedance measurements to a CSV file
                     timestamp = time.strftime("%Y%m%d-%H%M%S")
                     filename = f"impedance_measurements_{timestamp}.csv"
                     try:
-                        with open(filename, "w") as f:
-                            f.write(
-                                "Electrode ID,Magnitude (Ohms),Phase (degrees),Status\n"
-                            )
-                            for measurement in measurements.measurements:
-                                f.write(
-                                    f"{measurement.electrode_id},{measurement.magnitude},{measurement.phase},1\n"
-                                )
+                        impedance_csv.write_header(filename, peripheral_name)
+                        impedance_csv.append_measurements(
+                            filename, measurements.measurements
+                        )
                         console.print(
                             f"[green]Impedance measurements saved to {filename}[/green]"
                         )
