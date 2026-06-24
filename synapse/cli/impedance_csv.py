@@ -3,7 +3,7 @@
 Both the non-streaming (`synapsectl query`) and streaming (`--stream`) paths
 emit the same CSV so downstream tooling can parse either identically:
 
-    Peripheral: <name>
+    Peripheral,<name>
     Electrode ID,Magnitude (Ohms),Phase (degrees),Status
     <electrode_id>,<magnitude>,<phase>,<status>
     ...
@@ -54,8 +54,9 @@ def resolve_peripheral_name(device, impedance_query) -> str:
 def write_header(filename, peripheral_name):
     """Create (truncate) the CSV and write the peripheral line + column header."""
     with open(filename, "w", newline="") as f:
-        f.write(f"Peripheral: {peripheral_name}{_LINE_TERMINATOR}")
-        csv.writer(f, lineterminator=_LINE_TERMINATOR).writerow(CSV_COLUMNS)
+        writer = csv.writer(f, lineterminator=_LINE_TERMINATOR)
+        writer.writerow(["Peripheral", peripheral_name])
+        writer.writerow(CSV_COLUMNS)
 
 
 def append_measurements(filename, measurements, status=STATUS_OK):
