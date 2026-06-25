@@ -259,8 +259,8 @@ class StreamingQueryClient:
 
     def display_impedance_results(self, measurements):
         table = Table(title="Impedance Measurements")
-        table.add_column("Electorde ID", justify="right")
-        table.add_column("Magnitude (kΩ)", justify="right")
+        table.add_column("Electrode ID", justify="right")
+        table.add_column("Magnitude (Ω)", justify="right")
         table.add_column("Phase (°)", justify="right")
 
         for measurement in measurements:
