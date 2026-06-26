@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 import asyncio
-import csv
 from threading import Thread
 import time
 import sys
 import synapse as syn
 from synapse.api.query_pb2 import QueryRequest, StreamQueryRequest
+from synapse.cli import impedance_csv
 from google.protobuf.json_format import Parse
 
 from rich.progress import (
@@ -154,10 +154,9 @@ class StreamingQueryClient:
         failed_measurements = []
 
         # Create a CSV file to read from at the beginning
+        peripheral_name = impedance_csv.resolve_peripheral_name(self.device, query)
         filename = f"impedance_measurements_{time.strftime('%Y%m%d-%H%M%S')}.csv"
-        with open(filename, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["Electrode ID", "Magnitude", "Phase"])
+        impedance_csv.write_header(filename, peripheral_name)
         self.console.print(f"[green] Started saving measurements to {filename}")
 
         progress = Progress(
@@ -217,6 +216,9 @@ class StreamingQueryClient:
                         progress.console.log(
                             f"electrode id (mag, phase): {sample.electrode_id}\t {sample.magnitude},{sample.phase}"
                         )
+                    self.save_measurement_batch(
+                        filename, failed_batch, status=impedance_csv.STATUS_FAILED
+                    )
                     measurements_received += len(failed_batch)
                     progress.update(
                         task, completed=min(measurements_received, electrode_count)
@@ -257,8 +259,8 @@ class StreamingQueryClient:
 
     def display_impedance_results(self, measurements):
         table = Table(title="Impedance Measurements")
-        table.add_column("Electorde ID", justify="right")
-        table.add_column("Magnitude (kΩ)", justify="right")
+        table.add_column("Electrode ID", justify="right")
+        table.add_column("Magnitude (Ω)", justify="right")
         table.add_column("Phase (°)", justify="right")
 
         for measurement in measurements:
@@ -269,14 +271,11 @@ class StreamingQueryClient:
             )
         self.console.print(table)
 
-    def save_measurement_batch(self, filename, measurements):
+    def save_measurement_batch(
+        self, filename, measurements, status=impedance_csv.STATUS_OK
+    ):
         # Save a batch of measurements as they come in
-        with open(filename, "a", newline="") as f:
-            writer = csv.writer(f)
-            for measurement in measurements:
-                writer.writerow(
-                    [measurement.electrode_id, measurement.magnitude, measurement.phase]
-                )
+        impedance_csv.append_measurements(filename, measurements, status=status)
 
 
 def load_config_from_file(path_to_config):

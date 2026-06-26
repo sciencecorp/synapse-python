@@ -29,7 +29,7 @@ stamp_api_version()
 
 setup(
     name="science-synapse",
-    version="2.7.5",
+    version="2.7.6",
     description="Client library and CLI for the Synapse API",
     author="Science Team",
     author_email="team@science.xyz",
