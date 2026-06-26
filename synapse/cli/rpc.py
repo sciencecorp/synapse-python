@@ -142,15 +142,22 @@ def query(args):
             console.print(query_proto)
 
             device = syn.Device(args.uri, args.verbose)
+
+            # Resolve the peripheral name before running the query, matching the
+            # streaming path: if the probe un-enumerates as a result of the query
+            # we can still label the CSV correctly.
+            peripheral_name = None
+            if query_proto.HasField("impedance_query"):
+                peripheral_name = impedance_csv.resolve_peripheral_name(
+                    device, query_proto.impedance_query
+                )
+
             result: QueryResponse = device.query(query_proto)
             if result:
                 console.print(text_format.MessageToString(result))
 
                 if result.HasField("impedance_response"):
                     measurements = result.impedance_response
-                    peripheral_name = impedance_csv.resolve_peripheral_name(
-                        device, query_proto.impedance_query
-                    )
                     # Write impedance measurements to a CSV file
                     timestamp = time.strftime("%Y%m%d-%H%M%S")
                     filename = f"impedance_measurements_{timestamp}.csv"
