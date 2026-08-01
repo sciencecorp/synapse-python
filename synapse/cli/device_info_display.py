@@ -69,6 +69,14 @@ def visualize_configuration(info_dict, status):
                 frame_rate = source.get("frame_rate", "Unknown")
                 node_tree.add(f"Frame Rate: {frame_rate} hz")
 
+                display_map = source.get("display_map", None)
+                if display_map:
+                    n_rows = len(display_map.get("row_map", []))
+                    n_cols = len(display_map.get("col_map", []))
+                    node_tree.add(
+                        f"Display Map: {n_rows} x {n_cols} (custom pin mapping)"
+                    )
+
                 optical_stim_status = nodes_status[index].get(
                     "optical_stimulation", None
                 )
