@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -61,6 +62,13 @@ def _add_half_subcommands(parent_parser, *, func, action_label, extra_args):
     the old half-selector flags. A bare parent command (no leaf chosen) prints
     its own help. *action_label* is the verb phrase used in each leaf's help
     line ("Build/package", "Build/deploy").
+
+    Every leaf also carries ``--profile``, which selects the gateware project
+    in a repo that ships one per target profile (``src/gateware/<profile>/``).
+    It is wired here rather than per-command because it steers both halves: the
+    gateware half picks which project to build, and the driver half forwards it
+    to CMake as ``-DAXON_TARGET_PROFILE`` so profile-dependent constants (clock
+    rates, part numbers) compile against the devkit the bitstream targets.
     """
     targets = {
         "driver": "only the driver .so (skips the gateware container)",
@@ -75,6 +83,17 @@ def _add_half_subcommands(parent_parser, *, func, action_label, extra_args):
             nargs="?",
             default=".",
             help="Path to the peripheral plugin directory (defaults to cwd)",
+        )
+        leaf.add_argument(
+            "--profile",
+            type=str,
+            default=None,
+            help=(
+                "Target profile to build for, naming a gateware project at "
+                "src/gateware/<profile>/ (e.g. via-devkit, nerv512u-devkit). "
+                "Required when the repo has more than one; may also be set via "
+                f"${gateware.PROFILE_ENV_VAR}."
+            ),
         )
         extra_args(leaf)
         leaf.set_defaults(func=func, half=half)
@@ -205,9 +224,18 @@ def _expected_so_filename(manifest: dict) -> str:
 
 
 def build_peripheral_so(
-    peripheral_dir: str, plugin_name: str, so_filename: str, clean: bool = False
+    peripheral_dir: str,
+    plugin_name: str,
+    so_filename: str,
+    clean: bool = False,
+    profile: Optional[str] = None,
 ) -> bool:
-    """Cross-compile *plugin_name* into a .so inside its SDK container."""
+    """Cross-compile *plugin_name* into a .so inside its SDK container.
+
+    When *profile* is set it is passed to CMake as ``-DAXON_TARGET_PROFILE``,
+    letting the driver compile against the target devkit's parameters. Left
+    unset for single-profile repos, whose CMakeLists never reads the variable.
+    """
 
     console.print(f"[yellow]Building peripheral plugin: {plugin_name}...[/yellow]")
     so_path = os.path.join(peripheral_dir, "build/aarch64", so_filename)
@@ -263,10 +291,18 @@ def build_peripheral_so(
         )
 
     console.print("[blue]Running cmake build...[/blue]")
+    # Injected into both configure branches (preset and legacy) so the choice
+    # of profile doesn't depend on which one a given repo happens to take.
+    # shlex.quote keeps a hostile profile name from breaking out of the
+    # `bash -c` string; the value reaches us from --profile or the environment.
+    profile_flag = (
+        f" -DAXON_TARGET_PROFILE={shlex.quote(profile)}" if profile else ""
+    )
     build_cmd_str = (
         "cd /home/workspace && "
         "if [ -f CMakePresets.json ]; then "
-        "cmake --preset=dynamic-aarch64 -DVCPKG_TARGET_TRIPLET='arm64-linux-dynamic-release' && "
+        "cmake --preset=dynamic-aarch64 -DVCPKG_TARGET_TRIPLET='arm64-linux-dynamic-release'"
+        f"{profile_flag} && "
         "cmake --build --preset=cross-release -j$(nproc); "
         "else "
         "export VCPKG_DEFAULT_TRIPLET=arm64-linux-dynamic-release && "
@@ -276,7 +312,7 @@ def build_peripheral_so(
         "-DVCPKG_INSTALLED_DIR=${VCPKG_ROOT}/build/host/vcpkg_installed "
         "-DBUILD_SHARED_LIBS=ON "
         "-DCMAKE_BUILD_TYPE=Release "
-        "-DBUILD_FOR_ARM64=ON && "
+        f"-DBUILD_FOR_ARM64=ON{profile_flag} && "
         "cmake --build build/aarch64 -j$(nproc); "
         "fi"
     )
@@ -703,14 +739,19 @@ def build_gateware_deb(
 # ---------------------------------------------------------------------------
 
 
-def _clean_gateware_tree(peripheral_dir: str, gateware_image_tag: str) -> None:
-    """Wipe ``<peripheral_dir>/src/gateware/build/`` via a docker run.
+def _clean_gateware_tree(
+    peripheral_dir: str, gateware_image_tag: str, project_subdir: str
+) -> None:
+    """Wipe ``<peripheral_dir>/<project_subdir>/build/`` via a docker run.
 
     Mirrors the driver-side clean in :func:`build_peripheral_so`: it runs the
     rm inside the gateware container so the host user does not need to chown
-    files written as the in-container ``dev`` user.
+    files written as the in-container ``dev`` user. Scoped to the selected
+    project so cleaning one profile leaves the other profile's build intact.
     """
-    console.print("[yellow]Cleaning gateware build directory...[/yellow]")
+    console.print(
+        f"[yellow]Cleaning gateware build directory ({project_subdir}/build)...[/yellow]"
+    )
     clean_cmd = [
         "docker",
         "run",
@@ -720,7 +761,7 @@ def _clean_gateware_tree(peripheral_dir: str, gateware_image_tag: str) -> None:
         gateware_image_tag,
         "/bin/bash",
         "-c",
-        "cd /home/workspace && rm -rf src/gateware/build || true",
+        f"cd /home/workspace && rm -rf {shlex.quote(project_subdir)}/build || true",
     ]
     try:
         subprocess.run(clean_cmd, check=True, cwd=peripheral_dir)
@@ -728,7 +769,7 @@ def _clean_gateware_tree(peripheral_dir: str, gateware_image_tag: str) -> None:
         console.print("[yellow]Warning: gateware clean failed; continuing.[/yellow]")
 
 
-def _run_gateware_half(peripheral_dir: str) -> Optional[str]:
+def _run_gateware_half(peripheral_dir: str, project_subdir: str) -> Optional[str]:
     """Run the gateware build half; return the emitted ``.bit`` path or None."""
     try:
         image_tag = build_docker_image(
@@ -741,7 +782,9 @@ def _run_gateware_half(peripheral_dir: str) -> Optional[str]:
         return None
 
     try:
-        return gateware.run_gateware_build(peripheral_dir, image_tag)
+        return gateware.run_gateware_build(
+            peripheral_dir, image_tag, project_subdir=project_subdir
+        )
     except LicenseUnsetError as exc:
         console.print(f"[bold red]Error:[/bold red] {exc}")
         return None
@@ -760,12 +803,21 @@ def _gateware_usb_pid(bit_path: str) -> Optional[int]:
 
 
 def _build_debs(
-    peripheral_dir: str, manifest: dict, half: str, *, clean: bool = False
+    peripheral_dir: str,
+    manifest: dict,
+    half: str,
+    *,
+    clean: bool = False,
+    profile: Optional[str] = None,
 ) -> Optional[list]:
     """Build the requested halves; return built .deb paths or None on failure.
 
     Driver deb first, then the -gateware deb — deploy streams them in this
     order so the plugin lands before its gateware shows up as flashable.
+
+    The gateware project is resolved once, up front, even for a driver-only
+    build: the driver's compiled-in profile has to agree with the gateware it
+    will drive, and failing here beats discovering the mismatch on hardware.
     """
     plugin_name = manifest["name"]
     version = manifest.get("version", "0.1.0")
@@ -773,6 +825,22 @@ def _build_debs(
     do_gateware = half in ("gateware", "both")
     dist_dir = os.path.join(peripheral_dir, "dist")
     debs: list = []
+
+    # Resolve the target profile from the selected gateware project. A
+    # single-project repo resolves to plain "src/gateware" and yields no
+    # profile, which is what pre-multi-profile repos expect.
+    try:
+        project_subdir = gateware.resolve_gateware_project(peripheral_dir, profile)
+    except gateware.GatewareProfileError as exc:
+        console.print(f"[bold red]Error:[/bold red] {exc}")
+        return None
+    resolved_profile = (
+        project_subdir.split("/")[-1]
+        if project_subdir != gateware.GATEWARE_ROOT_SUBDIR
+        else None
+    )
+    if resolved_profile:
+        console.print(f"[bold]Target profile:[/bold] [yellow]{resolved_profile}[/yellow]")
 
     if do_gateware and clean:
         try:
@@ -784,12 +852,16 @@ def _build_debs(
                 f"[bold red]Error:[/bold red] Failed to build gateware Docker image: {exc}"
             )
             return None
-        _clean_gateware_tree(peripheral_dir, gateware_image_tag)
+        _clean_gateware_tree(peripheral_dir, gateware_image_tag, project_subdir)
 
     if do_driver:
         so_filename = _expected_so_filename(manifest)
         if not build_peripheral_so(
-            peripheral_dir, plugin_name, so_filename, clean=clean
+            peripheral_dir,
+            plugin_name,
+            so_filename,
+            clean=clean,
+            profile=resolved_profile,
         ):
             return None
         so_path = os.path.join(peripheral_dir, "build/aarch64", so_filename)
@@ -803,7 +875,7 @@ def _build_debs(
         debs.append(deb)
 
     if do_gateware:
-        bit_path = _run_gateware_half(peripheral_dir)
+        bit_path = _run_gateware_half(peripheral_dir, project_subdir)
         if bit_path is None:
             return None
         usb_pid = _gateware_usb_pid(bit_path)
@@ -850,7 +922,11 @@ def build_cmd(args) -> None:
     )
 
     debs = _build_debs(
-        peripheral_dir, manifest, getattr(args, "half", "both"), clean=args.clean
+        peripheral_dir,
+        manifest,
+        getattr(args, "half", "both"),
+        clean=args.clean,
+        profile=getattr(args, "profile", None),
     )
     if debs is None:
         return
@@ -915,7 +991,9 @@ def deploy_cmd(args) -> None:
             f"[bold]Deploying peripheral plugin:[/bold] [yellow]{manifest['name']}[/yellow]"
         )
 
-        debs = _build_debs(peripheral_dir, manifest, half)
+        debs = _build_debs(
+            peripheral_dir, manifest, half, profile=getattr(args, "profile", None)
+        )
         if debs is None:
             return
         deb_packages = debs
@@ -1012,11 +1090,38 @@ def gateware_cmd(args) -> None:
         )
         sys.exit(1)
 
+    # Best-effort project resolution for the cwd redirect. REMAINDER owns every
+    # token after `gateware`, so there is no --profile to read here; only
+    # $SYNAPSE_GATEWARE_PROFILE can select one. An unresolvable project (most
+    # often a multi-profile repo with nothing selected) is NOT fatal: the SDK
+    # runs from the repo root and the user's own `--project` reaches it
+    # verbatim. Hint at both escapes rather than failing the command.
+    try:
+        project_subdir = gateware.resolve_gateware_project(peripheral_dir)
+    except gateware.GatewareProfileError as exc:
+        gateware_root = Path(peripheral_dir) / gateware.GATEWARE_ROOT_SUBDIR
+        if gateware_root.is_dir() and not gateware.discover_gateware_profiles(
+            peripheral_dir
+        ):
+            # src/gateware/ exists but holds no project yet. Redirect anyway --
+            # this is the scaffolding case, where `gateware new <profile>
+            # --target <profile>` is meant to create the project *inside*
+            # src/gateware/, and cwd is what decides where it lands.
+            project_subdir = gateware.GATEWARE_ROOT_SUBDIR
+        else:
+            project_subdir = None
+            console.print(
+                f"[yellow]Note:[/yellow] {exc} Running the SDK from the repo "
+                f"root; pass `--project {gateware.GATEWARE_ROOT_SUBDIR}/<profile>` "
+                f"or set {gateware.PROFILE_ENV_VAR} to scope it to one project."
+            )
+
     sys.exit(
         gateware._gateware_passthrough(
             argv=list(args.argv),
             peripheral_dir=peripheral_dir,
             license_args=license_args,
             gateware_image_tag=tags["gateware"],
+            project_subdir=project_subdir,
         )
     )
