@@ -16,6 +16,12 @@ from synapse.api.status_pb2 import DeviceState, StatusCode
 from synapse.api.node_pb2 import NodeType
 from synapse.client.taps import Tap
 from synapse.utils.proto import load_device_config
+from synapse.utils.electrode_ids import (
+    GPIO_CHANNEL_ID_OFFSET,
+    ElectrodeRowIds,
+    build_channel_to_electrode_map,
+    derive_electrode_row_ids,
+)
 from synapse.api.datatype_pb2 import BroadbandFrame
 
 
@@ -252,7 +258,7 @@ class BroadbandFrameWriter:
     def set_attributes(
         self,
         sample_rate_hz: float,
-        channels: list,
+        electrode_rows: ElectrodeRowIds,
         broadband_lsb_uv: float,
         session_description: str = "",
     ):
@@ -269,7 +275,22 @@ class BroadbandFrameWriter:
         electrodes_group = self.file.create_group(
             "general/extracellular_ephys/electrodes"
         )
-        electrodes_group.create_dataset("id", data=channels, dtype="uint32")
+        # `id` holds physical electrode ids where we could resolve them (see
+        # derive_electrode_row_ids), and degrades to logical channel ids or row
+        # indices otherwise — `id_source` says which. The logical channel id and
+        # channel type are written alongside it, as equal-length datasets, so
+        # downstream analysis can reconstruct the full mapping.
+        electrodes_group.create_dataset(
+            "id", data=electrode_rows.ids, dtype="uint32"
+        )
+        electrodes_group.create_dataset(
+            "channel_id", data=electrode_rows.channel_ids, dtype="uint32"
+        )
+        electrodes_group.create_dataset(
+            "channel_type", data=electrode_rows.types, dtype="uint32"
+        )
+        electrodes_group.attrs["id_source"] = electrode_rows.source
+        electrodes_group.attrs["gpio_channel_id_offset"] = GPIO_CHANNEL_ID_OFFSET
 
     def start(self):
         """Start the writer thread"""
@@ -685,8 +706,15 @@ def list_available_taps(args, device, console):
     )
 
 
-def detect_stream_parameters(broadband_tap, console):
-    """Detect sample rate and available channels from the first message"""
+def detect_stream_parameters(broadband_tap, console, channel_to_electrode=None):
+    """Detect sample rate and channel identity from the first message
+
+    Returns (sample_rate, electrode_rows, first_frame). `electrode_rows` carries
+    one id per frame_data entry: the physical electrode where the device
+    configuration lets us resolve it, and a documented fallback otherwise. It
+    replaces the old range(num_channels), which labeled every row by its
+    position and so mislabeled any sparse or non-ascending configuration.
+    """
     console.log("[cyan]Detecting stream parameters from first message...[/cyan]")
 
     try:
@@ -704,15 +732,23 @@ def detect_stream_parameters(broadband_tap, console):
 
         # Extract parameters
         sample_rate = first_frame.sample_rate_hz
-        num_channels = len(first_frame.frame_data)
-        available_channels = list(range(num_channels))
+        electrode_rows = derive_electrode_row_ids(first_frame, channel_to_electrode)
+        if electrode_rows is None:
+            console.print(
+                "[bold red]First message carried no channel data[/bold red]"
+            )
+            return None, None, None
 
+        num_channels = len(electrode_rows.ids)
         console.log(f"[green]Detected sample rate: {sample_rate} Hz[/green]")
         console.log(
-            f"[green]Detected {num_channels} channels (0-{num_channels - 1})[/green]"
+            f"[green]Detected {num_channels} channels "
+            f"(id source: {electrode_rows.source})[/green]"
         )
+        for warning in electrode_rows.warnings:
+            console.print(f"[yellow]{warning}[/yellow]")
 
-        return sample_rate, available_channels, first_frame
+        return sample_rate, electrode_rows, first_frame
 
     except Exception as e:
         console.print(f"[bold red]Error detecting stream parameters: {e}[/bold red]")
@@ -944,19 +980,24 @@ def read(args):
         console.print("[bold red]Failed to get broadband tap[/bold red]")
         return
 
+    # Get the latest info on the device. The stream identifies its rows only by
+    # logical channel id, so the applied configuration is the only place the
+    # physical electrode behind each row is recorded.
+    device_info = device.info()
+    channel_to_electrode = build_channel_to_electrode_map(device_info)
+
     # Detect stream parameters from the first message
-    sample_rate, available_channels, first_frame = detect_stream_parameters(
-        broadband_tap, console
+    sample_rate, electrode_rows, first_frame = detect_stream_parameters(
+        broadband_tap, console, channel_to_electrode
     )
     if sample_rate is None:
         console.print("[bold red]Failed to detect stream parameters[/bold red]")
         return
+    available_channels = electrode_rows.ids
 
     # Setup our HDF5 writer if output is requested
     writer = None
     if args.output:
-        # Get the latest info on the device
-        device_info = device.info()
         broadband_node = get_broadband_node_status(device_info)
         if broadband_node is None:
             console.print(
@@ -967,7 +1008,7 @@ def read(args):
         writer = BroadbandFrameWriter(args.output)
         writer.set_attributes(
             sample_rate_hz=sample_rate,
-            channels=available_channels,
+            electrode_rows=electrode_rows,
             broadband_lsb_uv=broadband_lsb_uv,
         )
         writer.start()
