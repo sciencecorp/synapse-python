@@ -105,14 +105,20 @@ def load_h5_data(data_file, console, time_range=None):
         # List immediate groups (top-level only)
         print_tree(f, console)
 
-        # Get channel information
+        # Get channel information. `id` is one id per entry per frame, in frame
+        # order — physical electrode ids for recordings that could resolve them
+        # (see id_source), logical channel ids or row indices otherwise.
         channels = f["/general/extracellular_ephys/electrodes/"]
         channel_ids = channels["id"][:].tolist()
         number_of_channels = len(channel_ids)
 
         sample_rate = float(attributes["sample_rate_hz"])
         console.print(f"Sample rate: {sample_rate} Hz")
-        console.print(f"Found {number_of_channels} channels")
+        id_source = channels.attrs.get("id_source")
+        if id_source is not None:
+            console.print(f"Found {number_of_channels} channels (id source: {id_source})")
+        else:
+            console.print(f"Found {number_of_channels} channels")
 
         # Get frame data info
         frame_data = f["/acquisition/ElectricalSeries"]
@@ -204,8 +210,11 @@ def load_h5_data(data_file, console, time_range=None):
                 actual_samples_per_channel, number_of_channels
             )
 
-            # Create DataFrame
-            df = pd.DataFrame(reshaped_data, columns=range(number_of_channels))
+            # Create DataFrame, labeling each column with the channel id of the
+            # row it came from. filter_channels selects by label (--channels
+            # takes channel ids), so positional column labels quietly selected
+            # the wrong traces for any recording whose ids aren't 0..N-1.
+            df = pd.DataFrame(reshaped_data, columns=channel_ids)
 
         return PlotData(data=df, sample_rate=sample_rate, channel_ids=channel_ids)
 
