@@ -28,6 +28,15 @@ def add_commands(subparsers):
     unpair_parser = subparsers.add_parser(
         "unpair", help="Forget the locally stored token for a device"
     )
+    unpair_parser.add_argument(
+        "identifier",
+        nargs="?",
+        default=None,
+        help="Serial or stored name of a device to forget, matched against "
+        "~/.scifi-env. Works without reaching the device -- use this when the "
+        "device is gone. If omitted, --uri is used to contact the device and "
+        "look up its serial instead.",
+    )
     unpair_parser.set_defaults(func=unpair)
 
 
@@ -110,28 +119,75 @@ def pair(args):
 
 def unpair(args):
     console = Console()
-    device = syn.Device(args.uri, args.verbose)
 
+    # A positional identifier is a request to clean up local state without
+    # touching the network at all -- this is the "device is gone" case, so it
+    # takes priority even if --uri was also given.
+    identifier = getattr(args, "identifier", None)
+    if identifier:
+        _unpair_by_identifier(console, identifier)
+        return
+
+    if not args.uri:
+        console.print(
+            "[yellow]Specify a device: `unpair <serial-or-name>` to remove a "
+            "local entry, or `--uri <device>` to look one up by contacting it."
+        )
+        _print_stored_entries(console)
+        return
+
+    device = syn.Device(args.uri, args.verbose)
     try:
         info = device.rpc.Info(Empty(), timeout=10.0)
-        serial = info.serial
-        name = info.name
-    except grpc.RpcError:
-        # The device may be gone; fall back to matching what we have locally.
-        console.print("[yellow]Could not reach the device; looking up local entries.")
-        serial = None
-        name = args.uri
+    except grpc.RpcError as e:
+        console.print(f"[bold red]Could not reach the device: {e.details()}")
+        console.print(
+            "[dim]Run `unpair <serial-or-name>` to remove a local entry "
+            "without contacting the device.[/dim]"
+        )
+        return
 
-    if not serial:
-        matches = [s for s, (n, _) in auth.load_tokens().items() if n == args.uri]
-        if len(matches) != 1:
-            console.print(
-                "[bold red]Could not determine which device to unpair. "
-                f"Local entries: {list(auth.load_tokens().keys())}"
-            )
-            return
+    _remove_and_report(console, info.serial, info.name)
+
+
+def _unpair_by_identifier(console, identifier):
+    """Forget a locally stored token, matched by serial or name -- no network."""
+    tokens = auth.load_tokens()
+
+    if identifier in tokens:
+        _remove_and_report(console, identifier, tokens[identifier][0])
+        return
+
+    matches = [serial for serial, (name, _) in tokens.items() if name == identifier]
+    if len(matches) == 1:
         serial = matches[0]
+        _remove_and_report(console, serial, tokens[serial][0])
+        return
 
+    if not matches:
+        console.print(f"[bold red]No stored entry matches '{identifier}'.")
+        _print_stored_entries(console)
+        return
+
+    console.print(
+        f"[bold red]'{identifier}' matches more than one stored device; "
+        "re-run with the serial, which is unique:"
+    )
+    for serial in matches:
+        console.print(f"  [dim]{tokens[serial][0]}  (serial {serial})[/dim]")
+
+
+def _print_stored_entries(console):
+    tokens = auth.load_tokens()
+    if not tokens:
+        console.print("[dim]No devices are currently paired.[/dim]")
+        return
+    console.print("[dim]Stored entries:[/dim]")
+    for serial, (name, _) in sorted(tokens.items()):
+        console.print(f"  [dim]{name}  (serial {serial})[/dim]")
+
+
+def _remove_and_report(console, serial, name):
     if auth.remove_token(serial):
         console.print(f"[bold green]Forgot the token for {name} ({serial}).")
         console.print(
