@@ -95,3 +95,121 @@ def test_env_override_is_honored(tmp_path, monkeypatch):
     auth.save_token("NYX1512-0042", "sci-fi-1234", "f3a9c1")
 
     assert custom.exists()
+
+
+def test_open_methods_are_not_gated():
+    for name in ("Info", "GetLogs", "TailLogs", "RequestAuth"):
+        assert f"/synapse.SynapseDevice/{name}" in auth.OPEN_METHODS
+
+
+def test_closed_methods_are_not_in_the_open_set():
+    for name in ("Configure", "Start", "Stop", "Query", "StreamQuery"):
+        assert f"/synapse.SynapseDevice/{name}" not in auth.OPEN_METHODS
+
+
+class _FakeCallDetails:
+    def __init__(self, method):
+        self.method = method
+        self.timeout = None
+        self.metadata = None
+        self.credentials = None
+        self.wait_for_ready = None
+        self.compression = None
+
+
+def test_interceptor_sends_no_metadata_for_open_methods(env_file, monkeypatch):
+    auth.save_token("NYX1512-0042", "sci-fi-1234", "f3a9c1")
+
+    # Resolution would need a network call; if it happens for an open method,
+    # this raises and the test fails.
+    def explode(_channel):
+        raise AssertionError("resolved the serial for an open method")
+
+    interceptor = auth.AuthInterceptor(serial_resolver=explode)
+    seen = {}
+
+    def continuation(details, request):
+        seen["metadata"] = details.metadata
+        return "response"
+
+    result = interceptor.intercept_unary_unary(
+        continuation, _FakeCallDetails("/synapse.SynapseDevice/Info"), object()
+    )
+
+    assert result == "response"
+    assert not seen["metadata"]
+
+
+def test_interceptor_attaches_token_for_closed_methods(env_file):
+    auth.save_token("NYX1512-0042", "sci-fi-1234", "f3a9c1")
+
+    interceptor = auth.AuthInterceptor(serial_resolver=lambda _c: "NYX1512-0042")
+    seen = {}
+
+    def continuation(details, request):
+        seen["metadata"] = dict(details.metadata or [])
+        return "response"
+
+    interceptor.intercept_unary_unary(
+        continuation, _FakeCallDetails("/synapse.SynapseDevice/Configure"), object()
+    )
+
+    assert seen["metadata"]["x-scifi-auth-token"] == "f3a9c1"
+
+
+def test_interceptor_skips_resolution_when_no_tokens_exist(env_file):
+    def explode(_channel):
+        raise AssertionError("resolved the serial with an empty env file")
+
+    interceptor = auth.AuthInterceptor(serial_resolver=explode)
+    seen = {}
+
+    def continuation(details, request):
+        seen["metadata"] = details.metadata
+        return "response"
+
+    interceptor.intercept_unary_unary(
+        continuation, _FakeCallDetails("/synapse.SynapseDevice/Configure"), object()
+    )
+
+    assert not seen["metadata"]
+
+
+def test_interceptor_resolves_only_once_per_channel(env_file):
+    auth.save_token("NYX1512-0042", "sci-fi-1234", "f3a9c1")
+
+    calls = []
+
+    def counting_resolver(_channel):
+        calls.append(1)
+        return "NYX1512-0042"
+
+    interceptor = auth.AuthInterceptor(serial_resolver=counting_resolver)
+
+    def continuation(details, request):
+        return "response"
+
+    for _ in range(3):
+        interceptor.intercept_unary_unary(
+            continuation, _FakeCallDetails("/synapse.SynapseDevice/Configure"), object()
+        )
+
+    assert len(calls) == 1
+
+
+def test_unknown_serial_sends_no_token(env_file):
+    auth.save_token("NYX1512-0042", "sci-fi-1234", "f3a9c1")
+
+    interceptor = auth.AuthInterceptor(serial_resolver=lambda _c: "SOME-OTHER-SERIAL")
+    seen = {}
+
+    def continuation(details, request):
+        seen["metadata"] = details.metadata
+        return "response"
+
+    interceptor.intercept_unary_unary(
+        continuation, _FakeCallDetails("/synapse.SynapseDevice/Configure"), object()
+    )
+
+    # No token for that serial: send nothing and let the server explain.
+    assert not seen["metadata"]

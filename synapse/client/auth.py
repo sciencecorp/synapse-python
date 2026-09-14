@@ -17,8 +17,11 @@ The file is not shell-sourceable: device names contain hyphens, so
 
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+
+import grpc
 
 logger = logging.getLogger(__name__)
 
@@ -96,3 +99,114 @@ def _write(tokens: Dict[str, Tuple[str, str]]) -> None:
     with os.fdopen(fd, "w") as f:
         f.writelines(lines)
     os.chmod(path, 0o600)
+
+
+METADATA_KEY = "x-scifi-auth-token"
+
+# Mirrors scifi-server's open set (src/auth/rpc_auth_policy.cpp). These need no
+# token, so the interceptor never triggers serial resolution for them.
+OPEN_METHODS = frozenset(
+    {
+        "/synapse.SynapseDevice/Info",
+        "/synapse.SynapseDevice/GetLogs",
+        "/synapse.SynapseDevice/TailLogs",
+        "/synapse.SynapseDevice/RequestAuth",
+    }
+)
+
+
+def resolve_serial_via_info(channel) -> Optional[str]:
+    """One Info call to learn the device serial. Info is open, so no token."""
+    from google.protobuf.empty_pb2 import Empty
+
+    from synapse.api.synapse_pb2_grpc import SynapseDeviceStub
+
+    try:
+        info = SynapseDeviceStub(channel).Info(Empty(), timeout=5.0)
+        return info.serial or None
+    except grpc.RpcError as e:
+        logger.debug("Could not read the device serial: %s", e)
+        return None
+
+
+class AuthInterceptor(
+    grpc.UnaryUnaryClientInterceptor,
+    grpc.UnaryStreamClientInterceptor,
+    grpc.StreamUnaryClientInterceptor,
+    grpc.StreamStreamClientInterceptor,
+):
+    """Attaches the pairing token to calls that need one.
+
+    Resolution is lazy and happens at most once per channel: the first call to a
+    token-gated method learns the device serial, looks the token up, and caches
+    it. Open methods never trigger it, so discovery and log tailing cost nothing
+    extra, and neither does an unpaired user with no env file.
+    """
+
+    def __init__(self, channel=None, serial_resolver=None):
+        self._channel = channel
+        self._resolve = serial_resolver or resolve_serial_via_info
+        self._lock = threading.Lock()
+        self._resolved = False
+        self._token: Optional[str] = None
+
+    def _token_for_call(self) -> Optional[str]:
+        with self._lock:
+            if self._resolved:
+                return self._token
+            self._resolved = True
+
+            if not has_any_tokens():
+                # Nothing paired anywhere: do not pay for an Info call.
+                return None
+
+            serial = self._resolve(self._channel)
+            if not serial:
+                logger.debug("No device serial available; sending no token")
+                return None
+
+            self._token = token_for_serial(serial)
+            if self._token is None:
+                logger.debug("No token stored for serial %s", serial)
+            return self._token
+
+    def _with_token(self, call_details):
+        if call_details.method in OPEN_METHODS:
+            return call_details
+
+        token = self._token_for_call()
+        if not token:
+            return call_details
+
+        metadata = list(call_details.metadata or [])
+        metadata.append((METADATA_KEY, token))
+        return _ClientCallDetails(call_details, metadata)
+
+    def intercept_unary_unary(self, continuation, call_details, request):
+        return continuation(self._with_token(call_details), request)
+
+    def intercept_unary_stream(self, continuation, call_details, request):
+        return continuation(self._with_token(call_details), request)
+
+    def intercept_stream_unary(self, continuation, call_details, request_iterator):
+        return continuation(self._with_token(call_details), request_iterator)
+
+    def intercept_stream_stream(self, continuation, call_details, request_iterator):
+        return continuation(self._with_token(call_details), request_iterator)
+
+
+class _ClientCallDetails(grpc.ClientCallDetails):
+    """grpc.ClientCallDetails is not always a namedtuple, so carry a copy."""
+
+    def __init__(self, original, metadata):
+        self.method = original.method
+        self.timeout = original.timeout
+        self.metadata = metadata
+        self.credentials = original.credentials
+        self.wait_for_ready = getattr(original, "wait_for_ready", None)
+        self.compression = getattr(original, "compression", None)
+
+
+def intercept(channel):
+    """Wrap `channel` so token-gated calls carry the pairing token."""
+    return grpc.intercept_channel(channel, AuthInterceptor(channel))

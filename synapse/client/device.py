@@ -22,6 +22,7 @@ from synapse.api.app_pb2 import (
     ListAppsRequest,
     ListAppsResponse,
 )
+from synapse.client import auth
 from synapse.client.config import Config
 from synapse.utils.log import log_level_to_pb
 
@@ -38,7 +39,10 @@ class Device(object):
             self.uri = uri
 
         self.channel = grpc.insecure_channel(self.uri)
-        self.rpc = SynapseDeviceStub(self.channel)
+        # The interceptor resolves the serial and attaches the pairing token
+        # lazily, on the first call that needs one. Construction stays free of
+        # network I/O, so offline construction and existing tests are unaffected.
+        self.rpc = SynapseDeviceStub(auth.intercept(self.channel))
 
         self.logger = logging.getLogger(__name__)
         level = logging.DEBUG if verbose else logging.ERROR
