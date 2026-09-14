@@ -33,8 +33,13 @@ def test_saved_token_round_trips(env_file):
 def test_renamed_device_still_matches_by_serial(env_file):
     auth.save_token("NYX1512-0042", "old-name", "f3a9c1")
 
-    # The device was renamed; the serial is unchanged, so the token still works.
+    # The device was renamed on a later pairing; the serial (and token) are
+    # unchanged, so the lookup must still work, and the stored hint must be
+    # the new name, not the stale one.
+    auth.save_token("NYX1512-0042", "new-name", "f3a9c1")
+
     assert auth.token_for_serial("NYX1512-0042") == "f3a9c1"
+    assert auth.load_tokens()["NYX1512-0042"] == ("new-name", "f3a9c1")
 
 
 def test_saving_the_same_serial_replaces_the_entry(env_file):
@@ -59,6 +64,32 @@ def test_file_is_owner_only(env_file):
 
     mode = stat.S_IMODE(os.stat(env_file).st_mode)
     assert mode == 0o600
+
+
+def test_no_temp_file_left_behind_after_save(env_file):
+    auth.save_token("NYX1512-0042", "sci-fi-1234", "f3a9c1")
+
+    leftovers = [p.name for p in env_file.parent.iterdir() if p != env_file]
+    assert leftovers == []
+
+
+def test_failed_write_leaves_original_file_intact(env_file):
+    if os.geteuid() == 0:
+        pytest.skip("root bypasses directory permission checks")
+
+    auth.save_token("NYX1512-0042", "sci-fi-1234", "f3a9c1")
+    original = env_file.read_bytes()
+
+    # Strip write permission on the directory so the temp file used for the
+    # atomic replace cannot even be created; the original must survive.
+    env_file.parent.chmod(0o500)
+    try:
+        with pytest.raises(OSError):
+            auth.save_token("NYX1512-0099", "sci-fi-9999", "token-b")
+    finally:
+        env_file.parent.chmod(0o700)
+
+    assert env_file.read_bytes() == original
 
 
 def test_comments_and_blank_lines_are_ignored(env_file):

@@ -17,6 +17,7 @@ The file is not shell-sourceable: device names contain hyphens, so
 
 import logging
 import os
+import tempfile
 import threading
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -93,12 +94,38 @@ def _write(tokens: Dict[str, Tuple[str, str]]) -> None:
     for serial, (name, token) in sorted(tokens.items()):
         lines.append(f"{serial}\t{name}\t{token}\n")
 
-    # Create with 0600 from the outset rather than chmod-ing afterwards, so the
-    # token is never briefly world-readable.
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.writelines(lines)
-    os.chmod(path, 0o600)
+    # Write to a temp file in the same directory, then atomically swap it in
+    # with os.replace(). A truncate-in-place rewrite can leave the file empty
+    # or torn if the process dies mid-write (OOM kill, power loss, disk full),
+    # losing every paired device's token, and offers no protection against two
+    # concurrent writers interleaving bytes. os.replace() is atomic within a
+    # filesystem, so a reader always sees either the complete old file or the
+    # complete new one -- hence the temp file must live next to the target
+    # (not /tmp, which may be a different mount than $HOME).
+    #
+    # mkstemp() creates the file with mode 0600 already (it does not consult
+    # umask), but we chmod explicitly rather than rely on that, matching how
+    # the final file is created 0600 from the outset, never briefly
+    # world-readable, not even under the temp name.
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".scifi-env.", suffix=".tmp", dir=str(path.parent)
+    )
+    try:
+        os.chmod(tmp_path, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.writelines(lines)
+            f.flush()
+            # fsync before the replace: without it, the rename can be durable
+            # while the file's contents are not, so a crash right after could
+            # swap in a file that reads back empty.
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 METADATA_KEY = "x-scifi-auth-token"
