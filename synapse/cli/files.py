@@ -84,6 +84,14 @@ def add_commands(subparsers: argparse._SubParsersAction):
     add_user_arguments(c)
     c.set_defaults(func=rm)
 
+    d: argparse.ArgumentParser = file_subparsers.add_parser(
+        "write", help="Upload a file to device"
+    )
+    d.add_argument("remote_path", type=str, help="Destination path on device")
+    d.add_argument("local_path", type=str, help="Path of local file to upload")
+    add_user_arguments(d)
+    d.set_defaults(func=write)
+
 
 def ls(args):
     console = Console()
@@ -145,6 +153,23 @@ def rm(args):
     ssh, sftp_conn = connections
 
     remove_file(sftp_conn, args.path, args.recursive, console)
+    sftp.close_sftp(ssh, sftp_conn)
+
+
+def write(args):
+    console = Console()
+    connections = setup_connection(
+        args.uri,
+        args.username,
+        args.env_file,
+        args.forget_password,
+        console,
+    )
+    if connections is None:
+        return
+    ssh, sftp_conn = connections
+
+    put_file(sftp_conn, args.local_path, args.remote_path, console)
     sftp.close_sftp(ssh, sftp_conn)
 
 
@@ -313,6 +338,45 @@ def get_file(
     except paramiko.SFTPError as e:
         console.print(f"[bold red]Failed to download file:[/bold red] {e}")
         return
+
+
+def put_file(
+    sftp_conn: paramiko.SFTPClient, local_path: str, remote_path: str, console: Console
+):
+    if not os.path.isfile(local_path):
+        console.print(f"[bold red]Local file not found:[/bold red] [blue]{local_path}")
+        return
+
+    # If the remote path is an existing directory, upload into it.
+    try:
+        if stat.S_ISDIR(sftp_conn.stat(remote_path).st_mode):
+            remote_path = os.path.join(remote_path, os.path.basename(local_path))
+    except FileNotFoundError:
+        pass
+
+    try:
+        file_size = os.path.getsize(local_path)
+
+        prog = progress.Progress(
+            progress.SpinnerColumn(),
+            progress.TextColumn("[progress.description]{task.description}"),
+            progress.BarColumn(),
+            progress.DownloadColumn(),
+            progress.TransferSpeedColumn(),
+            progress.TimeElapsedColumn(),
+        )
+        with prog:
+            task = prog.add_task(f"Uploading file: {local_path}", total=file_size)
+
+            def update_progress(transferred: int, total: int):
+                prog.update(task, completed=transferred)
+
+            sftp_conn.put(local_path, remote_path, callback=update_progress)
+    except (paramiko.SFTPError, OSError) as e:
+        console.print(f"[bold red]Failed to upload file:[/bold red] {e}")
+        return
+
+    console.print(f"[bold green]File uploaded:[/bold green] [blue]{remote_path}")
 
 
 def remove_file(
