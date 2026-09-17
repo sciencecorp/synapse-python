@@ -12,6 +12,7 @@ from rich import progress
 from rich.prompt import Confirm
 
 from synapse import Device
+from synapse.cli.errors import print_error
 import synapse.client.sftp as sftp
 from synapse.utils.file import format_mode, format_time, filesize_binary
 
@@ -105,7 +106,7 @@ def ls(args):
         file_attr = sftp_conn.listdir_attr(args.path)
         print_file_list(file_attr, console)
     except Exception as e:
-        console.print(f"[bold red]Failed to list directory:[/bold red] {e}")
+        print_error(console, e, context="Failed to list directory")
 
     sftp.close_sftp(ssh, sftp_conn)
 
@@ -155,7 +156,7 @@ def setup_connection(
     forget_password: bool,
     console: Console,
 ) -> Optional[tuple[paramiko.SSHClient, paramiko.SFTPClient]]:
-    dev_name = Device(uri).get_name()
+    dev_name = Device(uri, raise_rpc_errors=True).get_name()
     password = find_password(
         dev_name, env_file
     )  # Check if password is provided or stored in env file
@@ -311,7 +312,7 @@ def get_file(
 
             sftp_conn.get(remote_path, local_path, callback=update_progress)
     except paramiko.SFTPError as e:
-        console.print(f"[bold red]Failed to download file:[/bold red] {e}")
+        print_error(console, e, context="Failed to download file")
         return
 
 
@@ -343,7 +344,7 @@ def remove_file(
             ):
                 sftp_conn.remove(remote_path)
     except Exception as e:
-        console.print(f"[bold red]Failed to remove file:[/bold red] {e}")
+        print_error(console, e, context="Failed to remove file")
         return
 
     console.print(f"[bold green]File removed:[/bold green] [blue]{remote_path}")

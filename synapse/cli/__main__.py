@@ -21,6 +21,7 @@ from synapse.cli import (
     taps,
     settings,
 )
+from synapse.cli.errors import run_action
 from synapse.utils.discover import find_device_by_name
 
 
@@ -47,7 +48,10 @@ def setup_device_uri(args):
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, handlers=[RichHandler()])
+    logging.basicConfig(
+        level=logging.INFO,
+        handlers=[RichHandler(show_path=False)],
+    )
     parser = argparse.ArgumentParser(
         description="Synapse Device Manager",
         formatter_class=lambda prog: argparse.HelpFormatter(prog, width=124),
@@ -85,27 +89,24 @@ def main():
     deploy_model.add_commands(subparsers)
     args = peripherals.parse_args_with_passthrough(parser)
 
-    # If we need to setup the device URI, do that now
-    args = setup_device_uri(args)
-    if not args:
-        return
+    def run_parsed_command():
+        # If we need to setup the device URI, do that now
+        resolved_args = setup_device_uri(args)
+        if not resolved_args:
+            return False
 
-    try:
-        if hasattr(args, "func"):
-            args.func(args)
-        else:
-            parser.print_help()
-    except Exception as e:
-        console = Console()
-        console.log(f"[bold red] Uncaught error during function. Why: {e}")
+        if hasattr(resolved_args, "func"):
+            return resolved_args.func(resolved_args)
+
         parser.print_help()
-    except KeyboardInterrupt:
-        print("User cancelled request")
+        return None
+
+    return run_action(
+        run_parsed_command,
+        console=Console(stderr=True),
+        verbose=args.verbose,
+    )
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print(f"Uncaught error in CLI. Why: {e}")
-        sys.exit(1)
+    sys.exit(main())
