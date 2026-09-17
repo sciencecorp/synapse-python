@@ -14,6 +14,7 @@ from rich import progress
 from rich.console import Console
 from rich.table import Table
 
+from synapse.cli.errors import print_error
 import synapse.client.sftp as sftp
 from synapse.utils.file import filesize_binary, format_mode, format_time
 
@@ -43,7 +44,7 @@ def ls(args):
         file_attr = sftp_conn.listdir_attr(path)
         print_file_list(file_attr, console)
     except Exception as e:
-        console.print(f"[bold red]Failed to list directory:[/bold red] {e}")
+        print_error(console, e, context="Failed to list directory")
 
     sftp.close_sftp(ssh, sftp_conn)
 
@@ -227,7 +228,7 @@ def get_file(
 
             sftp_conn.get(remote_path, local_path, callback=update_progress)
     except paramiko.SFTPError as e:
-        console.print(f"[bold red]Failed to download file:[/bold red] {e}")
+        print_error(console, e, context="Failed to download file")
         return
 
 
@@ -259,7 +260,7 @@ def remove_file(
             ):
                 sftp_conn.remove(remote_path)
     except Exception as e:
-        console.print(f"[bold red]Failed to remove file:[/bold red] {e}")
+        print_error(console, e, context="Failed to remove file")
         return
 
     console.print(f"[bold green]File removed:[/bold green] [blue]{remote_path}")
