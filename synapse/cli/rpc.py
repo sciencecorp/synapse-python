@@ -14,6 +14,7 @@ from rich.console import Console
 
 from synapse.cli.query import StreamingQueryClient
 from synapse.cli import impedance_csv
+from synapse.cli.errors import print_error
 from synapse.utils.log import log_entry_to_str
 from synapse.cli.device_info_display import DeviceInfoDisplay
 from synapse.utils.proto import load_device_config
@@ -100,7 +101,7 @@ def add_commands(subparsers):
 
 
 def info(args):
-    device = syn.Device(args.uri, args.verbose)
+    device = syn.Device(args.uri, args.verbose, raise_rpc_errors=True)
     display = DeviceInfoDisplay()
     display.summary(device)
 
@@ -116,7 +117,7 @@ def query(args):
             console.print(f"[red]Failed to open {path_to_config}: File not found[/red]")
             return None
         except Exception as e:
-            console.print(f"[red]Failed to parse query file: {str(e)}[/red]")
+            print_error(console, e, context="Failed to parse query file")
             return None
 
     console = Console()
@@ -128,7 +129,12 @@ def query(args):
         try:
             return client.stream_query(StreamQueryRequest(request=query_proto))
         except Exception as e:
-            console.print(f"[red]Error streaming query: {str(e)}[/red]")
+            print_error(
+                console,
+                e,
+                context="Streaming query failed",
+                verbose=args.verbose,
+            )
             return False
 
     if Path(args.query_file).suffix != ".json":
@@ -141,7 +147,7 @@ def query(args):
             console.print("Running query:")
             console.print(query_proto)
 
-            device = syn.Device(args.uri, args.verbose)
+            device = syn.Device(args.uri, args.verbose, raise_rpc_errors=True)
 
             # Resolve the peripheral name before running the query, matching the
             # streaming path: if the probe un-enumerates as a result of the query
@@ -170,11 +176,13 @@ def query(args):
                             f"[green]Impedance measurements saved to {filename}[/green]"
                         )
                     except IOError as e:
-                        console.print(
-                            f"[red]Error writing impedance measurements: {str(e)}[/red]"
+                        print_error(
+                            console,
+                            e,
+                            context="Failed to write impedance measurements",
                         )
     except Exception as e:
-        console.print(f"[red]Error executing query: {str(e)}[/red]")
+        print_error(console, e, context="Query failed", verbose=args.verbose)
         return False
 
 
@@ -203,12 +211,14 @@ def start(args):
         try:
             config_obj = load_device_config(cfg_path, console)
         except Exception as e:
-            console.print(
-                f"[bold red]Failed to parse configuration file[/bold red]: {e}"
+            print_error(
+                console,
+                e,
+                context="Failed to parse configuration file",
             )
             return
 
-    device = syn.Device(args.uri, args.verbose)
+    device = syn.Device(args.uri, args.verbose, raise_rpc_errors=True)
 
     device_name = device.get_name()
 
@@ -217,8 +227,8 @@ def start(args):
         with console.status("Configuring device...", spinner="bouncingBall"):
             cfg_ret = device.configure_with_status(config_obj)
             if cfg_ret is None:
-                console.print("[bold red]Internal error configuring device")
-                return
+                console.print("[bold red]Failed to configure device[/bold red]")
+                return False
             if cfg_ret.code != StatusCode.kOk:
                 console.print(
                     f"[bold red]Error configuring device[/bold red]\nResponse from {device_name}:\n{cfg_ret.message}"
@@ -229,8 +239,8 @@ def start(args):
     with console.status("Starting device...", spinner="bouncingBall"):
         start_ret = device.start_with_status()
         if start_ret is None:
-            console.print("[bold red]Internal error starting device")
-            return
+            console.print("[bold red]Failed to start device[/bold red]")
+            return False
         if start_ret.code != StatusCode.kOk:
             console.print(
                 f"[bold red]Error starting device[/bold red]\nResponse from {device_name}:\n{start_ret.message}"
@@ -254,10 +264,12 @@ def stop(args):
         )
 
     with console.status("Stopping device...", spinner="bouncingBall"):
-        stop_ret = syn.Device(args.uri, args.verbose).stop_with_status()
+        stop_ret = syn.Device(
+            args.uri, args.verbose, raise_rpc_errors=True
+        ).stop_with_status()
         if not stop_ret:
-            console.print("[bold red]Internal error stopping device")
-            return
+            console.print("[bold red]Failed to stop device[/bold red]")
+            return False
         if stop_ret.code != StatusCode.kOk:
             console.print(f"[bold red]Error stopping\n{stop_ret.message}")
             return
@@ -274,10 +286,12 @@ def configure(args):
     console.print("Configuring device with the following configuration:")
     console.print(config_obj.to_proto())
 
-    config_ret = syn.Device(args.uri, args.verbose).configure_with_status(config_obj)
+    config_ret = syn.Device(
+        args.uri, args.verbose, raise_rpc_errors=True
+    ).configure_with_status(config_obj)
     if not config_ret:
-        console.print("[bold red]Internal error configuring device")
-        return
+        console.print("[bold red]Failed to configure device[/bold red]")
+        return False
     if config_ret.code != StatusCode.kOk:
         console.print(f"[bold red]Error configuring\n{config_ret.message}")
         return
@@ -300,7 +314,7 @@ def get_logs(args):
     try:
         if args.follow:
             with console.status("Tailing logs...", spinner="bouncingBall"):
-                device = syn.Device(args.uri, args.verbose)
+                device = syn.Device(args.uri, args.verbose, raise_rpc_errors=True)
                 for log in device.tail_logs(args.log_level):
                     line = log_entry_to_str(log)
                     if output_file:
@@ -324,7 +338,9 @@ def get_logs(args):
             return
 
         with console.status("Getting logs...", spinner="bouncingBall"):
-            res = syn.Device(args.uri, args.verbose).get_logs_with_status(
+            res = syn.Device(
+                args.uri, args.verbose, raise_rpc_errors=True
+            ).get_logs_with_status(
                 log_level=args.log_level,
                 since_ms=args.since,
                 start_time=start_time,
@@ -349,7 +365,7 @@ def get_logs(args):
 def list_apps(args):
     console = Console()
     with console.status("Listing installed applications...", spinner="bouncingBall"):
-        device = syn.Device(args.uri, args.verbose)
+        device = syn.Device(args.uri, args.verbose, raise_rpc_errors=True)
         response = device.list_apps()
 
         if not response:

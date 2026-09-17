@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
+import grpc
 from threading import Thread
 import time
 import sys
@@ -20,6 +21,8 @@ from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
 
+from synapse.cli.errors import print_error
+
 
 class StreamingQueryClient:
     def __init__(self, uri, verbose=False):
@@ -27,7 +30,7 @@ class StreamingQueryClient:
         self.verbose = verbose
         self.console = Console()
 
-        self.device = syn.Device(self.uri, self.verbose)
+        self.device = syn.Device(self.uri, self.verbose, raise_rpc_errors=True)
         if self.verbose:
             info = self.device.info()
             self.console.log(info)
@@ -45,12 +48,20 @@ class StreamingQueryClient:
 
     def tail_logs_background(self):
         self.last_log_line = ""
-        for log in self.device.tail_logs():
-            if self.last_log_line != log.message:
-                self.last_log_line = log.message
-                self.new_log_event.set()
-            if self.log_stop_event.is_set():
-                break
+        try:
+            for log in self.device.tail_logs():
+                if self.last_log_line != log.message:
+                    self.last_log_line = log.message
+                    self.new_log_event.set()
+                if self.log_stop_event.is_set():
+                    break
+        except grpc.RpcError as error:
+            print_error(
+                self.console,
+                error,
+                context="Log stream failed",
+                verbose=self.verbose,
+            )
 
     def stream_query(self, request):
         query_type = request.request.query_type
@@ -63,7 +74,12 @@ class StreamingQueryClient:
                 self.console.log(f"[bold red]Unknown stream request: {query_type}")
                 return False
         except Exception as e:
-            self.console.log(f"[bold red] Uncaught exception during stream: {e}")
+            print_error(
+                self.console,
+                e,
+                context="Streaming query failed",
+                verbose=self.verbose,
+            )
             return False
         except KeyboardInterrupt:
             self.console.log("[yellow] Operation cancelled by user")
@@ -103,7 +119,7 @@ class StreamingQueryClient:
 
                 if response.code != 0 or not response.self_test:
                     self.console.log(
-                        f"[bold red] Failed self test, why: {response.message}"
+                        f"[bold red]Self test failed:[/bold red] {response.message}"
                     )
                     return False
 
@@ -210,7 +226,7 @@ class StreamingQueryClient:
 
                     failed_ids = [m.electrode_id for m in failed_batch]
                     progress.console.log(
-                        f"Failed to measure impedance for {failed_ids}, why: {response.message}"
+                        f"Failed to measure impedance for {failed_ids}: {response.message}"
                     )
                     for sample in failed_batch:
                         progress.console.log(
@@ -317,5 +333,10 @@ if __name__ == "__main__":
             print("Failed to stream query for device")
             sys.exit(1)
     except Exception as e:
-        print(f"Failed to stream query. Why: {e}")
+        print_error(
+            Console(stderr=True),
+            e,
+            context="Streaming query failed",
+            verbose=args.verbose,
+        )
         sys.exit(1)
