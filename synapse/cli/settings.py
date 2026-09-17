@@ -3,6 +3,8 @@ from synapse.client import settings
 from rich.console import Console
 from rich.table import Table
 
+from synapse.cli.errors import print_error
+
 
 def add_commands(subparsers):
     parser = subparsers.add_parser(
@@ -29,7 +31,7 @@ def get_settings(args):
 
     try:
         with console.status("Getting settings", spinner="bouncingBall"):
-            device = syn.Device(args.uri, args.verbose)
+            device = syn.Device(args.uri, args.verbose, raise_rpc_errors=True)
             settings_dict = settings.get_all_settings(device)
 
         if not settings_dict:
@@ -53,7 +55,8 @@ def get_settings(args):
         console.print(settings_table)
 
     except Exception as e:
-        console.print(f"[bold red]{e}[/bold red]")
+        print_error(console, e, context="Failed to get settings", verbose=args.verbose)
+        return False
 
 
 def set_setting(args):
@@ -61,7 +64,7 @@ def set_setting(args):
 
     try:
         with console.status("Setting settings", spinner="bouncingBall"):
-            device = syn.Device(args.uri, args.verbose)
+            device = syn.Device(args.uri, args.verbose, raise_rpc_errors=True)
             updated_value = settings.set_setting(device, args.key, args.value)
 
         console.print(
@@ -70,4 +73,7 @@ def set_setting(args):
         console.print(f"[dim]Confirmed value: {updated_value}[/dim]")
 
     except Exception as e:
-        console.print(f"[bold red]{e}[/bold red]")
+        print_error(
+            console, e, context="Failed to update setting", verbose=args.verbose
+        )
+        return False

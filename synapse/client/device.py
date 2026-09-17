@@ -29,7 +29,7 @@ DEFAULT_SYNAPSE_PORT = 647
 
 
 class Device(object):
-    def __init__(self, uri, verbose=False):
+    def __init__(self, uri, verbose=False, raise_rpc_errors=False):
         if not uri:
             raise ValueError("URI cannot be empty or none")
         if len(uri.split(":")) != 2:
@@ -39,6 +39,7 @@ class Device(object):
 
         self.channel = grpc.insecure_channel(self.uri)
         self.rpc = SynapseDeviceStub(self.channel)
+        self.raise_rpc_errors = raise_rpc_errors
 
         self.logger = logging.getLogger(__name__)
         level = logging.DEBUG if verbose else logging.ERROR
@@ -50,7 +51,7 @@ class Device(object):
             if self._handle_status_response(response):
                 return response
         except grpc.RpcError as e:
-            self.logger.debug("Error: %s", e.details())
+            self._handle_rpc_error(e)
         return False
 
     def start_with_status(self) -> Status:
@@ -58,8 +59,8 @@ class Device(object):
             response = self.rpc.Start(Empty())
             return response
         except grpc.RpcError as e:
-            self.logger.error("Error: %s", e.details())
-        return None
+            self._handle_rpc_error(e)
+            return None
 
     def stop(self):
         try:
@@ -67,14 +68,14 @@ class Device(object):
             if self._handle_status_response(response):
                 return response
         except grpc.RpcError as e:
-            self.logger.error("Error: %s", e.details())
+            self._handle_rpc_error(e)
         return False
 
     def stop_with_status(self) -> Status:
         try:
             return self.rpc.Stop(Empty())
         except grpc.RpcError as e:
-            self.logger.error("Error: %s", e.details())
+            self._handle_rpc_error(e)
             return None
 
     def info(self):
@@ -83,7 +84,7 @@ class Device(object):
             self._handle_status_response(response.status)
             return response
         except grpc.RpcError as e:
-            self.logger.error("Error: %s", e.details())
+            self._handle_rpc_error(e)
             return None
 
     def query(self, query):
@@ -91,7 +92,7 @@ class Device(object):
             response = self.rpc.Query(query)
             return response
         except grpc.RpcError as e:
-            self.logger.error("Error: %s", e.details())
+            self._handle_rpc_error(e)
             return None
 
     def configure(self, config: Config):
@@ -103,7 +104,7 @@ class Device(object):
             if self._handle_status_response(response):
                 return response
         except grpc.RpcError as e:
-            self.logger.error("Error: %s", e.details())
+            self._handle_rpc_error(e)
         return False
 
     def configure_with_status(self, config: Config) -> Status:
@@ -114,7 +115,7 @@ class Device(object):
             response = self.rpc.Configure(config.to_proto())
             return response
         except grpc.RpcError as e:
-            self.logger.error("Error: %s", e.details())
+            self._handle_rpc_error(e)
             return None
 
     def get_name(self) -> Optional[str]:
@@ -143,7 +144,7 @@ class Device(object):
             response = self.rpc.GetLogs(request)
             return response
         except grpc.RpcError as e:
-            self.logger.error("Error: %s", e.details())
+            self._handle_rpc_error(e)
             return None
 
     def get_logs_with_status(
@@ -167,7 +168,7 @@ class Device(object):
 
             return self.rpc.GetLogs(request)
         except grpc.RpcError as e:
-            self.logger.error("Error: %s", e.details())
+            self._handle_rpc_error(e)
             return None
 
     def tail_logs(
@@ -178,7 +179,7 @@ class Device(object):
             request.min_level = log_level_to_pb(log_level)
             return self.rpc.TailLogs(request)
         except grpc.RpcError as e:
-            self.logger.error("Error: %s", e.details())
+            self._handle_rpc_error(e)
             return None
 
     def stream_query(
@@ -187,8 +188,11 @@ class Device(object):
         try:
             for response in self.rpc.StreamQuery(stream_request):
                 yield response
+        except grpc.RpcError as e:
+            self._handle_rpc_error(e)
+            yield StreamQueryResponse(code=StatusCode.kQueryFailed)
         except Exception as e:
-            self.logger.error(f"Error during StreamQuery: {str(e)}")
+            self.logger.error("Stream query failed: %s", e)
             yield StreamQueryResponse(code=StatusCode.kQueryFailed)
 
     def update_device_settings(
@@ -197,8 +201,11 @@ class Device(object):
         try:
             return self.rpc.UpdateDeviceSettings(request)
 
+        except grpc.RpcError as e:
+            self._handle_rpc_error(e)
+            return None
         except Exception as e:
-            self.logger.error(f"Error during update settings: {str(e)}")
+            self.logger.error("Settings update failed: %s", e)
             return None
 
     def list_apps(self) -> Optional[ListAppsResponse]:
@@ -207,7 +214,7 @@ class Device(object):
             response = self.rpc.ListApps(ListAppsRequest())
             return response
         except grpc.RpcError as e:
-            self.logger.error("Error listing apps: %s", e.details())
+            self._handle_rpc_error(e)
             return None
 
     def _handle_status_response(self, status):
@@ -216,3 +223,8 @@ class Device(object):
             return False
         else:
             return True
+
+    def _handle_rpc_error(self, error: grpc.RpcError) -> None:
+        if self.raise_rpc_errors:
+            raise error
+        self.logger.error("Error: %s", error.details())

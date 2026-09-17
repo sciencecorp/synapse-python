@@ -15,6 +15,7 @@ import synapse as syn
 from synapse.api.status_pb2 import DeviceState, StatusCode
 from synapse.api.node_pb2 import NodeType
 from synapse.client.taps import Tap
+from synapse.cli.errors import print_error
 from synapse.utils.proto import load_device_config
 from synapse.utils.electrode_ids import (
     GPIO_CHANNEL_ID_OFFSET,
@@ -280,9 +281,7 @@ class BroadbandFrameWriter:
         # indices otherwise — `id_source` says which. The logical channel id and
         # channel type are written alongside it, as equal-length datasets, so
         # downstream analysis can reconstruct the full mapping.
-        electrodes_group.create_dataset(
-            "id", data=electrode_rows.ids, dtype="uint32"
-        )
+        electrodes_group.create_dataset("id", data=electrode_rows.ids, dtype="uint32")
         electrodes_group.create_dataset(
             "channel_id", data=electrode_rows.channel_ids, dtype="uint32"
         )
@@ -615,7 +614,9 @@ def configure_device(device, config, console):
         # Apply the configuration to the device
         configure_status = device.configure_with_status(config)
         if configure_status is None:
-            console.print("[bold red]Failed to configure device: connection error[/bold red]")
+            console.print(
+                "[bold red]Failed to configure device: connection error[/bold red]"
+            )
             return False
         if configure_status.code != StatusCode.kOk:
             console.print(
@@ -635,7 +636,9 @@ def start_device(device, console):
     with console.status("Starting device...", spinner="bouncingBall"):
         start_status = device.start_with_status()
         if start_status is None:
-            console.print("[bold red]Failed to start device: connection error[/bold red]")
+            console.print(
+                "[bold red]Failed to start device: connection error[/bold red]"
+            )
             return False
         if start_status.code != StatusCode.kOk:
             console.print(
@@ -649,7 +652,9 @@ def stop_device(device, console):
     with console.status("Stopping device...", spinner="bouncingBall"):
         stop_status = device.stop_with_status()
         if stop_status is None:
-            console.print("[bold red]Failed to stop device: connection error[/bold red]")
+            console.print(
+                "[bold red]Failed to stop device: connection error[/bold red]"
+            )
             return False
         if stop_status.code != StatusCode.kOk:
             console.print(
@@ -734,9 +739,7 @@ def detect_stream_parameters(broadband_tap, console, channel_to_electrode=None):
         sample_rate = first_frame.sample_rate_hz
         electrode_rows = derive_electrode_row_ids(first_frame, channel_to_electrode)
         if electrode_rows is None:
-            console.print(
-                "[bold red]First message carried no channel data[/bold red]"
-            )
+            console.print("[bold red]First message carried no channel data[/bold red]")
             return None, None, None
 
         num_channels = len(electrode_rows.ids)
@@ -751,7 +754,7 @@ def detect_stream_parameters(broadband_tap, console, channel_to_electrode=None):
         return sample_rate, electrode_rows, first_frame
 
     except Exception as e:
-        console.print(f"[bold red]Error detecting stream parameters: {e}[/bold red]")
+        print_error(console, e, context="Failed to detect stream parameters")
         return None, None, None
 
 
@@ -945,11 +948,11 @@ def read(args):
     try:
         config = load_device_config(args.config, console)
     except Exception as e:
-        console.print(f"[bold red]Failed to load device configuration: {e}[/bold red]")
-        return
+        print_error(console, e, context="Failed to load device configuration")
+        return False
 
     # Create the device object
-    device = syn.Device(args.uri, args.verbose)
+    device = syn.Device(args.uri, args.verbose, raise_rpc_errors=True)
     device_name = device.get_name()
     console.log(f"[green]Connected to {device_name}[/green]")
 
@@ -1030,10 +1033,12 @@ def read(args):
                 f"[green]Started real-time plotter with {len(available_channels)} channels available[/green]"
             )
         except ImportError as e:
-            console.print(
-                f"[bold red]Failed to import plotter (missing dearpygui?): {e}[/bold red]"
+            print_error(
+                console,
+                e,
+                context="Failed to import plotter (is dearpygui installed?)",
             )
-            return
+            return False
 
     # Setup stream monitor
     monitor = StreamMonitor(console)
