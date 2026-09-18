@@ -89,8 +89,10 @@ class _FakeDevice:
         self.rpc = _FakeRpc(info=info, error=error)
 
 
-def _args(uri=None, verbose=False, identifier=None):
-    return argparse.Namespace(uri=uri, verbose=verbose, identifier=identifier)
+def _args(uri=None, verbose=False, identifier=None, label=None):
+    return argparse.Namespace(
+        uri=uri, verbose=verbose, identifier=identifier, label=label
+    )
 
 
 def _patch_device(monkeypatch, device):
@@ -256,3 +258,23 @@ def test_unpair_with_neither_uri_nor_identifier_prints_hint(
     auth_module.unpair(_args())
 
     assert any("Specify a device" in line for line in console_log)
+
+# --- pair: interrupt before any code is on screen ---------------------------
+
+
+def test_pair_ctrl_c_during_info_is_not_a_traceback(
+    monkeypatch, console_log, env_file
+):
+    """Ctrl-C in the 10s Info window must read as a cancellation, not a crash.
+
+    The interrupt during the *approval wait* was always handled. This is the
+    earlier window -- before a code exists -- which used to escape as a raw
+    KeyboardInterrupt traceback. Nothing has been asked of the device yet, so
+    there is nothing to withdraw and nothing to save.
+    """
+    _patch_device(monkeypatch, _FakeDevice(error=KeyboardInterrupt()))
+
+    auth_module.pair(_args(uri="10.0.0.1"))
+
+    assert any("cancelled" in line.lower() for line in console_log), console_log
+    assert not env_file.exists(), "an interrupted pair must not write a token"

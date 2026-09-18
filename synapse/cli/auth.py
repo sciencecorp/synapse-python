@@ -58,6 +58,12 @@ def pair(args):
     except grpc.RpcError as e:
         console.print(f"[bold red]Could not reach the device: {e.details()}")
         return
+    except KeyboardInterrupt:
+        # Ctrl-C during the 10s Info call, before any code is on screen. Without
+        # this the user gets a raw traceback; nothing has been requested of the
+        # device yet, so there is nothing to withdraw.
+        console.print("\n[yellow]Pairing cancelled. Nothing was saved.")
+        return
 
     if not info.serial:
         console.print("[bold red]This device did not report a serial number; cannot pair.")
