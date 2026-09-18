@@ -128,7 +128,11 @@ def _write(tokens: Dict[str, Tuple[str, str]]) -> None:
         raise
 
 
-METADATA_KEY = "x-scifi-auth-token"
+# The standard bearer-token header (RFC 6750) rather than a bespoke x- key, so
+# proxies and tooling that already understand it keep working. The value carries
+# the "Bearer " scheme; the server strips it case-insensitively.
+METADATA_KEY = "authorization"
+METADATA_SCHEME = "Bearer "
 
 # Mirrors scifi-server's open set (src/auth/rpc_auth_policy.cpp). These need no
 # token, so the interceptor never triggers serial resolution for them.
@@ -206,7 +210,7 @@ class AuthInterceptor(
             return call_details
 
         metadata = list(call_details.metadata or [])
-        metadata.append((METADATA_KEY, token))
+        metadata.append((METADATA_KEY, f"{METADATA_SCHEME}{token}"))
         return _ClientCallDetails(call_details, metadata)
 
     def intercept_unary_unary(self, continuation, call_details, request):

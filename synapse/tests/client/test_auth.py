@@ -185,7 +185,7 @@ def test_interceptor_attaches_token_for_closed_methods(env_file):
         continuation, _FakeCallDetails("/synapse.SynapseDevice/Configure"), object()
     )
 
-    assert seen["metadata"]["x-scifi-auth-token"] == "f3a9c1"
+    assert seen["metadata"]["authorization"] == "Bearer f3a9c1"
 
 
 def test_interceptor_skips_resolution_when_no_tokens_exist(env_file):
