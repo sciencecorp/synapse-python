@@ -9,7 +9,7 @@ from rich import progress
 from rich.prompt import Confirm
 
 import synapse.client.sftp as sftp
-from synapse.cli.files import setup_connection
+from synapse.client.sftp import setup_connection
 
 # Constants
 DEVICE_MODEL_DIR = "/models"
