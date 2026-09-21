@@ -6,9 +6,9 @@ for one. Going through the SynapseDevice service means file access is governed
 by the same pairing token as everything else, so the SFTP password is gone --
 along with --username, --env-file and the local password store.
 
-Paths are relative to the device's data root and cannot escape it. SFTP served
-the whole filesystem to any authenticated user; this deliberately does not, so
-`file ls /` shows the data root rather than the device's actual root.
+Paths are relative to the device's data root and cannot escape it, so
+`file ls /` shows the data root. That is the same tree the scifi-sftp account
+was chrooted to, so what you can reach is unchanged -- only the credential is.
 """
 
 import argparse
@@ -91,7 +91,10 @@ def add_commands(subparsers: argparse._SubParsersAction):
         type=str,
         nargs="?",
         default=None,
-        help="Remote path, relative to the data directory (default: the file's own name)",
+        help="Remote path, relative to the data directory (default: the name as given)",
+    )
+    c.add_argument(
+        "--recursive", "-r", action="store_true", help="Upload a directory recursively"
     )
     c.set_defaults(func=put)
 
@@ -218,16 +221,7 @@ def get(args):
     console.print(f"[bold green]Downloaded {ok}/{len(wanted)} file(s)[/bold green] to {args.output_path}")
 
 
-def put(args):
-    console = Console()
-    device = Device(args.uri, args.verbose)
-
-    if not os.path.isfile(args.local_path):
-        console.print(f"[bold red]No such local file:[/bold red] {args.local_path}")
-        return
-    remote = args.remote_path or os.path.basename(args.local_path)
-    total = os.path.getsize(args.local_path)
-
+def _upload_one(device, console: Console, local: str, remote: str) -> Optional[int]:
     with progress.Progress(
         progress.TextColumn("[cyan]{task.description}"),
         progress.BarColumn(),
@@ -235,19 +229,56 @@ def put(args):
         progress.TransferSpeedColumn(),
         console=console,
     ) as bar:
-        task = bar.add_task(os.path.basename(args.local_path), total=total)
+        task = bar.add_task(os.path.basename(local), total=os.path.getsize(local))
         try:
-            written = files_client.write_file(
+            return files_client.write_file(
                 device,
-                args.local_path,
+                local,
                 remote,
                 progress=lambda done, tot: bar.update(task, completed=done),
             )
         except grpc.RpcError as e:
-            _rpc_error(console, f"upload {args.local_path}", e)
-            return
+            _rpc_error(console, f"upload {local}", e)
+            return None
 
-    console.print(f"[bold green]Uploaded[/bold green] {written} bytes to {remote}")
+
+def put(args):
+    console = Console()
+    device = Device(args.uri, args.verbose)
+    local = args.local_path.rstrip("/")
+
+    if os.path.isdir(local):
+        if not args.recursive:
+            console.print(
+                f"[bold red]{local} is a directory.[/bold red] Pass --recursive to upload it."
+            )
+            return
+        base = args.remote_path or os.path.basename(local)
+        # No mkdir needed: the server creates parent directories for whatever
+        # path a chunk stream names, so the tree appears as the files land.
+        files = [
+            os.path.join(root, name)
+            for root, _, names in os.walk(local)
+            for name in names
+        ]
+        if not files:
+            console.print("[yellow]Nothing to upload.[/yellow]")
+            return
+        ok = 0
+        for f in sorted(files):
+            remote = os.path.join(base, os.path.relpath(f, local))
+            if _upload_one(device, console, f, remote) is not None:
+                ok += 1
+        console.print(f"[bold green]Uploaded {ok}/{len(files)} file(s)[/bold green] to {base}")
+        return
+
+    if not os.path.isfile(local):
+        console.print(f"[bold red]No such local file:[/bold red] {local}")
+        return
+    remote = args.remote_path or os.path.basename(local)
+    written = _upload_one(device, console, local, remote)
+    if written is not None:
+        console.print(f"[bold green]Uploaded[/bold green] {written} bytes to {remote}")
 
 
 def rm(args):

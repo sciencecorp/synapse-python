@@ -5,8 +5,9 @@ SFTP needed its own password, so a device carried two independent credentials.
 Going through the SynapseDevice service means file access is governed by the
 same pairing token as everything else, and the SFTP password disappears.
 
-Paths are relative to the device's data root and cannot escape it -- unlike
-SFTP, which served the whole filesystem to any authenticated user.
+Paths are relative to the device's data root and cannot escape it. That is the
+same tree the scifi-sftp account was chrooted to, so reach is unchanged -- what
+goes away is the second credential.
 """
 
 import os
