@@ -121,3 +121,64 @@ def test_delete_passes_recursive_through(tmp_path):
     files_client.delete_file(device, "run_1", recursive=True)
     assert device.rpc.delete_request.recursive is True
     assert device.rpc.delete_request.path == "run_1"
+
+
+def test_upload_into_a_directory_appends_the_basename(tmp_path, monkeypatch):
+    """`put file some/dir` must mean into that directory.
+
+    The bug: uploading to an existing directory transferred the whole file and
+    then failed at the final rename, because the server cannot replace a
+    directory with a file. 194 MB were sent before the error appeared.
+    """
+    from synapse.api.files_pb2 import ListFilesResponse
+    from synapse.cli import files as cli
+
+    src = tmp_path / "recording.h5"
+    src.write_bytes(b"data")
+
+    listing = [ListFilesResponse.File(path="hdf5-replay", size=0, is_dir=True)]
+    device = _FakeDevice(listing=listing)
+
+    assert cli._remote_is_dir(device, "hdf5-replay") is True
+
+    captured = {}
+
+    def fake_upload(dev, console, local, remote):
+        captured["remote"] = remote
+        return 4
+
+    monkeypatch.setattr(cli, "_upload_one", fake_upload)
+
+    class Args:
+        uri = "1.2.3.4"
+        verbose = False
+        local_path = str(src)
+        remote_path = "hdf5-replay"
+        recursive = False
+
+    monkeypatch.setattr(cli, "Device", lambda uri, verbose: device)
+    cli.put(Args())
+
+    assert captured["remote"] == "hdf5-replay/recording.h5"
+
+
+def test_upload_to_a_plain_path_is_left_alone(tmp_path, monkeypatch):
+    from synapse.cli import files as cli
+
+    src = tmp_path / "x.bin"
+    src.write_bytes(b"y")
+    device = _FakeDevice(listing=[])
+
+    captured = {}
+    monkeypatch.setattr(cli, "_upload_one", lambda d, c, l, r: captured.setdefault("remote", r))
+    monkeypatch.setattr(cli, "Device", lambda uri, verbose: device)
+
+    class Args:
+        uri = "1.2.3.4"
+        verbose = False
+        local_path = str(src)
+        remote_path = "dump/explicit.bin"
+        recursive = False
+
+    cli.put(Args())
+    assert captured["remote"] == "dump/explicit.bin"

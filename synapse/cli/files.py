@@ -221,6 +221,24 @@ def get(args):
     console.print(f"[bold green]Downloaded {ok}/{len(wanted)} file(s)[/bold green] to {args.output_path}")
 
 
+def _remote_is_dir(device, path: str) -> bool:
+    """Whether `path` already exists on the device as a directory.
+
+    Listing the parent and looking for the entry, rather than listing `path`
+    itself: an empty directory and a missing path both list as nothing, so
+    listing the target cannot tell them apart.
+    """
+    cleaned = path.rstrip("/")
+    if not cleaned:
+        return True  # the data root itself
+    try:
+        entries = files_client.list_files(device, os.path.dirname(cleaned))
+    except grpc.RpcError:
+        return False
+    name = os.path.basename(cleaned)
+    return any(os.path.basename(f.path) == name and f.is_dir for f in entries)
+
+
 def _upload_one(device, console: Console, local: str, remote: str) -> Optional[int]:
     with progress.Progress(
         progress.TextColumn("[cyan]{task.description}"),
@@ -276,6 +294,11 @@ def put(args):
         console.print(f"[bold red]No such local file:[/bold red] {local}")
         return
     remote = args.remote_path or os.path.basename(local)
+    # `put file some/dir` means into that directory, the same way
+    # `get file -o some/dir` does. Without this the server is asked to replace
+    # a directory with a file, which cannot work.
+    if _remote_is_dir(device, remote):
+        remote = os.path.join(remote.rstrip("/"), os.path.basename(local))
     written = _upload_one(device, console, local, remote)
     if written is not None:
         console.print(f"[bold green]Uploaded[/bold green] {written} bytes to {remote}")
