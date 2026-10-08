@@ -7,7 +7,7 @@ from google.protobuf.empty_pb2 import Empty
 from rich.console import Console
 
 import synapse as syn
-from synapse.api.auth_pb2 import AuthRequest
+from synapse.api.auth_pb2 import AuthRequest, RevokeAuthClientRequest
 from synapse.client import auth
 
 logger = logging.getLogger(__name__)
@@ -26,16 +26,16 @@ def add_commands(subparsers):
     pair_parser.set_defaults(func=pair)
 
     unpair_parser = subparsers.add_parser(
-        "unpair", help="Forget the locally stored token for a device"
+        "unpair", help="Revoke this computer's access to a device and forget its token"
     )
     unpair_parser.add_argument(
         "identifier",
         nargs="?",
         default=None,
         help="Serial or stored name of a device to forget, matched against "
-        "~/.scifi-env. Works without reaching the device -- use this when the "
-        "device is gone. If omitted, --uri is used to contact the device and "
-        "look up its serial instead.",
+        "~/.scifi-env. Only forgets the local token, without contacting the "
+        "device -- use this when the device is gone. If omitted, --uri is used "
+        "to contact the device, revoke access there, then forget the token.",
     )
     unpair_parser.set_defaults(func=unpair)
 
@@ -153,6 +153,28 @@ def unpair(args):
         )
         return
 
+    token = auth.token_for_serial(info.serial)
+    if token is None:
+        console.print(f"[yellow]No stored token for {info.name} ({info.serial}).")
+        return
+
+    try:
+        device.rpc.RevokeAuthClient(RevokeAuthClientRequest(id=auth.token_id(token)), timeout=10.0)
+        console.print(f"[bold green]Revoked this computer's access to {info.name}.")
+    except grpc.RpcError as e:
+        if e.code() in (grpc.StatusCode.UNAUTHENTICATED, grpc.StatusCode.NOT_FOUND):
+            # Already revoked or expired on the device; only the local copy is left.
+            pass
+        elif e.code() == grpc.StatusCode.UNIMPLEMENTED:
+            console.print(
+                "[yellow]This device's firmware cannot revoke access remotely. "
+                "Revoke it on the device under Settings > Authorized Devices."
+            )
+        else:
+            # Keep the token: without it, this computer can no longer revoke itself.
+            console.print(f"[bold red]Could not revoke access on the device: {e.details()}")
+            return
+
     _remove_and_report(console, info.serial, info.name)
 
 
@@ -161,13 +183,13 @@ def _unpair_by_identifier(console, identifier):
     tokens = auth.load_tokens()
 
     if identifier in tokens:
-        _remove_and_report(console, identifier, tokens[identifier][0])
+        _remove_and_report(console, identifier, tokens[identifier][0], contacted=False)
         return
 
     matches = [serial for serial, (name, _) in tokens.items() if name == identifier]
     if len(matches) == 1:
         serial = matches[0]
-        _remove_and_report(console, serial, tokens[serial][0])
+        _remove_and_report(console, serial, tokens[serial][0], contacted=False)
         return
 
     if not matches:
@@ -193,12 +215,13 @@ def _print_stored_entries(console):
         console.print(f"  [dim]{name}  (serial {serial})[/dim]")
 
 
-def _remove_and_report(console, serial, name):
+def _remove_and_report(console, serial, name, contacted=True):
     if auth.remove_token(serial):
         console.print(f"[bold green]Forgot the token for {name} ({serial}).")
-        console.print(
-            "[dim]The device still lists this client as paired. Removing it there is "
-            "not yet supported.[/dim]"
-        )
+        if not contacted:
+            console.print(
+                "[dim]The device was not contacted. Use `unpair --uri <device>` to "
+                "also revoke access there.[/dim]"
+            )
     else:
         console.print(f"[yellow]No stored token for {name} ({serial}).")

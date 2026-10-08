@@ -14,8 +14,9 @@ on-device validation task. What's tested here:
         matching by serial, matching by name, no match, and an ambiguous
         name match.
       * `unpair --uri <device>` (no positional) -- contacts the device via
-        the open `Info` RPC for the authoritative serial. Covers found, not
-        found, and unreachable.
+        the open `Info` RPC for the authoritative serial, then revokes the
+        token there with `RevokeAuthClient` before forgetting it. Covers
+        found, not found, unreachable, and a revoke that fails.
       * both given -- the positional wins and the device is never contacted.
       * neither given -- a usage hint instead of a crash.
 """
@@ -72,21 +73,28 @@ class _FakeInfo:
 
 
 class _FakeRpc:
-    def __init__(self, info=None, error=None):
+    def __init__(self, info=None, error=None, revoke_error=None):
         self._info = info
         self._error = error
+        self._revoke_error = revoke_error
+        self.revoked_ids = []
 
     def Info(self, request, timeout=None):
         if self._error is not None:
             raise self._error
         return self._info
 
+    def RevokeAuthClient(self, request, timeout=None):
+        if self._revoke_error is not None:
+            raise self._revoke_error
+        self.revoked_ids.append(request.id)
+
 
 class _FakeDevice:
     """Stands in for `syn.Device(uri, verbose)`."""
 
-    def __init__(self, info=None, error=None):
-        self.rpc = _FakeRpc(info=info, error=error)
+    def __init__(self, info=None, error=None, revoke_error=None):
+        self.rpc = _FakeRpc(info=info, error=error, revoke_error=revoke_error)
 
 
 def _args(uri=None, verbose=False, identifier=None, label=None):
@@ -190,18 +198,55 @@ def test_unpair_by_identifier_ambiguous_name_removes_nothing(
 # --- unpair --uri <device>: contacts the device for the authoritative serial
 
 
-def test_unpair_via_uri_removes_the_stored_token_when_found(
+def test_unpair_via_uri_revokes_on_the_device_then_forgets(
     env_file, console_log, monkeypatch
 ):
     client_auth.save_token("NYX1512-0042", "sci-fi-1234", "f3a9c1")
+    device = _FakeDevice(info=_FakeInfo(serial="NYX1512-0042", name="sci-fi-1234"))
+    _patch_device(monkeypatch, device)
+
+    auth_module.unpair(_args(uri="10.0.0.5"))
+
+    # The id is the SHA-256 of the token, which is what the device stores.
+    assert device.rpc.revoked_ids == ["9f7c8760692c8aaedf00c8bc6de95cb58d70c9e6d8c6d5053b4de60f0159ddf0"]
+    assert client_auth.token_for_serial("NYX1512-0042") is None
+    assert any("Revoked" in line for line in console_log)
+
+
+@pytest.mark.parametrize(
+    "code", [grpc.StatusCode.UNAUTHENTICATED, grpc.StatusCode.NOT_FOUND, grpc.StatusCode.UNIMPLEMENTED]
+)
+def test_unpair_via_uri_forgets_when_the_device_has_nothing_to_revoke(
+    env_file, console_log, monkeypatch, code
+):
+    client_auth.save_token("NYX1512-0042", "sci-fi-1234", "f3a9c1")
     _patch_device(
-        monkeypatch, _FakeDevice(info=_FakeInfo(serial="NYX1512-0042", name="sci-fi-1234"))
+        monkeypatch,
+        _FakeDevice(
+            info=_FakeInfo(serial="NYX1512-0042", name="sci-fi-1234"),
+            revoke_error=_FakeRpcError(code, "x"),
+        ),
     )
 
     auth_module.unpair(_args(uri="10.0.0.5"))
 
     assert client_auth.token_for_serial("NYX1512-0042") is None
-    assert any("Forgot the token" in line for line in console_log)
+
+
+def test_unpair_via_uri_keeps_the_token_when_revoke_fails(env_file, console_log, monkeypatch):
+    client_auth.save_token("NYX1512-0042", "sci-fi-1234", "f3a9c1")
+    _patch_device(
+        monkeypatch,
+        _FakeDevice(
+            info=_FakeInfo(serial="NYX1512-0042", name="sci-fi-1234"),
+            revoke_error=_FakeRpcError(grpc.StatusCode.UNAVAILABLE, "dropped"),
+        ),
+    )
+
+    auth_module.unpair(_args(uri="10.0.0.5"))
+
+    assert client_auth.token_for_serial("NYX1512-0042") == "f3a9c1"
+    assert any("Could not revoke" in line for line in console_log)
 
 
 def test_unpair_via_uri_reports_no_token_when_device_never_paired(
