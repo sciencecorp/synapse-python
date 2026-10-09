@@ -16,7 +16,7 @@ import os
 from typing import List, Optional
 
 import grpc
-from rich import progress
+from rich import filesize, progress
 from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
@@ -203,7 +203,21 @@ def _download_one(
             return True
         except grpc.RpcError as e:
             _rpc_error(console, f"download {remote}", e)
+            _report_kept_partial(console, local)
             return False
+        except KeyboardInterrupt:
+            _report_kept_partial(console, local)
+            raise SystemExit(130)
+
+
+def _report_kept_partial(console: Console, local: str) -> None:
+    """Say where an interrupted download went, so it is not a mystery file."""
+    partial = local + files_client.PARTIAL_SUFFIX
+    if os.path.exists(partial):
+        console.print(
+            f"Kept {filesize.decimal(os.path.getsize(partial))} in [cyan]{partial}[/cyan]. "
+            "Run the same command to resume, or delete it."
+        )
 
 
 def get(args):

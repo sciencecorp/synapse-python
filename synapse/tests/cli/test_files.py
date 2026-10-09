@@ -96,3 +96,27 @@ def test_put_accepted_or_yes_uploads_over_a_device_file(monkeypatch, tmp_path):
 
 def test_put_to_a_new_name_does_not_ask(monkeypatch, tmp_path):
     assert _put(monkeypatch, tmp_path, answer=False, remote="b.h5") == ["b.h5"]
+
+
+def test_an_interrupted_get_says_where_the_partial_is(monkeypatch, tmp_path, capsys):
+    import pytest
+
+    class _InterruptingRpc:
+        def ReadFile(self, request):
+            yield ReadFileResponse(path="a.h5", data=b"half", file_total_length=8)
+            raise KeyboardInterrupt
+
+    device = _FakeDevice()
+    device.rpc = _InterruptingRpc()
+    monkeypatch.setattr(files_cli, "Device", lambda *a, **k: device)
+    args = argparse.Namespace(
+        uri="x", verbose=False, remote_path="a.h5", output_path=str(tmp_path),
+        recursive=False, no_resume=False, yes=False,
+        username=None, env_file=None, forget_password=False,
+    )
+    with pytest.raises(SystemExit):
+        files_cli.get(args)
+
+    out = capsys.readouterr().out
+    assert "a.h5.partial" in out and "resume" in out
+    assert (tmp_path / "a.h5.partial").read_bytes() == b"half"
