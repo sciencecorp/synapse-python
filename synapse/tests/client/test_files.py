@@ -1,12 +1,13 @@
 """Tests for the gRPC file client.
 
 The device is faked: these pin the client's side of the contract -- chunking,
-the path-first upload framing, and resume -- which is where the bugs that only
+the path-first upload framing, and resume via a .partial file -- which is where the bugs that only
 show up on multi-gigabyte files would live.
 """
 
 import os
 
+import grpc
 import pytest
 
 from synapse.api.files_pb2 import ListFilesResponse, ReadFileResponse, WriteFileResponse
@@ -85,10 +86,10 @@ def test_download_writes_every_chunk_in_order(tmp_path):
     assert n == 11
 
 
-def test_download_resumes_from_what_is_already_on_disk(tmp_path):
+def test_download_resumes_an_interrupted_partial(tmp_path):
     # A 3 GB recording that dies at 90% must not start over.
     dest = tmp_path / "f"
-    dest.write_bytes(b"hello ")
+    (tmp_path / "f.partial").write_bytes(b"hello ")
     chunks = [ReadFileResponse(path="f", data=b"world", start_offset=6, file_total_length=11)]
     device = _FakeDevice(read_chunks=chunks)
 
@@ -96,12 +97,67 @@ def test_download_resumes_from_what_is_already_on_disk(tmp_path):
 
     assert device.rpc.read_requests[0].start_offset == 6, "did not ask to resume"
     assert dest.read_bytes() == b"hello world"
+    assert not (tmp_path / "f.partial").exists()
     assert n == 11
+
+
+def test_a_complete_local_file_is_replaced_not_appended_to(tmp_path):
+    # The bug this pins: a same-named local file used to be treated as a
+    # partial download, so the remote file's tail was appended to it.
+    dest = tmp_path / "f"
+    dest.write_bytes(b"other")
+    chunks = [ReadFileResponse(path="f", data=b"remote!", start_offset=0, file_total_length=7)]
+    device = _FakeDevice(read_chunks=chunks)
+
+    files_client.read_file(device, "f", str(dest))
+
+    assert device.rpc.read_requests[0].start_offset == 0
+    assert dest.read_bytes() == b"remote!"
+
+
+def test_an_interrupted_download_leaves_the_destination_untouched(tmp_path):
+    dest = tmp_path / "f"
+    dest.write_bytes(b"previous copy")
+
+    def broken():
+        yield ReadFileResponse(path="f", data=b"half", start_offset=0, file_total_length=8)
+        raise ConnectionError("link dropped")
+
+    device = _FakeDevice()
+    device.rpc.ReadFile = lambda request: broken()
+    with pytest.raises(ConnectionError):
+        files_client.read_file(device, "f", str(dest))
+
+    assert dest.read_bytes() == b"previous copy"
+    assert (tmp_path / "f.partial").read_bytes() == b"half"
+
+
+def test_a_partial_longer_than_the_remote_file_restarts(tmp_path):
+    class _OutOfRange(grpc.RpcError):
+        def code(self):
+            return grpc.StatusCode.OUT_OF_RANGE
+
+    dest = tmp_path / "f"
+    (tmp_path / "f.partial").write_bytes(b"from a bigger, older file")
+    calls = []
+
+    def read(request):
+        calls.append(request.start_offset)
+        if request.start_offset:
+            raise _OutOfRange()
+        return iter([ReadFileResponse(path="f", data=b"new", start_offset=0, file_total_length=3)])
+
+    device = _FakeDevice()
+    device.rpc.ReadFile = read
+    files_client.read_file(device, "f", str(dest))
+
+    assert calls == [25, 0]
+    assert dest.read_bytes() == b"new"
 
 
 def test_resume_false_refetches_from_the_start(tmp_path):
     dest = tmp_path / "f"
-    dest.write_bytes(b"stale")
+    (tmp_path / "f.partial").write_bytes(b"stale")
     chunks = [ReadFileResponse(path="f", data=b"fresh", start_offset=0, file_total_length=5)]
     device = _FakeDevice(read_chunks=chunks)
     files_client.read_file(device, "f", str(dest), resume=False)
@@ -139,7 +195,7 @@ def test_upload_into_a_directory_appends_the_basename(tmp_path, monkeypatch):
     listing = [ListFilesResponse.File(path="hdf5-replay", size=0, is_dir=True)]
     device = _FakeDevice(listing=listing)
 
-    assert cli._remote_is_dir(device, "hdf5-replay") is True
+    assert cli._remote_entry(device, "hdf5-replay").is_dir
 
     captured = {}
 
@@ -155,6 +211,7 @@ def test_upload_into_a_directory_appends_the_basename(tmp_path, monkeypatch):
         local_path = str(src)
         remote_path = "hdf5-replay"
         recursive = False
+        yes = False
 
     monkeypatch.setattr(cli, "Device", lambda uri, verbose: device)
     cli.put(Args())

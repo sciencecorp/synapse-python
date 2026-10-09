@@ -13,6 +13,8 @@ goes away is the second credential.
 import os
 from typing import Callable, Iterator, List, Optional
 
+import grpc
+
 from synapse.api.files_pb2 import (
     DeleteFileRequest,
     ListFilesRequest,
@@ -32,6 +34,9 @@ def list_files(device, path: str = "", recursive: bool = False) -> List[ListFile
     return list(device.rpc.ListFiles(ListFilesRequest(path=path, recursive=recursive)).files)
 
 
+PARTIAL_SUFFIX = ".partial"
+
+
 def read_file(
     device,
     remote_path: str,
@@ -41,27 +46,37 @@ def read_file(
 ) -> int:
     """Download `remote_path` to `local_path`, returning bytes written.
 
-    Resumes from whatever is already on disk by default: a multi-gigabyte
-    recording that dies at 90% should not have to start over. Set resume=False
-    to always fetch from the beginning.
+    Bytes land in `<local_path>.partial`, which is renamed over `local_path`
+    only once the download completes. So `local_path` is never half-written,
+    and resuming is unambiguous: only a leftover `.partial` is continued, never
+    a complete file that happens to share the name. Set resume=False to discard
+    any `.partial` and start over.
     """
-    start_offset = 0
-    if resume and os.path.exists(local_path):
-        start_offset = os.path.getsize(local_path)
-
-    stream = device.rpc.ReadFile(
-        ReadFileRequest(path=remote_path, start_offset=start_offset)
-    )
-
+    partial = local_path + PARTIAL_SUFFIX
+    start_offset = os.path.getsize(partial) if resume and os.path.exists(partial) else 0
     os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
+
+    try:
+        written = _fetch(device, remote_path, partial, start_offset, progress)
+    except grpc.RpcError as e:
+        # The device's copy is now shorter than what we had: it changed since
+        # the interrupted download, so that partial is from another file.
+        if start_offset == 0 or e.code() != grpc.StatusCode.OUT_OF_RANGE:
+            raise
+        written = _fetch(device, remote_path, partial, 0, progress)
+
+    os.replace(partial, local_path)
+    return written
+
+
+def _fetch(device, remote_path, partial, start_offset, progress) -> int:
+    stream = device.rpc.ReadFile(ReadFileRequest(path=remote_path, start_offset=start_offset))
     written = start_offset
-    mode = "r+b" if start_offset else "wb"
-    # Open lazily inside the loop's first iteration would be tidier, but the
-    # server may legitimately send zero chunks (an empty file), and the file
-    # still has to exist afterwards.
-    with open(local_path, mode) as f:
-        if start_offset:
-            f.seek(start_offset)
+    # Opened before the first chunk: the server sends zero chunks for an empty
+    # file, and that file still has to exist afterwards.
+    with open(partial, "r+b" if start_offset else "wb") as f:
+        f.seek(start_offset)
+        f.truncate()
         for chunk in stream:
             f.write(chunk.data)
             written += len(chunk.data)

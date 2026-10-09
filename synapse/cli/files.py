@@ -79,7 +79,10 @@ def add_commands(subparsers: argparse._SubParsersAction):
     b.add_argument(
         "--no-resume",
         action="store_true",
-        help="Download from the start instead of continuing a partial file",
+        help="Download from the start instead of continuing an interrupted download",
+    )
+    b.add_argument(
+        "--yes", "-y", action="store_true", help="Overwrite existing local files without asking"
     )
     _add_retired_sftp_flags(b)
     b.set_defaults(func=get)
@@ -95,6 +98,9 @@ def add_commands(subparsers: argparse._SubParsersAction):
     )
     c.add_argument(
         "--recursive", "-r", action="store_true", help="Upload a directory recursively"
+    )
+    c.add_argument(
+        "--yes", "-y", action="store_true", help="Overwrite existing device files without asking"
     )
     c.set_defaults(func=put)
 
@@ -161,7 +167,22 @@ def ls(args):
         _rpc_error(console, "list the directory", e)
 
 
-def _download_one(device, console: Console, remote: str, local: str, resume: bool) -> bool:
+def _may_overwrite(console: Console, what: str) -> bool:
+    """Ask before replacing `what`. Declines when there is no terminal to ask on."""
+    try:
+        ok = Confirm.ask(f"[yellow]{what}[/yellow] already exists. Overwrite?", default=False)
+    except EOFError:
+        ok = False
+    if not ok:
+        console.print(f"Skipped {what} (pass -y to overwrite)")
+    return ok
+
+
+def _download_one(
+    device, console: Console, remote: str, local: str, resume: bool, overwrite: bool
+) -> bool:
+    if os.path.exists(local) and not overwrite and not _may_overwrite(console, local):
+        return False
     with progress.Progress(
         progress.TextColumn("[cyan]{task.description}"),
         progress.BarColumn(),
@@ -195,7 +216,7 @@ def get(args):
         local = args.output_path
         if os.path.isdir(local):
             local = os.path.join(local, os.path.basename(args.remote_path))
-        if _download_one(device, console, args.remote_path, local, resume):
+        if _download_one(device, console, args.remote_path, local, resume, args.yes):
             console.print(f"[bold green]Saved[/bold green] {local}")
         return
 
@@ -216,27 +237,33 @@ def get(args):
         # the tree shape without embedding the parent's name twice.
         rel = os.path.relpath(f.path, args.remote_path) if args.remote_path else f.path
         local = os.path.join(args.output_path, os.path.basename(args.remote_path.rstrip("/")) or "", rel)
-        if _download_one(device, console, f.path, local, resume):
+        if _download_one(device, console, f.path, local, resume, args.yes):
             ok += 1
     console.print(f"[bold green]Downloaded {ok}/{len(wanted)} file(s)[/bold green] to {args.output_path}")
 
 
-def _remote_is_dir(device, path: str) -> bool:
-    """Whether `path` already exists on the device as a directory.
+def _remote_entry(device, path: str):
+    """The device's listing entry for `path`, or None if nothing is there.
 
-    Listing the parent and looking for the entry, rather than listing `path`
+    Lists the parent and looks for the entry, rather than listing `path`
     itself: an empty directory and a missing path both list as nothing, so
     listing the target cannot tell them apart.
     """
     cleaned = path.rstrip("/")
-    if not cleaned:
-        return True  # the data root itself
     try:
         entries = files_client.list_files(device, os.path.dirname(cleaned))
     except grpc.RpcError:
-        return False
+        return None
     name = os.path.basename(cleaned)
-    return any(os.path.basename(f.path) == name and f.is_dir for f in entries)
+    return next((f for f in entries if os.path.basename(f.path) == name), None)
+
+
+def _remote_files_under(device, path: str) -> set:
+    """Paths of the files already under `path` on the device (empty if none)."""
+    try:
+        return {f.path for f in files_client.list_files(device, path, recursive=True) if not f.is_dir}
+    except grpc.RpcError:
+        return set()
 
 
 def _upload_one(device, console: Console, local: str, remote: str) -> Optional[int]:
@@ -282,9 +309,13 @@ def put(args):
         if not files:
             console.print("[yellow]Nothing to upload.[/yellow]")
             return
+        # One recursive listing up front rather than one per file.
+        existing = _remote_files_under(device, base)
         ok = 0
         for f in sorted(files):
             remote = os.path.join(base, os.path.relpath(f, local))
+            if remote in existing and not args.yes and not _may_overwrite(console, remote):
+                continue
             if _upload_one(device, console, f, remote) is not None:
                 ok += 1
         console.print(f"[bold green]Uploaded {ok}/{len(files)} file(s)[/bold green] to {base}")
@@ -297,8 +328,12 @@ def put(args):
     # `put file some/dir` means into that directory, the same way
     # `get file -o some/dir` does. Without this the server is asked to replace
     # a directory with a file, which cannot work.
-    if _remote_is_dir(device, remote):
+    entry = _remote_entry(device, remote) if remote.strip("/") else None
+    if not remote.strip("/") or (entry and entry.is_dir):
         remote = os.path.join(remote.rstrip("/"), os.path.basename(local))
+        entry = _remote_entry(device, remote)
+    if entry and not args.yes and not _may_overwrite(console, remote):
+        return
     written = _upload_one(device, console, local, remote)
     if written is not None:
         console.print(f"[bold green]Uploaded[/bold green] {written} bytes to {remote}")
