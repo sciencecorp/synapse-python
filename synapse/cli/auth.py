@@ -7,7 +7,7 @@ from google.protobuf.empty_pb2 import Empty
 from rich.console import Console
 
 import synapse as syn
-from synapse.api.auth_pb2 import AuthRequest, RevokeAuthClientRequest
+from synapse.api.auth_pb2 import AuthRequest, RevokeAuthRequest
 from synapse.client import auth
 
 logger = logging.getLogger(__name__)
@@ -159,10 +159,11 @@ def unpair(args):
         return
 
     try:
-        device.rpc.RevokeAuthClient(RevokeAuthClientRequest(id=auth.token_id(token)), timeout=10.0)
+        # Revokes whichever token the call carries, i.e. this computer's.
+        device.rpc.RevokeAuth(RevokeAuthRequest(), timeout=10.0)
         console.print(f"[bold green]Revoked this computer's access to {info.name}.")
     except grpc.RpcError as e:
-        if e.code() in (grpc.StatusCode.UNAUTHENTICATED, grpc.StatusCode.NOT_FOUND):
+        if e.code() == grpc.StatusCode.UNAUTHENTICATED:
             # Already revoked or expired on the device; only the local copy is left.
             pass
         elif e.code() == grpc.StatusCode.UNIMPLEMENTED:

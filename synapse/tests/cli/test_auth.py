@@ -15,7 +15,7 @@ on-device validation task. What's tested here:
         name match.
       * `unpair --uri <device>` (no positional) -- contacts the device via
         the open `Info` RPC for the authoritative serial, then revokes the
-        token there with `RevokeAuthClient` before forgetting it. Covers
+        token there with `RevokeAuth` before forgetting it. Covers
         found, not found, unreachable, and a revoke that fails.
       * both given -- the positional wins and the device is never contacted.
       * neither given -- a usage hint instead of a crash.
@@ -77,17 +77,17 @@ class _FakeRpc:
         self._info = info
         self._error = error
         self._revoke_error = revoke_error
-        self.revoked_ids = []
+        self.revoke_calls = 0
 
     def Info(self, request, timeout=None):
         if self._error is not None:
             raise self._error
         return self._info
 
-    def RevokeAuthClient(self, request, timeout=None):
+    def RevokeAuth(self, request, timeout=None):
         if self._revoke_error is not None:
             raise self._revoke_error
-        self.revoked_ids.append(request.id)
+        self.revoke_calls += 1
 
 
 class _FakeDevice:
@@ -207,14 +207,13 @@ def test_unpair_via_uri_revokes_on_the_device_then_forgets(
 
     auth_module.unpair(_args(uri="10.0.0.5"))
 
-    # The id is the SHA-256 of the token, which is what the device stores.
-    assert device.rpc.revoked_ids == ["9f7c8760692c8aaedf00c8bc6de95cb58d70c9e6d8c6d5053b4de60f0159ddf0"]
+    assert device.rpc.revoke_calls == 1
     assert client_auth.token_for_serial("NYX1512-0042") is None
     assert any("Revoked" in line for line in console_log)
 
 
 @pytest.mark.parametrize(
-    "code", [grpc.StatusCode.UNAUTHENTICATED, grpc.StatusCode.NOT_FOUND, grpc.StatusCode.UNIMPLEMENTED]
+    "code", [grpc.StatusCode.UNAUTHENTICATED, grpc.StatusCode.UNIMPLEMENTED]
 )
 def test_unpair_via_uri_forgets_when_the_device_has_nothing_to_revoke(
     env_file, console_log, monkeypatch, code

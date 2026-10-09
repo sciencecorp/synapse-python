@@ -15,7 +15,6 @@ The file is not shell-sourceable: device names contain hyphens, so
 ``SCIFI_TOKEN_SCI_FI_1234`` risks two names colliding on one key.
 """
 
-import hashlib
 import logging
 import os
 import tempfile
@@ -75,13 +74,6 @@ def save_token(serial: str, name: str, token: str) -> None:
     tokens = load_tokens()
     tokens[serial] = (name, token)
     _write(tokens)
-
-
-def token_id(token: str) -> str:
-    """The device's handle for a paired client: the SHA-256 of its token, as
-    lowercase hex. The device stores only this hash, so it doubles as the id
-    RevokeAuthClient takes."""
-    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def remove_token(serial: str) -> bool:
