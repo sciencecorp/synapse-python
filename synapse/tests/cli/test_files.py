@@ -120,3 +120,34 @@ def test_an_interrupted_get_says_where_the_partial_is(monkeypatch, tmp_path, cap
     out = capsys.readouterr().out
     assert "a.h5.partial" in out and "resume" in out
     assert (tmp_path / "a.h5.partial").read_bytes() == b"half"
+
+
+def test_ls_hides_dotfiles_unless_all(monkeypatch):
+    from synapse.api.files_pb2 import ListFilesResponse
+
+    printed = []
+    monkeypatch.setattr(files_cli, "_print_file_list", lambda entries, console: printed.append([f.path for f in entries]))
+
+    class _Rpc:
+        def ListFiles(self, request):
+            F = ListFilesResponse.File
+            return ListFilesResponse(files=[
+                F(path="rec/a.h5"), F(path="rec/.scifi-checked"), F(path="rec/.cache", is_dir=True),
+                F(path="rec/.cache/x"),
+            ])
+
+    device = _FakeDevice()
+    device.rpc = _Rpc()
+    monkeypatch.setattr(files_cli, "Device", lambda *a, **k: device)
+    base = dict(uri="x", verbose=False, path="rec", recursive=True, username=None, env_file=None, forget_password=False)
+
+    files_cli.ls(argparse.Namespace(**base, all=False))
+    files_cli.ls(argparse.Namespace(**base, all=True))
+
+    assert printed[0] == ["rec/a.h5"]
+    assert len(printed[1]) == 4
+
+
+def test_listing_a_hidden_directory_by_name_shows_its_contents():
+    assert not files_cli._is_hidden(".cache/x", ".cache")
+    assert files_cli._is_hidden(".cache/x", "")

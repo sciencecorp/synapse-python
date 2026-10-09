@@ -65,6 +65,9 @@ def add_commands(subparsers: argparse._SubParsersAction):
     a.add_argument(
         "--recursive", "-r", action="store_true", help="List subdirectories too"
     )
+    a.add_argument(
+        "--all", "-a", action="store_true", help="Include hidden files (names starting with .)"
+    )
     _add_retired_sftp_flags(a)
     a.set_defaults(func=ls)
 
@@ -155,6 +158,19 @@ def _print_file_list(files: List[ListFilesResponse.File], console: Console):
         console.print("[dim](empty)[/dim]")
 
 
+def _is_hidden(path: str, listed: str) -> bool:
+    """Whether `path` is, or sits inside, a dotfile below the listed directory.
+
+    Judged only below `listed`, so explicitly listing a hidden directory still
+    shows what is in it.
+    """
+    prefix = listed.strip("/")
+    rel = path.strip("/")
+    if prefix and (rel == prefix or rel.startswith(prefix + "/")):
+        rel = rel[len(prefix):].lstrip("/")
+    return any(part.startswith(".") for part in rel.split("/") if part)
+
+
 def ls(args):
     console = Console()
     _warn_about_retired_flags(args, console)
@@ -162,9 +178,13 @@ def ls(args):
     shown = args.path or "/"
     console.print(f"\n[bold blue]Listing directory:[/bold blue] [yellow]{shown}[/yellow]\n")
     try:
-        _print_file_list(files_client.list_files(device, args.path, args.recursive), console)
+        entries = files_client.list_files(device, args.path, args.recursive)
     except grpc.RpcError as e:
         _rpc_error(console, "list the directory", e)
+        return
+    if not getattr(args, "all", False):
+        entries = [f for f in entries if not _is_hidden(f.path, args.path)]
+    _print_file_list(entries, console)
 
 
 def _may_overwrite(console: Console, what: str) -> bool:
