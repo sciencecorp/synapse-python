@@ -200,9 +200,10 @@ def _may_overwrite(console: Console, what: str) -> bool:
 
 def _download_one(
     device, console: Console, remote: str, local: str, resume: bool, overwrite: bool
-) -> bool:
+) -> Optional[bool]:
+    """True if downloaded, False if it failed, None if the user chose to skip it."""
     if os.path.exists(local) and not overwrite and not _may_overwrite(console, local):
-        return False
+        return None
     with progress.Progress(
         progress.TextColumn("[cyan]{task.description}"),
         progress.BarColumn(),
@@ -247,10 +248,24 @@ def get(args):
     resume = not args.no_resume
 
     if not args.recursive:
+        # Checked first so a typo gets one plain line, not an overwrite prompt
+        # and an empty progress bar.
+        entry = _remote_entry(device, args.remote_path)
+        if entry is None:
+            console.print(f"[bold red]{args.remote_path} does not exist on the device.[/bold red]")
+            raise SystemExit(1)
+        if entry.is_dir:
+            console.print(
+                f"[bold red]{args.remote_path} is a directory.[/bold red] Pass --recursive to download it."
+            )
+            raise SystemExit(1)
         local = args.output_path
         if os.path.isdir(local):
             local = os.path.join(local, os.path.basename(args.remote_path))
-        if _download_one(device, console, args.remote_path, local, resume, args.yes):
+        result = _download_one(device, console, args.remote_path, local, resume, args.yes)
+        if result is False:
+            raise SystemExit(1)
+        if result:
             console.print(f"[bold green]Saved[/bold green] {local}")
         return
 

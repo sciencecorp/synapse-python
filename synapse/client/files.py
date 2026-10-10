@@ -57,13 +57,21 @@ def read_file(
     os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
 
     try:
-        written = _fetch(device, remote_path, partial, start_offset, progress)
-    except grpc.RpcError as e:
-        # The device's copy is now shorter than what we had: it changed since
-        # the interrupted download, so that partial is from another file.
-        if start_offset == 0 or e.code() != grpc.StatusCode.OUT_OF_RANGE:
-            raise
-        written = _fetch(device, remote_path, partial, 0, progress)
+        try:
+            written = _fetch(device, remote_path, partial, start_offset, progress)
+        except grpc.RpcError as e:
+            # The device's copy is now shorter than what we had: it changed since
+            # the interrupted download, so that partial is from another file.
+            if start_offset == 0 or e.code() != grpc.StatusCode.OUT_OF_RANGE:
+                raise
+            written = _fetch(device, remote_path, partial, 0, progress)
+    except BaseException:
+        # The partial is opened before the first chunk (so an empty file still
+        # gets created), but the device's errors, such as "no such file", only
+        # arrive once reading starts. Nothing received means nothing to resume.
+        if os.path.exists(partial) and os.path.getsize(partial) == 0:
+            os.remove(partial)
+        raise
 
     os.replace(partial, local_path)
     return written

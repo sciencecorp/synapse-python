@@ -10,6 +10,11 @@ class _FakeRpc:
     def __init__(self):
         self.read_requests = []
 
+    def ListFiles(self, request):
+        from synapse.api.files_pb2 import ListFilesResponse
+
+        return ListFilesResponse(files=[ListFilesResponse.File(path="a.h5", size=6)])
+
     def ReadFile(self, request):
         self.read_requests.append(request)
         return iter([ReadFileResponse(path="a.h5", data=b"remote", file_total_length=6)])
@@ -101,7 +106,7 @@ def test_put_to_a_new_name_does_not_ask(monkeypatch, tmp_path):
 def test_an_interrupted_get_says_where_the_partial_is(monkeypatch, tmp_path, capsys):
     import pytest
 
-    class _InterruptingRpc:
+    class _InterruptingRpc(_FakeRpc):
         def ReadFile(self, request):
             yield ReadFileResponse(path="a.h5", data=b"half", file_total_length=8)
             raise KeyboardInterrupt
@@ -151,3 +156,40 @@ def test_ls_hides_dotfiles_unless_all(monkeypatch):
 def test_listing_a_hidden_directory_by_name_shows_its_contents():
     assert not files_cli._is_hidden(".cache/x", ".cache")
     assert files_cli._is_hidden(".cache/x", "")
+
+
+def _get_missing(monkeypatch, tmp_path, listing):
+    import pytest
+    from synapse.api.files_pb2 import ListFilesResponse
+
+    class _Rpc(_FakeRpc):
+        def ListFiles(self, request):
+            return ListFilesResponse(files=listing)
+
+    device = _FakeDevice()
+    device.rpc = _Rpc()
+    monkeypatch.setattr(files_cli, "Device", lambda *a, **k: device)
+    args = argparse.Namespace(
+        uri="x", verbose=False, remote_path="a.h5", output_path=str(tmp_path),
+        recursive=False, no_resume=False, yes=False,
+        username=None, env_file=None, forget_password=False,
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        files_cli.get(args)
+    return device, exit_info.value.code
+
+
+def test_get_of_a_missing_file_says_so_and_touches_nothing(monkeypatch, tmp_path, capsys):
+    device, code = _get_missing(monkeypatch, tmp_path, listing=[])
+    assert code == 1
+    assert "a.h5 does not exist on the device" in capsys.readouterr().out
+    assert device.rpc.read_requests == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_get_of_a_directory_points_at_recursive(monkeypatch, tmp_path, capsys):
+    from synapse.api.files_pb2 import ListFilesResponse
+
+    _, code = _get_missing(monkeypatch, tmp_path, listing=[ListFilesResponse.File(path="a.h5", is_dir=True)])
+    assert code == 1
+    assert "--recursive" in capsys.readouterr().out

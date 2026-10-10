@@ -239,3 +239,20 @@ def test_upload_to_a_plain_path_is_left_alone(tmp_path, monkeypatch):
 
     cli.put(Args())
     assert captured["remote"] == "dump/explicit.bin"
+
+
+def test_a_missing_remote_file_leaves_no_empty_partial(tmp_path):
+    class _NotFound(grpc.RpcError):
+        def code(self):
+            return grpc.StatusCode.NOT_FOUND
+
+    def read(request):
+        raise _NotFound()
+        yield  # a generator, like the real stream: the error surfaces on iteration
+
+    device = _FakeDevice()
+    device.rpc.ReadFile = read
+    with pytest.raises(grpc.RpcError):
+        files_client.read_file(device, "missing.h5", str(tmp_path / "missing.h5"))
+
+    assert list(tmp_path.iterdir()) == []
