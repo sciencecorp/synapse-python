@@ -10,8 +10,9 @@ same tree the scifi-sftp account was chrooted to, so reach is unchanged -- what
 goes away is the second credential.
 """
 
+import json
 import os
-from typing import Callable, Iterator, List, Optional
+from typing import Callable, Iterator, List, Optional, Tuple
 
 import grpc
 
@@ -35,6 +36,47 @@ def list_files(device, path: str = "", recursive: bool = False) -> List[ListFile
 
 
 PARTIAL_SUFFIX = ".partial"
+# Beside each .partial: which version of the device file it holds, as
+# {"size": ..., "modified": ...}. Same format nexus-desktop writes.
+STAMP_SUFFIX = ".partial.json"
+
+# (size, modified) of a device file, as listed by ListFiles.
+Stamp = Tuple[int, int]
+
+
+def stamp_of(entry: ListFilesResponse.File) -> Stamp:
+    return (int(entry.size), int(entry.modified))
+
+
+def _resume_offset(local_path: str, stamp: Optional[Stamp]) -> int:
+    """Bytes already downloaded of this exact version of the file, else 0.
+
+    A partial is only worth continuing if the device's file is unchanged since
+    it was started; resuming onto a replaced file would splice two different
+    files together. Without a stamp to compare against, the partial's size is
+    trusted as before.
+    """
+    partial = local_path + PARTIAL_SUFFIX
+    if not os.path.exists(partial):
+        return 0
+    if stamp is None:
+        return os.path.getsize(partial)
+    try:
+        with open(local_path + STAMP_SUFFIX) as f:
+            saved = json.load(f)
+        if (saved["size"], saved["modified"]) == stamp:
+            return os.path.getsize(partial)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return 0  # stale or unidentified: start over
+
+
+def _discard_partial(local_path: str) -> None:
+    for suffix in (PARTIAL_SUFFIX, STAMP_SUFFIX):
+        try:
+            os.remove(local_path + suffix)
+        except FileNotFoundError:
+            pass
 
 
 def read_file(
@@ -43,18 +85,26 @@ def read_file(
     local_path: str,
     progress: Optional[ProgressFn] = None,
     resume: bool = True,
+    stamp: Optional[Stamp] = None,
 ) -> int:
     """Download `remote_path` to `local_path`, returning bytes written.
 
     Bytes land in `<local_path>.partial`, which is renamed over `local_path`
     only once the download completes. So `local_path` is never half-written,
     and resuming is unambiguous: only a leftover `.partial` is continued, never
-    a complete file that happens to share the name. Set resume=False to discard
-    any `.partial` and start over.
+    a complete file that happens to share the name. Pass the device file's
+    `stamp` (see stamp_of) so a partial of an older version is restarted
+    rather than continued. Set resume=False to discard any `.partial` and start
+    over.
     """
     partial = local_path + PARTIAL_SUFFIX
-    start_offset = os.path.getsize(partial) if resume and os.path.exists(partial) else 0
+    start_offset = _resume_offset(local_path, stamp) if resume else 0
     os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
+    if stamp is not None:
+        with open(local_path + STAMP_SUFFIX, "w") as f:
+            json.dump({"size": stamp[0], "modified": stamp[1]}, f)
+    elif os.path.exists(local_path + STAMP_SUFFIX):
+        os.remove(local_path + STAMP_SUFFIX)  # it would describe another download
 
     try:
         try:
@@ -69,11 +119,12 @@ def read_file(
         # The partial is opened before the first chunk (so an empty file still
         # gets created), but the device's errors, such as "no such file", only
         # arrive once reading starts. Nothing received means nothing to resume.
-        if os.path.exists(partial) and os.path.getsize(partial) == 0:
-            os.remove(partial)
+        if not os.path.exists(partial) or os.path.getsize(partial) == 0:
+            _discard_partial(local_path)
         raise
 
     os.replace(partial, local_path)
+    _discard_partial(local_path)  # just the stamp, now
     return written
 
 

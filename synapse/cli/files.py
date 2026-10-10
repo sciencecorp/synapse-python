@@ -199,7 +199,8 @@ def _may_overwrite(console: Console, what: str) -> bool:
 
 
 def _download_one(
-    device, console: Console, remote: str, local: str, resume: bool, overwrite: bool
+    device, console: Console, remote: str, local: str, resume: bool, overwrite: bool,
+    stamp: Optional[files_client.Stamp] = None,
 ) -> Optional[bool]:
     """True if downloaded, False if it failed, None if the user chose to skip it."""
     if os.path.exists(local) and not overwrite and not _may_overwrite(console, local):
@@ -220,7 +221,9 @@ def _download_one(
             bar.update(task, completed=done, total=total or None)
 
         try:
-            files_client.read_file(device, remote, local, progress=on_progress, resume=resume)
+            files_client.read_file(
+                device, remote, local, progress=on_progress, resume=resume, stamp=stamp
+            )
             return True
         except grpc.RpcError as e:
             _rpc_error(console, f"download {remote}", e)
@@ -237,7 +240,7 @@ def _report_kept_partial(console: Console, local: str) -> None:
     if os.path.exists(partial):
         console.print(
             f"Kept {filesize.decimal(os.path.getsize(partial))} in [cyan]{partial}[/cyan]. "
-            "Run the same command to resume, or delete it."
+            "Run the same command to resume it, or add --no-resume to start over."
         )
 
 
@@ -262,7 +265,9 @@ def get(args):
         local = args.output_path
         if os.path.isdir(local):
             local = os.path.join(local, os.path.basename(args.remote_path))
-        result = _download_one(device, console, args.remote_path, local, resume, args.yes)
+        result = _download_one(
+            device, console, args.remote_path, local, resume, args.yes, files_client.stamp_of(entry)
+        )
         if result is False:
             raise SystemExit(1)
         if result:
@@ -286,7 +291,7 @@ def get(args):
         # the tree shape without embedding the parent's name twice.
         rel = os.path.relpath(f.path, args.remote_path) if args.remote_path else f.path
         local = os.path.join(args.output_path, os.path.basename(args.remote_path.rstrip("/")) or "", rel)
-        if _download_one(device, console, f.path, local, resume, args.yes):
+        if _download_one(device, console, f.path, local, resume, args.yes, files_client.stamp_of(f)):
             ok += 1
     console.print(f"[bold green]Downloaded {ok}/{len(wanted)} file(s)[/bold green] to {args.output_path}")
 

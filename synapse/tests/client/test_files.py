@@ -256,3 +256,61 @@ def test_a_missing_remote_file_leaves_no_empty_partial(tmp_path):
         files_client.read_file(device, "missing.h5", str(tmp_path / "missing.h5"))
 
     assert list(tmp_path.iterdir()) == []
+
+
+def _stamped_partial(tmp_path, data, size, modified):
+    import json
+
+    (tmp_path / "f.partial").write_bytes(data)
+    (tmp_path / "f.partial.json").write_text(json.dumps({"size": size, "modified": modified}))
+
+
+def test_resumes_when_the_device_file_is_unchanged(tmp_path):
+    _stamped_partial(tmp_path, b"hello ", size=11, modified=100)
+    chunks = [ReadFileResponse(path="f", data=b"world", start_offset=6, file_total_length=11)]
+    device = _FakeDevice(read_chunks=chunks)
+
+    files_client.read_file(device, "f", str(tmp_path / "f"), stamp=(11, 100))
+
+    assert device.rpc.read_requests[0].start_offset == 6
+    assert (tmp_path / "f").read_bytes() == b"hello world"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["f"], "partial or stamp left behind"
+
+
+def test_restarts_when_the_device_file_was_replaced(tmp_path):
+    # Same size, different modified time: a re-upload under the same name.
+    # Resuming would splice the old file's head onto the new file's tail.
+    _stamped_partial(tmp_path, b"OLDOLD", size=11, modified=100)
+    chunks = [ReadFileResponse(path="f", data=b"brand new!!", start_offset=0, file_total_length=11)]
+    device = _FakeDevice(read_chunks=chunks)
+
+    files_client.read_file(device, "f", str(tmp_path / "f"), stamp=(11, 200))
+
+    assert device.rpc.read_requests[0].start_offset == 0
+    assert (tmp_path / "f").read_bytes() == b"brand new!!"
+
+
+def test_a_partial_with_no_stamp_is_restarted_when_a_stamp_is_given(tmp_path):
+    (tmp_path / "f.partial").write_bytes(b"who knows")
+    chunks = [ReadFileResponse(path="f", data=b"real", start_offset=0, file_total_length=4)]
+    device = _FakeDevice(read_chunks=chunks)
+
+    files_client.read_file(device, "f", str(tmp_path / "f"), stamp=(4, 1))
+
+    assert device.rpc.read_requests[0].start_offset == 0
+    assert (tmp_path / "f").read_bytes() == b"real"
+
+
+def test_an_interrupted_download_records_which_version_it_holds(tmp_path):
+    import json
+
+    def broken():
+        yield ReadFileResponse(path="f", data=b"half", start_offset=0, file_total_length=8)
+        raise ConnectionError("link dropped")
+
+    device = _FakeDevice()
+    device.rpc.ReadFile = lambda request: broken()
+    with pytest.raises(ConnectionError):
+        files_client.read_file(device, "f", str(tmp_path / "f"), stamp=(8, 42))
+
+    assert json.loads((tmp_path / "f.partial.json").read_text()) == {"size": 8, "modified": 42}
