@@ -11,10 +11,14 @@ from rich import progress
 from rich.prompt import Confirm
 
 from synapse import Device
+import synapse.client.sftp as sftp
+from synapse.cli.files import _uses_sftp
 from synapse.client import files as files_client
 
 # Constants
 DEVICE_MODEL_DIR = "models"
+DEFAULT_SFTP_USER = "scifi-sftp"
+DEFAULT_ENV_FILE = ".scienv"
 
 
 def add_commands(subparsers: argparse._SubParsersAction):
@@ -44,13 +48,22 @@ def add_commands(subparsers: argparse._SubParsersAction):
         help="Model name on device (default: filename without extension, e.g., 'my_model')",
     )
 
-    # Retired with SFTP. Kept parseable so an existing script gets an
-    # explanation rather than an unknown-argument error.
-    parser.add_argument("--username", type=str, default=None, help=argparse.SUPPRESS)
+    # Used only with device firmware that predates pairing, which still
+    # deploys over SFTP with its own password.
+    parser.add_argument(
+        "--username", type=str, default=DEFAULT_SFTP_USER,
+        help=f"SFTP username, for older device firmware only (default: {DEFAULT_SFTP_USER})",
+    )
 
-    parser.add_argument("--env-file", "-e", type=str, default=None, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--env-file", "-e", type=str, default=DEFAULT_ENV_FILE,
+        help=f"File the SFTP password is saved in, for older device firmware only (default: {DEFAULT_ENV_FILE})",
+    )
 
-    parser.add_argument("--forget-password", "-f", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--forget-password", "-f", action="store_true",
+        help="Do not save the SFTP password, for older device firmware only",
+    )
 
     parser.add_argument(
         "--snpe-root",
@@ -224,6 +237,10 @@ def deploy_model(args):
     # governs every other RPC governs this too.
     console.print("[bold cyan]Connecting to device...[/bold cyan]")
     device = Device(args.uri, getattr(args, "verbose", False))
+    if _uses_sftp(device, console):
+        if _deploy_over_sftp(args, deploy_path, model_name, remote_ext, console):
+            _report_deployed(console, model_name, remote_ext, quantize)
+        return
 
     try:
         # Step 3: No mkdir. WriteFile creates parent directories for whatever
@@ -256,25 +273,28 @@ def deploy_model(args):
 
         # Step 5: Upload the model file
         _upload_file(device, deploy_path, remote_path, console)
-
-        console.print()
-        console.print("[bold green]Model deployed successfully![/bold green]")
-        console.print()
-        console.print(f"  Model deployed: [cyan]models/{model_name}{remote_ext}[/cyan]")
-        if quantize:
-            console.print(f"  Runtime: [cyan]DSP (quantized INT8)[/cyan]")
-        else:
-            console.print(f"  Runtime: [cyan]CPU (float32, ONNX Runtime)[/cyan]")
-            console.print()
-            console.print(
-                "  [dim]Tip: for faster DSP inference (~1ms), redeploy with --quantize --input-list[/dim]"
-            )
-        console.print()
-        console.print("  To load in your app:")
-        console.print(f'    [cyan]auto model = synapse::create_model("{model_name}");[/cyan]')
+        _report_deployed(console, model_name, remote_ext, quantize)
 
     finally:
         pass
+
+
+def _report_deployed(console: Console, model_name: str, remote_ext: str, quantize: bool):
+    console.print()
+    console.print("[bold green]Model deployed successfully![/bold green]")
+    console.print()
+    console.print(f"  Model deployed: [cyan]models/{model_name}{remote_ext}[/cyan]")
+    if quantize:
+        console.print(f"  Runtime: [cyan]DSP (quantized INT8)[/cyan]")
+    else:
+        console.print(f"  Runtime: [cyan]CPU (float32, ONNX Runtime)[/cyan]")
+        console.print()
+        console.print(
+            "  [dim]Tip: for faster DSP inference (~1ms), redeploy with --quantize --input-list[/dim]"
+        )
+    console.print()
+    console.print("  To load in your app:")
+    console.print(f'    [cyan]auto model = synapse::create_model("{model_name}");[/cyan]')
 
 
 def _upload_file(device, local_path: str, remote_path: str, console: Console):
@@ -301,5 +321,101 @@ def _upload_file(device, local_path: str, remote_path: str, console: Console):
         files_client.write_file(
             device, local_path, remote_path, progress=update_progress
         )
+
+    console.print(f"[green]Uploaded to {remote_path}[/green]")
+
+
+# --- Older device firmware: deploy over SFTP, as before the move to gRPC. ---
+
+# A path inside the scifi-sftp chroot, which is the data directory: the same
+# place DEVICE_MODEL_DIR names for the file RPCs.
+SFTP_MODEL_DIR = f"/{DEVICE_MODEL_DIR}"
+
+
+def _deploy_over_sftp(args, deploy_path: str, model_name: str, remote_ext: str, console: Console) -> bool:
+    result = sftp.setup_connection(args.uri, args.username, args.env_file, args.forget_password, console)
+    if result is None:
+        return False
+    ssh, sftp_conn = result
+    try:
+        _ensure_model_dir(sftp_conn, ssh, console)
+        remote_path = f"{SFTP_MODEL_DIR}/{model_name}{remote_ext}"
+        try:
+            sftp_conn.stat(remote_path)
+            if not args.force and not Confirm.ask(
+                f"[yellow]Model '{model_name}{remote_ext}' already exists on device. Overwrite?[/yellow]",
+                default=False,
+            ):
+                console.print("[dim]Aborted.[/dim]")
+                return False
+        except FileNotFoundError:
+            pass
+        _sftp_upload_file(sftp_conn, deploy_path, remote_path, console)
+        return True
+    finally:
+        sftp.close_sftp(ssh, sftp_conn)
+
+
+def _ensure_model_dir(sftp_conn, ssh, console: Console):
+    """Ensure the model directory exists on the device.
+
+    Tries SFTP mkdir first. If that fails (permission denied in chroot),
+    falls back to SSH exec to create and chown the directory.
+    """
+    try:
+        sftp_conn.stat(SFTP_MODEL_DIR)
+        return
+    except FileNotFoundError:
+        pass
+
+    console.print(f"[blue]Creating model directory: {SFTP_MODEL_DIR}[/blue]")
+
+    # Try SFTP mkdir first
+    try:
+        sftp_conn.mkdir(SFTP_MODEL_DIR)
+        return
+    except Exception:
+        pass
+
+    # SFTP failed — try SSH command to create with proper ownership
+    real_path = f"/opt/scifi/data{SFTP_MODEL_DIR}"
+    try:
+        _, stdout, stderr = ssh.exec_command(
+            f"mkdir -p {real_path} && chown $(whoami) {real_path}"
+        )
+        exit_code = stdout.channel.recv_exit_status()
+        if exit_code == 0:
+            console.print(f"[green]Created {SFTP_MODEL_DIR}[/green]")
+            return
+    except Exception:
+        pass
+
+    console.print(
+        f"[bold red]Error: Could not create model directory on device.[/bold red]"
+    )
+
+
+def _sftp_upload_file(sftp_conn, local_path: str, remote_path: str, console: Console):
+    """Upload a file to the device with progress display."""
+    file_size = os.path.getsize(local_path)
+
+    console.print(f"[blue]Uploading to {remote_path}...[/blue]")
+
+    prog = progress.Progress(
+        progress.SpinnerColumn(),
+        progress.TextColumn("[progress.description]{task.description}"),
+        progress.BarColumn(),
+        progress.DownloadColumn(),
+        progress.TransferSpeedColumn(),
+        progress.TimeElapsedColumn(),
+    )
+
+    with prog:
+        task = prog.add_task("Uploading model", total=file_size)
+
+        def update_progress(transferred: int, total: int):
+            prog.update(task, completed=transferred)
+
+        sftp_conn.put(local_path, remote_path, callback=update_progress)
 
     console.print(f"[green]Uploaded to {remote_path}[/green]")

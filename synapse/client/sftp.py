@@ -90,6 +90,8 @@ def setup_connection(
     forget_password: bool,
     console: Console,
 ) -> Optional[tuple[paramiko.SSHClient, paramiko.SFTPClient]]:
+    from synapse import Device  # here, not at the top: synapse/__init__ imports this package
+
     dev_name = Device(uri).get_name()
     password = find_password(
         dev_name, env_file
@@ -101,7 +103,7 @@ def setup_connection(
     # Open SFTP connection
     with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
         try:
-            ssh, sftp_conn = sftp.connect_sftp(uri, username, password)
+            ssh, sftp_conn = connect_sftp(uri, username, password)
         except paramiko.ssh_exception.AuthenticationException:
             console.print(f"[bold red]Authentication failed for {uri}[/bold red]")
             console.print("[yellow] Incorrect username or password.")

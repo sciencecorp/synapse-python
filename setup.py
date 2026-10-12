@@ -63,7 +63,7 @@ setup(
     ],
     extras_require={
         "model-convert": [
-            "onnx>=1.12.0,<1.16.0",
+            "onnx==1.16.2",  # same as the converter container; first release with Python 3.12 wheels is 1.16.0
             "torch",
             "packaging",
             "protobuf",

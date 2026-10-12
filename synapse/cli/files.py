@@ -23,35 +23,44 @@ from rich.table import Table
 
 from synapse import Device
 from synapse.api.files_pb2 import ListFilesResponse
+from synapse.cli import files_sftp
 from synapse.client import files as files_client
 from synapse.utils.file import filesize_binary, format_time
 
-# Accepted and ignored so a script written against the SFTP version fails
-# loudly on the flag being pointless rather than confusingly on an unknown
-# argument. Hidden from --help, which advertises only what still does anything.
-_RETIRED_SFTP_FLAGS = ("username", "env_file", "forget_password")
-
-
-def _add_retired_sftp_flags(parser: argparse.ArgumentParser):
-    parser.add_argument("--username", "-u", type=str, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--env-file", "-e", type=str, default=None, help=argparse.SUPPRESS)
+def _add_sftp_flags(parser: argparse.ArgumentParser):
+    """SFTP settings, used only with device firmware that predates pairing."""
     parser.add_argument(
-        "--forget-password", "-f", action="store_true", help=argparse.SUPPRESS
+        "--username", "-u", type=str, default=files_sftp.SCIFI_DEFAULT_SFTP_USER,
+        help="SFTP username, for older device firmware only",
+    )
+    parser.add_argument(
+        "--env-file", "-e", type=str, default=files_sftp.DEFAULT_ENV_FILE,
+        help="File the SFTP password is saved in, for older device firmware only",
+    )
+    parser.add_argument(
+        "--forget-password", "-f", action="store_true",
+        help="Do not save the SFTP password, for older device firmware only",
     )
 
 
-def _warn_about_retired_flags(args, console: Console):
-    used = [
-        f.replace("_", "-")
-        for f in _RETIRED_SFTP_FLAGS
-        if getattr(args, f, None) not in (None, False)
-    ]
-    if used:
-        console.print(
-            f"[yellow]Ignoring {', '.join('--' + u for u in used)}:[/yellow] file "
-            "transfers no longer use SFTP, so there is no separate password. "
-            "Access is granted by pairing with the device."
-        )
+def _uses_sftp(device, console: Console) -> bool:
+    """True for device firmware without the file RPCs, which still serves SFTP.
+
+    Such firmware also predates pairing, so this is where users of a newer
+    synapsectl find out the device should be updated.
+    """
+    try:
+        files_client.list_files(device, "")
+        return False
+    except grpc.RpcError as e:
+        if e.code() != grpc.StatusCode.UNIMPLEMENTED:
+            return False  # a real error; let the command report it
+    console.print(
+        "[yellow]This device's firmware predates device pairing, so file transfer "
+        "uses SFTP and needs the device's file-transfer password. Update the device "
+        "firmware to pair with it instead.[/yellow]"
+    )
+    return True
 
 
 def add_commands(subparsers: argparse._SubParsersAction):
@@ -68,7 +77,7 @@ def add_commands(subparsers: argparse._SubParsersAction):
     a.add_argument(
         "--all", "-a", action="store_true", help="Include hidden files (names starting with .)"
     )
-    _add_retired_sftp_flags(a)
+    _add_sftp_flags(a)
     a.set_defaults(func=ls)
 
     b = file_subparsers.add_parser("get", help="Get a file from device")
@@ -87,7 +96,7 @@ def add_commands(subparsers: argparse._SubParsersAction):
     b.add_argument(
         "--yes", "-y", action="store_true", help="Overwrite existing local files without asking"
     )
-    _add_retired_sftp_flags(b)
+    _add_sftp_flags(b)
     b.set_defaults(func=get)
 
     c = file_subparsers.add_parser("put", help="Upload a file to the device")
@@ -105,6 +114,7 @@ def add_commands(subparsers: argparse._SubParsersAction):
     c.add_argument(
         "--yes", "-y", action="store_true", help="Overwrite existing device files without asking"
     )
+    _add_sftp_flags(c)
     c.set_defaults(func=put)
 
     d = file_subparsers.add_parser("rm", help="Remove a file from device")
@@ -115,7 +125,7 @@ def add_commands(subparsers: argparse._SubParsersAction):
     d.add_argument(
         "--yes", "-y", action="store_true", help="Do not ask before deleting"
     )
-    _add_retired_sftp_flags(d)
+    _add_sftp_flags(d)
     d.set_defaults(func=rm)
 
 
@@ -173,8 +183,9 @@ def _is_hidden(path: str, listed: str) -> bool:
 
 def ls(args):
     console = Console()
-    _warn_about_retired_flags(args, console)
     device = Device(args.uri, args.verbose)
+    if _uses_sftp(device, console):
+        return files_sftp.ls(args)
     shown = args.path or "/"
     console.print(f"\n[bold blue]Listing directory:[/bold blue] [yellow]{shown}[/yellow]\n")
     try:
@@ -246,8 +257,9 @@ def _report_kept_partial(console: Console, local: str) -> None:
 
 def get(args):
     console = Console()
-    _warn_about_retired_flags(args, console)
     device = Device(args.uri, args.verbose)
+    if _uses_sftp(device, console):
+        return files_sftp.get(args)
     resume = not args.no_resume
 
     if not args.recursive:
@@ -344,6 +356,8 @@ def _upload_one(device, console: Console, local: str, remote: str) -> Optional[i
 def put(args):
     console = Console()
     device = Device(args.uri, args.verbose)
+    if _uses_sftp(device, console):
+        return files_sftp.put(args)
     local = args.local_path.rstrip("/")
 
     if os.path.isdir(local):
@@ -395,15 +409,16 @@ def put(args):
 
 def rm(args):
     console = Console()
-    _warn_about_retired_flags(args, console)
-    device = Device(args.uri, args.verbose)
-
     # Recursive deletes take a whole recording directory with them, and there
-    # is no undo on the device.
+    # is no undo on the device. Asked before the SFTP hand-off so both paths ask.
     if args.recursive and not args.yes:
         if not Confirm.ask(f"Delete [bold]{args.path}[/bold] and everything under it?"):
             console.print("Not deleting.")
             return
+
+    device = Device(args.uri, args.verbose)
+    if _uses_sftp(device, console):
+        return files_sftp.rm(args)
 
     try:
         files_client.delete_file(device, args.path, args.recursive)

@@ -193,3 +193,103 @@ def test_get_of_a_directory_points_at_recursive(monkeypatch, tmp_path, capsys):
     _, code = _get_missing(monkeypatch, tmp_path, listing=[ListFilesResponse.File(path="a.h5", is_dir=True)])
     assert code == 1
     assert "--recursive" in capsys.readouterr().out
+
+
+class _OldFirmwareRpc:
+    """Device firmware from before the file RPCs existed."""
+
+    def ListFiles(self, request):
+        class _Unimplemented(grpc.RpcError):
+            def code(self):
+                return grpc.StatusCode.UNIMPLEMENTED
+
+        raise _Unimplemented()
+
+
+import grpc  # noqa: E402  (used by the fake above)
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("command", ["ls", "get", "put", "rm"])
+def test_old_firmware_falls_back_to_sftp_and_says_to_update(monkeypatch, capsys, command):
+    device = _FakeDevice()
+    device.rpc = _OldFirmwareRpc()
+    monkeypatch.setattr(files_cli, "Device", lambda *a, **k: device)
+    called = []
+    monkeypatch.setattr(files_cli.files_sftp, command, lambda args: called.append(args))
+    args = argparse.Namespace(uri="x", verbose=False, recursive=False, yes=False)
+
+    getattr(files_cli, command)(args)
+
+    assert called == [args], f"{command} did not hand over to the SFTP implementation"
+    out = capsys.readouterr().out
+    assert "predates device pairing" in out and "Update the device" in out
+
+
+def test_new_firmware_does_not_use_sftp(monkeypatch):
+    device = _FakeDevice()  # its ListFiles answers normally
+    monkeypatch.setattr(files_cli, "Device", lambda *a, **k: device)
+    monkeypatch.setattr(files_cli.files_sftp, "ls", lambda args: pytest.fail("used SFTP on new firmware"))
+    files_cli.ls(argparse.Namespace(uri="x", verbose=False, path="", recursive=False, all=False))
+
+
+def test_sftp_ls_with_no_path_lists_the_root(monkeypatch):
+    listed = []
+
+    class _Sftp:
+        def listdir_attr(self, path):
+            listed.append(path)
+            return []
+
+    monkeypatch.setattr(files_cli.files_sftp.sftp, "setup_connection", lambda *a: (None, _Sftp()))
+    monkeypatch.setattr(files_cli.files_sftp.sftp, "close_sftp", lambda *a: None)
+    files_cli.files_sftp.ls(
+        argparse.Namespace(uri="x", username="u", env_file=".scienv", forget_password=False, path="")
+    )
+    assert listed == ["/"]
+
+
+class _ExistingSftp:
+    """Every remote path exists as a 1-byte regular file."""
+
+    def __init__(self):
+        self.transfers = []
+
+    def stat(self, path):
+        import paramiko
+
+        a = paramiko.SFTPAttributes()
+        a.st_mode, a.st_size = 0o100644, 1
+        return a
+
+    def get(self, remote, local, callback=None):
+        self.transfers.append(("get", remote))
+
+    def put(self, local, remote, callback=None):
+        self.transfers.append(("put", remote))
+
+
+@pytest.mark.parametrize("answer, overwrite, expect", [(False, False, 0), (True, False, 1), (False, True, 1)])
+def test_sftp_get_and_put_ask_before_replacing(monkeypatch, tmp_path, answer, overwrite, expect):
+    from rich.console import Console
+
+    from synapse.cli import files_sftp
+
+    monkeypatch.setattr(files_cli.Confirm, "ask", lambda *a, **k: answer)
+    local = tmp_path / "a.h5"
+    local.write_bytes(b"x")
+    conn = _ExistingSftp()
+
+    files_sftp.get_file(conn, "disk_writer/a.h5", str(local), Console(), overwrite)
+    files_sftp.put_file(conn, str(local), "disk_writer/a.h5", Console(), overwrite)
+
+    assert len(conn.transfers) == 2 * expect
+
+
+def test_old_firmware_recursive_rm_asks_first(monkeypatch):
+    device = _FakeDevice()
+    device.rpc = _OldFirmwareRpc()
+    monkeypatch.setattr(files_cli, "Device", lambda *a, **k: device)
+    monkeypatch.setattr(files_cli.Confirm, "ask", lambda *a, **k: False)
+    monkeypatch.setattr(files_cli.files_sftp, "rm", lambda args: pytest.fail("deleted without asking"))
+    files_cli.rm(argparse.Namespace(uri="x", verbose=False, path="disk_writer", recursive=True, yes=False))

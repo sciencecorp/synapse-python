@@ -29,8 +29,12 @@ def convert_pt_to_onnx(
         import torch
     except ImportError:
         if console:
-            console.print("[bold red]Error:[/bold red] torch is required for PT to ONNX conversion")
-            console.print("[yellow]Install with: pip install torch[/yellow]")
+            console.print(
+                "[bold red]Error:[/bold red] .pt models need the model-conversion extra "
+                "(PyTorch and ONNX), which a plain install does not include."
+            )
+            console.print("[yellow]Install it with: pip install 'science-synapse\\[model-convert]'[/yellow]")
+            console.print("[yellow]Or export your model to .onnx and deploy that instead.[/yellow]")
         return None
 
     if console:
