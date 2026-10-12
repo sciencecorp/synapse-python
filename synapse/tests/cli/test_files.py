@@ -13,11 +13,11 @@ class _FakeRpc:
     def ListFiles(self, request):
         from synapse.api.files_pb2 import ListFilesResponse
 
-        return ListFilesResponse(files=[ListFilesResponse.File(path="a.h5", size=6)])
+        return ListFilesResponse(files=[ListFilesResponse.File(path="a.h5", size_bytes=6)])
 
     def ReadFile(self, request):
         self.read_requests.append(request)
-        return iter([ReadFileResponse(path="a.h5", data=b"remote", file_total_length=6)])
+        return iter([ReadFileResponse(path="a.h5", data=b"remote", file_size_bytes=6)])
 
 
 class _FakeDevice:
@@ -66,7 +66,7 @@ class _FakePutRpc:
     def ListFiles(self, request):
         from synapse.api.files_pb2 import ListFilesResponse
 
-        return ListFilesResponse(files=[ListFilesResponse.File(path="a.h5", size=4)])
+        return ListFilesResponse(files=[ListFilesResponse.File(path="a.h5", size_bytes=4)])
 
     def WriteFile(self, messages):
         from synapse.api.files_pb2 import WriteFileResponse
@@ -108,7 +108,7 @@ def test_an_interrupted_get_says_where_the_partial_is(monkeypatch, tmp_path, cap
 
     class _InterruptingRpc(_FakeRpc):
         def ReadFile(self, request):
-            yield ReadFileResponse(path="a.h5", data=b"half", file_total_length=8)
+            yield ReadFileResponse(path="a.h5", data=b"half", file_size_bytes=8)
             raise KeyboardInterrupt
 
     device = _FakeDevice()

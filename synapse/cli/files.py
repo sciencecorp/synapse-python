@@ -149,7 +149,7 @@ def _print_file_list(files: List[ListFilesResponse.File], console: Console):
     table.add_column("Date modified", style="yellow")
     table.add_column("Filename", style="white")
     for f in entries:
-        size_str = "" if f.is_dir else filesize_binary(f.size)
+        size_str = "" if f.is_dir else filesize_binary(f.size_bytes)
         name = f"[bold blue]{f.path}/[/bold blue]" if f.is_dir else f.path
         table.add_row(size_str, format_time(f.modified), name)
 

@@ -45,7 +45,7 @@ Stamp = Tuple[int, int]
 
 
 def stamp_of(entry: ListFilesResponse.File) -> Stamp:
-    return (int(entry.size), int(entry.modified))
+    return (int(entry.size_bytes), int(entry.modified))
 
 
 def _resume_offset(local_path: str, stamp: Optional[Stamp]) -> int:
@@ -129,7 +129,7 @@ def read_file(
 
 
 def _fetch(device, remote_path, partial, start_offset, progress) -> int:
-    stream = device.rpc.ReadFile(ReadFileRequest(path=remote_path, start_offset=start_offset))
+    stream = device.rpc.ReadFile(ReadFileRequest(path=remote_path, start_offset_bytes=start_offset))
     written = start_offset
     # Opened before the first chunk: the server sends zero chunks for an empty
     # file, and that file still has to exist afterwards.
@@ -140,7 +140,7 @@ def _fetch(device, remote_path, partial, start_offset, progress) -> int:
             f.write(chunk.data)
             written += len(chunk.data)
             if progress:
-                progress(written, chunk.file_total_length)
+                progress(written, chunk.file_size_bytes)
     return written
 
 

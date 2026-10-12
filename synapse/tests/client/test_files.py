@@ -76,8 +76,8 @@ def test_upload_chunks_stay_under_the_grpc_message_limit(tmp_path):
 
 def test_download_writes_every_chunk_in_order(tmp_path):
     chunks = [
-        ReadFileResponse(path="f", data=b"hello ", start_offset=0, file_total_length=11),
-        ReadFileResponse(path="f", data=b"world", start_offset=6, file_total_length=11),
+        ReadFileResponse(path="f", data=b"hello ", start_offset_bytes=0, file_size_bytes=11),
+        ReadFileResponse(path="f", data=b"world", start_offset_bytes=6, file_size_bytes=11),
     ]
     device = _FakeDevice(read_chunks=chunks)
     dest = tmp_path / "out" / "f"
@@ -90,12 +90,12 @@ def test_download_resumes_an_interrupted_partial(tmp_path):
     # A 3 GB recording that dies at 90% must not start over.
     dest = tmp_path / "f"
     (tmp_path / "f.partial").write_bytes(b"hello ")
-    chunks = [ReadFileResponse(path="f", data=b"world", start_offset=6, file_total_length=11)]
+    chunks = [ReadFileResponse(path="f", data=b"world", start_offset_bytes=6, file_size_bytes=11)]
     device = _FakeDevice(read_chunks=chunks)
 
     n = files_client.read_file(device, "f", str(dest))
 
-    assert device.rpc.read_requests[0].start_offset == 6, "did not ask to resume"
+    assert device.rpc.read_requests[0].start_offset_bytes == 6, "did not ask to resume"
     assert dest.read_bytes() == b"hello world"
     assert not (tmp_path / "f.partial").exists()
     assert n == 11
@@ -106,12 +106,12 @@ def test_a_complete_local_file_is_replaced_not_appended_to(tmp_path):
     # partial download, so the remote file's tail was appended to it.
     dest = tmp_path / "f"
     dest.write_bytes(b"other")
-    chunks = [ReadFileResponse(path="f", data=b"remote!", start_offset=0, file_total_length=7)]
+    chunks = [ReadFileResponse(path="f", data=b"remote!", start_offset_bytes=0, file_size_bytes=7)]
     device = _FakeDevice(read_chunks=chunks)
 
     files_client.read_file(device, "f", str(dest))
 
-    assert device.rpc.read_requests[0].start_offset == 0
+    assert device.rpc.read_requests[0].start_offset_bytes == 0
     assert dest.read_bytes() == b"remote!"
 
 
@@ -120,7 +120,7 @@ def test_an_interrupted_download_leaves_the_destination_untouched(tmp_path):
     dest.write_bytes(b"previous copy")
 
     def broken():
-        yield ReadFileResponse(path="f", data=b"half", start_offset=0, file_total_length=8)
+        yield ReadFileResponse(path="f", data=b"half", start_offset_bytes=0, file_size_bytes=8)
         raise ConnectionError("link dropped")
 
     device = _FakeDevice()
@@ -142,10 +142,10 @@ def test_a_partial_longer_than_the_remote_file_restarts(tmp_path):
     calls = []
 
     def read(request):
-        calls.append(request.start_offset)
-        if request.start_offset:
+        calls.append(request.start_offset_bytes)
+        if request.start_offset_bytes:
             raise _OutOfRange()
-        return iter([ReadFileResponse(path="f", data=b"new", start_offset=0, file_total_length=3)])
+        return iter([ReadFileResponse(path="f", data=b"new", start_offset_bytes=0, file_size_bytes=3)])
 
     device = _FakeDevice()
     device.rpc.ReadFile = read
@@ -158,10 +158,10 @@ def test_a_partial_longer_than_the_remote_file_restarts(tmp_path):
 def test_resume_false_refetches_from_the_start(tmp_path):
     dest = tmp_path / "f"
     (tmp_path / "f.partial").write_bytes(b"stale")
-    chunks = [ReadFileResponse(path="f", data=b"fresh", start_offset=0, file_total_length=5)]
+    chunks = [ReadFileResponse(path="f", data=b"fresh", start_offset_bytes=0, file_size_bytes=5)]
     device = _FakeDevice(read_chunks=chunks)
     files_client.read_file(device, "f", str(dest), resume=False)
-    assert device.rpc.read_requests[0].start_offset == 0
+    assert device.rpc.read_requests[0].start_offset_bytes == 0
     assert dest.read_bytes() == b"fresh"
 
 
@@ -192,7 +192,7 @@ def test_upload_into_a_directory_appends_the_basename(tmp_path, monkeypatch):
     src = tmp_path / "recording.h5"
     src.write_bytes(b"data")
 
-    listing = [ListFilesResponse.File(path="hdf5-replay", size=0, is_dir=True)]
+    listing = [ListFilesResponse.File(path="hdf5-replay", size_bytes=0, is_dir=True)]
     device = _FakeDevice(listing=listing)
 
     assert cli._remote_entry(device, "hdf5-replay").is_dir
@@ -267,12 +267,12 @@ def _stamped_partial(tmp_path, data, size, modified):
 
 def test_resumes_when_the_device_file_is_unchanged(tmp_path):
     _stamped_partial(tmp_path, b"hello ", size=11, modified=100)
-    chunks = [ReadFileResponse(path="f", data=b"world", start_offset=6, file_total_length=11)]
+    chunks = [ReadFileResponse(path="f", data=b"world", start_offset_bytes=6, file_size_bytes=11)]
     device = _FakeDevice(read_chunks=chunks)
 
     files_client.read_file(device, "f", str(tmp_path / "f"), stamp=(11, 100))
 
-    assert device.rpc.read_requests[0].start_offset == 6
+    assert device.rpc.read_requests[0].start_offset_bytes == 6
     assert (tmp_path / "f").read_bytes() == b"hello world"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["f"], "partial or stamp left behind"
 
@@ -281,23 +281,23 @@ def test_restarts_when_the_device_file_was_replaced(tmp_path):
     # Same size, different modified time: a re-upload under the same name.
     # Resuming would splice the old file's head onto the new file's tail.
     _stamped_partial(tmp_path, b"OLDOLD", size=11, modified=100)
-    chunks = [ReadFileResponse(path="f", data=b"brand new!!", start_offset=0, file_total_length=11)]
+    chunks = [ReadFileResponse(path="f", data=b"brand new!!", start_offset_bytes=0, file_size_bytes=11)]
     device = _FakeDevice(read_chunks=chunks)
 
     files_client.read_file(device, "f", str(tmp_path / "f"), stamp=(11, 200))
 
-    assert device.rpc.read_requests[0].start_offset == 0
+    assert device.rpc.read_requests[0].start_offset_bytes == 0
     assert (tmp_path / "f").read_bytes() == b"brand new!!"
 
 
 def test_a_partial_with_no_stamp_is_restarted_when_a_stamp_is_given(tmp_path):
     (tmp_path / "f.partial").write_bytes(b"who knows")
-    chunks = [ReadFileResponse(path="f", data=b"real", start_offset=0, file_total_length=4)]
+    chunks = [ReadFileResponse(path="f", data=b"real", start_offset_bytes=0, file_size_bytes=4)]
     device = _FakeDevice(read_chunks=chunks)
 
     files_client.read_file(device, "f", str(tmp_path / "f"), stamp=(4, 1))
 
-    assert device.rpc.read_requests[0].start_offset == 0
+    assert device.rpc.read_requests[0].start_offset_bytes == 0
     assert (tmp_path / "f").read_bytes() == b"real"
 
 
@@ -305,7 +305,7 @@ def test_an_interrupted_download_records_which_version_it_holds(tmp_path):
     import json
 
     def broken():
-        yield ReadFileResponse(path="f", data=b"half", start_offset=0, file_total_length=8)
+        yield ReadFileResponse(path="f", data=b"half", start_offset_bytes=0, file_size_bytes=8)
         raise ConnectionError("link dropped")
 
     device = _FakeDevice()
