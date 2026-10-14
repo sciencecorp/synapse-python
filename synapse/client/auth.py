@@ -134,13 +134,13 @@ def _write(tokens: Dict[str, Tuple[str, str]]) -> None:
 METADATA_KEY = "authorization"
 METADATA_SCHEME = "Bearer "
 
-# Mirrors scifi-server's open set (src/auth/rpc_auth_policy.cpp). These need no
-# token, so the interceptor never triggers serial resolution for them.
+# Mirrors scifi-server's open set exactly (src/auth/rpc_auth_policy.cpp,
+# kOpenMethods). These are sent without a token, so the interceptor never triggers
+# serial resolution for them; every other RPC is refused without one. GetLogs and
+# TailLogs were open at first and are gated now.
 OPEN_METHODS = frozenset(
     {
         "/synapse.SynapseDevice/Info",
-        "/synapse.SynapseDevice/GetLogs",
-        "/synapse.SynapseDevice/TailLogs",
         "/synapse.SynapseDevice/RequestAuth",
     }
 )
@@ -170,8 +170,8 @@ class AuthInterceptor(
 
     Resolution is lazy and happens at most once per channel: the first call to a
     token-gated method learns the device serial, looks the token up, and caches
-    it. Open methods never trigger it, so discovery and log tailing cost nothing
-    extra, and neither does an unpaired user with no env file.
+    it. Open methods never trigger it, so discovery costs nothing extra, and
+    neither does an unpaired user with no env file.
     """
 
     def __init__(self, channel=None, serial_resolver=None):
