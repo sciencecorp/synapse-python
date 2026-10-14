@@ -202,8 +202,9 @@ Deploy machine learning models to Synapse devices.
 
 ### Prerequisites
 
-1. **Docker** — required for model conversion
-2. **QAIRT SDK v2.34** (Qualcomm AI Runtime) — required for model conversion for DSP runtime, not required for CPU runtime
+1. **For `.pt` models:** the model-conversion extra, `pip install 'science-synapse[model-convert]'` (PyTorch and ONNX). Not needed for `.onnx` or `.dlc` models.
+2. **Docker** — required for quantized (DSP) model conversion
+3. **QAIRT SDK v2.34** (Qualcomm AI Runtime) — required for model conversion for DSP runtime, not required for CPU runtime
 
 ### Quick Start — Deploy a Float Model (CPU)
 

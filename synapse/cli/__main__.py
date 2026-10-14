@@ -10,6 +10,7 @@ from rich.logging import RichHandler
 
 from synapse import SYNAPSE_API_VERSION
 from synapse.cli import (
+    auth,
     apps,
     deploy_model,
     discover,
@@ -74,6 +75,7 @@ def main():
     )
     subparsers = parser.add_subparsers(title="Commands")
     discover.add_commands(subparsers)
+    auth.add_commands(subparsers)
     rpc.add_commands(subparsers)
     streaming.add_commands(subparsers)
     offline_plot.add_commands(subparsers)

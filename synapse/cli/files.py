@@ -1,419 +1,432 @@
-import os
-import paramiko
+"""`synapsectl file` -- device files over gRPC.
+
+This used SFTP, which needed its own password: a device carried two
+independent credentials, and `synapsectl file` was the only command that asked
+for one. Going through the SynapseDevice service means file access is governed
+by the same pairing token as everything else.
+
+Device firmware that predates the file RPCs answers them with UNIMPLEMENTED;
+for those devices every command falls back to the old SFTP path (files_sftp),
+which still takes --username, --env-file and the SFTP password, and says to
+update the device firmware.
+
+Paths are relative to the device's data root and cannot escape it, so
+`file ls /` shows the data root. That is the same tree the scifi-sftp account
+was chrooted to, so what you can reach is unchanged -- only the credential is.
+"""
+
 import argparse
-import stat
-import yaml
-import getpass
-from typing import Optional
-import paramiko.ssh_exception
+import os
+from typing import List, Optional
+
+import grpc
+from rich import filesize, progress
 from rich.console import Console
-from rich.table import Table
-from rich import progress
 from rich.prompt import Confirm
+from rich.table import Table
 
 from synapse import Device
-import synapse.client.sftp as sftp
-from synapse.utils.file import format_mode, format_time, filesize_binary
+from synapse.api.files_pb2 import ListFilesResponse
+from synapse.cli import files_sftp
+from synapse.client import files as files_client
+from synapse.utils.file import filesize_binary, format_time
 
-SCIFI_DEFAULT_SFTP_USER = "scifi-sftp"
-DEFAULT_ENV_FILE = ".scienv"
-
-
-def add_user_arguments(parser: argparse.ArgumentParser):
+def _add_sftp_flags(parser: argparse.ArgumentParser):
+    """SFTP settings, used only with device firmware that predates pairing."""
     parser.add_argument(
-        "--username",
-        "-u",
-        type=str,
-        default=SCIFI_DEFAULT_SFTP_USER,
-        help="Username for SFTP connection",
+        "--username", "-u", type=str, default=files_sftp.SCIFI_DEFAULT_SFTP_USER,
+        help="SFTP username, for older device firmware only",
     )
     parser.add_argument(
-        "--env-file",
-        "-e",
-        type=str,
-        default=DEFAULT_ENV_FILE,
-        help="Path to environment file containing passwords",
+        "--env-file", "-e", type=str, default=files_sftp.DEFAULT_ENV_FILE,
+        help="File the SFTP password is saved in, for older device firmware only",
     )
     parser.add_argument(
-        "--forget-password",
-        "-f",
-        action="store_true",
-        help="Dont store an input password locally for future use",
+        "--forget-password", "-f", action="store_true",
+        help="Do not save the SFTP password, for older device firmware only",
     )
+
+
+def _uses_sftp(device, console: Console) -> bool:
+    """True for device firmware without the file RPCs, which still serves SFTP.
+
+    Such firmware also predates pairing, so this is where users of a newer
+    synapsectl find out the device should be updated.
+    """
+    try:
+        files_client.list_files(device, "")
+        return False
+    except grpc.RpcError as e:
+        if e.code() != grpc.StatusCode.UNIMPLEMENTED:
+            return False  # a real error; let the command report it
+    console.print(
+        "[yellow]This device's firmware predates device pairing, so file transfer "
+        "uses SFTP and needs the device's file-transfer password. Update the device "
+        "firmware to pair with it instead.[/yellow]"
+    )
+    return True
 
 
 def add_commands(subparsers: argparse._SubParsersAction):
     file_parser = subparsers.add_parser("file", help="File commands")
     file_subparsers = file_parser.add_subparsers(title="File Commands")
-    a: argparse.ArgumentParser = file_subparsers.add_parser(
-        "ls", help="List files on device"
+
+    a = file_subparsers.add_parser("ls", help="List files on device")
+    a.add_argument(
+        "path", type=str, nargs="?", default="", help="Path to list, relative to the data directory"
     )
     a.add_argument(
-        "path", type=str, nargs="?", default="/", help="Path to list files from"
+        "--recursive", "-r", action="store_true", help="List subdirectories too"
     )
-    add_user_arguments(a)
+    a.add_argument(
+        "--all", "-a", action="store_true", help="Include hidden files (names starting with .)"
+    )
+    _add_sftp_flags(a)
     a.set_defaults(func=ls)
 
-    b: argparse.ArgumentParser = file_subparsers.add_parser(
-        "get", help="Get a file from device"
-    )
+    b = file_subparsers.add_parser("get", help="Get a file from device")
     b.add_argument("remote_path", type=str, help="Remote path of file to download")
     b.add_argument(
-        "--output_path",
-        "-o",
-        type=str,
-        default=os.getcwd(),
-        help="Output path for downloaded file(s)",
+        "--output_path", "-o", type=str, default=os.getcwd(), help="Output path for downloaded file(s)"
     )
     b.add_argument(
-        "--recursive",
-        "-r",
-        action="store_true",
-        help="Download directories recursively",
+        "--recursive", "-r", action="store_true", help="Download directories recursively"
     )
-    add_user_arguments(b)
+    b.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Download from the start instead of continuing an interrupted download",
+    )
+    b.add_argument(
+        "--yes", "-y", action="store_true", help="Overwrite existing local files without asking"
+    )
+    _add_sftp_flags(b)
     b.set_defaults(func=get)
 
-    c: argparse.ArgumentParser = file_subparsers.add_parser(
-        "rm", help="Remove a file from device"
-    )
-    c.add_argument("path", type=str, help="Path to file to remove")
+    c = file_subparsers.add_parser("put", help="Upload a file to the device")
+    c.add_argument("local_path", type=str, help="Local file to upload")
     c.add_argument(
+        "remote_path",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Remote path, relative to the data directory (default: the name as given)",
+    )
+    c.add_argument(
+        "--recursive", "-r", action="store_true", help="Upload a directory recursively"
+    )
+    c.add_argument(
+        "--yes", "-y", action="store_true", help="Overwrite existing device files without asking"
+    )
+    _add_sftp_flags(c)
+    c.set_defaults(func=put)
+
+    d = file_subparsers.add_parser("rm", help="Remove a file from device")
+    d.add_argument("path", type=str, help="Path to file to remove")
+    d.add_argument(
         "--recursive", "-r", action="store_true", help="Remove directories recursively"
     )
-    add_user_arguments(c)
-    c.set_defaults(func=rm)
+    d.add_argument(
+        "--yes", "-y", action="store_true", help="Do not ask before deleting"
+    )
+    _add_sftp_flags(d)
+    d.set_defaults(func=rm)
+
+
+def _rpc_error(console: Console, action: str, e: grpc.RpcError) -> None:
+    """One place for gRPC failures, so every command explains them the same way."""
+    code = e.code()
+    if code == grpc.StatusCode.UNAUTHENTICATED:
+        console.print(
+            f"[bold red]Not paired with this device.[/bold red] Run "
+            f"[bold]synapsectl pair[/bold] first."
+        )
+    elif code == grpc.StatusCode.UNIMPLEMENTED:
+        console.print(
+            "[bold red]This device's firmware does not support file transfers "
+            "over gRPC.[/bold red] Update the device firmware and try again."
+        )
+    elif code == grpc.StatusCode.INVALID_ARGUMENT:
+        console.print(f"[bold red]{e.details()}[/bold red]")
+    elif code == grpc.StatusCode.NOT_FOUND:
+        console.print("[bold red]No such file on the device.[/bold red]")
+    else:
+        console.print(f"[bold red]Failed to {action}:[/bold red] {e.details()}")
+
+
+def _print_file_list(files: List[ListFilesResponse.File], console: Console):
+    # Directories first, then by name -- same ordering the SFTP version used.
+    entries = sorted(files, key=lambda f: (0 if f.is_dir else 1, f.path))
+
+    table = Table(show_header=True)
+    table.add_column("Size", justify="right", style="magenta")
+    table.add_column("Date modified", style="yellow")
+    table.add_column("Filename", style="white")
+    for f in entries:
+        size_str = "" if f.is_dir else filesize_binary(f.size_bytes)
+        name = f"[bold blue]{f.path}/[/bold blue]" if f.is_dir else f.path
+        table.add_row(size_str, format_time(f.modified), name)
+
+    console.print(table)
+    if not entries:
+        console.print("[dim](empty)[/dim]")
+
+
+def _is_hidden(path: str, listed: str) -> bool:
+    """Whether `path` is, or sits inside, a dotfile below the listed directory.
+
+    Judged only below `listed`, so explicitly listing a hidden directory still
+    shows what is in it.
+    """
+    prefix = listed.strip("/")
+    rel = path.strip("/")
+    if prefix and (rel == prefix or rel.startswith(prefix + "/")):
+        rel = rel[len(prefix):].lstrip("/")
+    return any(part.startswith(".") for part in rel.split("/") if part)
 
 
 def ls(args):
     console = Console()
-    connections = setup_connection(
-        args.uri,
-        args.username,
-        args.env_file,
-        args.forget_password,
-        console,
-    )
-    if connections is None:
-        return
-    ssh, sftp_conn = connections
-    console.print(
-        f"\n[bold blue]Listing directory:[/bold blue] [yellow]{args.path}[/yellow]\n"
-    )
-
+    device = Device(args.uri, args.verbose)
+    if _uses_sftp(device, console):
+        return files_sftp.ls(args)
+    shown = args.path or "/"
+    console.print(f"\n[bold blue]Listing directory:[/bold blue] [yellow]{shown}[/yellow]\n")
     try:
-        file_attr = sftp_conn.listdir_attr(args.path)
-        print_file_list(file_attr, console)
-    except Exception as e:
-        console.print(f"[bold red]Failed to list directory:[/bold red] {e}")
+        entries = files_client.list_files(device, args.path, args.recursive)
+    except grpc.RpcError as e:
+        _rpc_error(console, "list the directory", e)
+        return
+    if not getattr(args, "all", False):
+        entries = [f for f in entries if not _is_hidden(f.path, args.path)]
+    _print_file_list(entries, console)
 
-    sftp.close_sftp(ssh, sftp_conn)
+
+def _may_overwrite(console: Console, what: str) -> bool:
+    """Ask before replacing `what`. Declines when there is no terminal to ask on."""
+    try:
+        ok = Confirm.ask(f"[yellow]{what}[/yellow] already exists. Overwrite?", default=False)
+    except EOFError:
+        ok = False
+    if not ok:
+        console.print(f"Skipped {what} (pass -y to overwrite)")
+    return ok
+
+
+def _download_one(
+    device, console: Console, remote: str, local: str, resume: bool, overwrite: bool,
+    stamp: Optional[files_client.Stamp] = None,
+) -> Optional[bool]:
+    """True if downloaded, False if it failed, None if the user chose to skip it."""
+    if os.path.exists(local) and not overwrite and not _may_overwrite(console, local):
+        return None
+    with progress.Progress(
+        progress.TextColumn("[cyan]{task.description}"),
+        progress.BarColumn(),
+        progress.DownloadColumn(),
+        progress.TransferSpeedColumn(),
+        progress.TimeRemainingColumn(),
+        console=console,
+    ) as bar:
+        task = bar.add_task(os.path.basename(remote), total=None)
+
+        def on_progress(done: int, total: int):
+            # The device reports the total on every chunk, so it is only known
+            # once the first one lands.
+            bar.update(task, completed=done, total=total or None)
+
+        try:
+            files_client.read_file(
+                device, remote, local, progress=on_progress, resume=resume, stamp=stamp
+            )
+            return True
+        except grpc.RpcError as e:
+            _rpc_error(console, f"download {remote}", e)
+            _report_kept_partial(console, local)
+            return False
+        except KeyboardInterrupt:
+            _report_kept_partial(console, local)
+            raise SystemExit(130)
+
+
+def _report_kept_partial(console: Console, local: str) -> None:
+    """Say where an interrupted download went, so it is not a mystery file."""
+    partial = local + files_client.PARTIAL_SUFFIX
+    if os.path.exists(partial):
+        console.print(
+            f"Kept {filesize.decimal(os.path.getsize(partial))} in [cyan]{partial}[/cyan]. "
+            "Run the same command to resume it, or add --no-resume to start over."
+        )
 
 
 def get(args):
     console = Console()
-    connections = setup_connection(
-        args.uri,
-        args.username,
-        args.env_file,
-        args.forget_password,
-        console,
-    )
-    if connections is None:
+    device = Device(args.uri, args.verbose)
+    if _uses_sftp(device, console):
+        return files_sftp.get(args)
+    resume = not args.no_resume
+
+    if not args.recursive:
+        # Checked first so a typo gets one plain line, not an overwrite prompt
+        # and an empty progress bar.
+        entry = _remote_entry(device, args.remote_path)
+        if entry is None:
+            console.print(f"[bold red]{args.remote_path} does not exist on the device.[/bold red]")
+            raise SystemExit(1)
+        if entry.is_dir:
+            console.print(
+                f"[bold red]{args.remote_path} is a directory.[/bold red] Pass --recursive to download it."
+            )
+            raise SystemExit(1)
+        local = args.output_path
+        if os.path.isdir(local):
+            local = os.path.join(local, os.path.basename(args.remote_path))
+        result = _download_one(
+            device, console, args.remote_path, local, resume, args.yes, files_client.stamp_of(entry)
+        )
+        if result is False:
+            raise SystemExit(1)
+        if result:
+            console.print(f"[bold green]Saved[/bold green] {local}")
         return
-    ssh, sftp_conn = connections
 
-    if args.recursive:
-        get_dir(sftp_conn, args.remote_path, args.output_path, console)
-    else:
-        get_file(sftp_conn, args.remote_path, args.output_path, console)
+    try:
+        entries = files_client.list_files(device, args.remote_path, recursive=True)
+    except grpc.RpcError as e:
+        _rpc_error(console, "list the directory", e)
+        return
 
-    sftp.close_sftp(ssh, sftp_conn)
+    wanted = [f for f in entries if not f.is_dir]
+    if not wanted:
+        console.print("[yellow]Nothing to download.[/yellow]")
+        return
+
+    ok = 0
+    for f in wanted:
+        # Mirror the device's layout under the output directory. relpath keeps
+        # the tree shape without embedding the parent's name twice.
+        rel = os.path.relpath(f.path, args.remote_path) if args.remote_path else f.path
+        local = os.path.join(args.output_path, os.path.basename(args.remote_path.rstrip("/")) or "", rel)
+        if _download_one(device, console, f.path, local, resume, args.yes, files_client.stamp_of(f)):
+            ok += 1
+    console.print(f"[bold green]Downloaded {ok}/{len(wanted)} file(s)[/bold green] to {args.output_path}")
+
+
+def _remote_entry(device, path: str):
+    """The device's listing entry for `path`, or None if nothing is there.
+
+    Lists the parent and looks for the entry, rather than listing `path`
+    itself: an empty directory and a missing path both list as nothing, so
+    listing the target cannot tell them apart.
+    """
+    cleaned = path.rstrip("/")
+    try:
+        entries = files_client.list_files(device, os.path.dirname(cleaned))
+    except grpc.RpcError:
+        return None
+    name = os.path.basename(cleaned)
+    return next((f for f in entries if os.path.basename(f.path) == name), None)
+
+
+def _remote_files_under(device, path: str) -> set:
+    """Paths of the files already under `path` on the device (empty if none)."""
+    try:
+        return {f.path for f in files_client.list_files(device, path, recursive=True) if not f.is_dir}
+    except grpc.RpcError:
+        return set()
+
+
+def _upload_one(device, console: Console, local: str, remote: str) -> Optional[int]:
+    with progress.Progress(
+        progress.TextColumn("[cyan]{task.description}"),
+        progress.BarColumn(),
+        progress.DownloadColumn(),
+        progress.TransferSpeedColumn(),
+        console=console,
+    ) as bar:
+        task = bar.add_task(os.path.basename(local), total=os.path.getsize(local))
+        try:
+            return files_client.write_file(
+                device,
+                local,
+                remote,
+                progress=lambda done, tot: bar.update(task, completed=done),
+            )
+        except grpc.RpcError as e:
+            _rpc_error(console, f"upload {local}", e)
+            return None
+
+
+def put(args):
+    console = Console()
+    device = Device(args.uri, args.verbose)
+    if _uses_sftp(device, console):
+        return files_sftp.put(args)
+    local = args.local_path.rstrip("/")
+
+    if os.path.isdir(local):
+        if not args.recursive:
+            console.print(
+                f"[bold red]{local} is a directory.[/bold red] Pass --recursive to upload it."
+            )
+            return
+        base = args.remote_path or os.path.basename(local)
+        # No mkdir needed: the server creates parent directories for whatever
+        # path a chunk stream names, so the tree appears as the files land.
+        files = [
+            os.path.join(root, name)
+            for root, _, names in os.walk(local)
+            for name in names
+        ]
+        if not files:
+            console.print("[yellow]Nothing to upload.[/yellow]")
+            return
+        # One recursive listing up front rather than one per file.
+        existing = _remote_files_under(device, base)
+        ok = 0
+        for f in sorted(files):
+            remote = os.path.join(base, os.path.relpath(f, local))
+            if remote in existing and not args.yes and not _may_overwrite(console, remote):
+                continue
+            if _upload_one(device, console, f, remote) is not None:
+                ok += 1
+        console.print(f"[bold green]Uploaded {ok}/{len(files)} file(s)[/bold green] to {base}")
+        return
+
+    if not os.path.isfile(local):
+        console.print(f"[bold red]No such local file:[/bold red] {local}")
+        return
+    remote = args.remote_path or os.path.basename(local)
+    # `put file some/dir` means into that directory, the same way
+    # `get file -o some/dir` does. Without this the server is asked to replace
+    # a directory with a file, which cannot work.
+    entry = _remote_entry(device, remote) if remote.strip("/") else None
+    if not remote.strip("/") or (entry and entry.is_dir):
+        remote = os.path.join(remote.rstrip("/"), os.path.basename(local))
+        entry = _remote_entry(device, remote)
+    if entry and not args.yes and not _may_overwrite(console, remote):
+        return
+    written = _upload_one(device, console, local, remote)
+    if written is not None:
+        console.print(f"[bold green]Uploaded[/bold green] {written} bytes to {remote}")
 
 
 def rm(args):
     console = Console()
-    connections = setup_connection(
-        args.uri,
-        args.username,
-        args.env_file,
-        args.forget_password,
-        console,
-    )
-    if connections is None:
-        return
-    ssh, sftp_conn = connections
-
-    remove_file(sftp_conn, args.path, args.recursive, console)
-    sftp.close_sftp(ssh, sftp_conn)
-
-
-def setup_connection(
-    uri: str,
-    username: str,
-    env_file: str,
-    forget_password: bool,
-    console: Console,
-) -> Optional[tuple[paramiko.SSHClient, paramiko.SFTPClient]]:
-    dev_name = Device(uri).get_name()
-    password = find_password(
-        dev_name, env_file
-    )  # Check if password is provided or stored in env file
-    if password is None:
-        console.print(f"[bold red]Didnt find any password for {uri}[/bold red]")
-        return
-
-    # Open SFTP connection
-    with console.status("Connecting to Synapse device...", spinner="bouncingBall"):
-        try:
-            ssh, sftp_conn = sftp.connect_sftp(uri, username, password)
-        except paramiko.ssh_exception.AuthenticationException:
-            console.print(f"[bold red]Authentication failed for {uri}[/bold red]")
-            console.print("[yellow] Incorrect username or password.")
-            return None
-    if ssh is None or sftp_conn is None:
-        console.print(f"[bold red]Failed to connect to {uri}[/bold red]")
-        return
-    # If the connection is successful, we can prompt the user if they want to save the password
-    if not forget_password and dev_name is not None:
-        save_password(password, env_file, dev_name)
-    return ssh, sftp_conn
-
-
-def print_file_list(files: list[paramiko.SFTPAttributes], console: Console):
-    # Sort files: directories first, then by name
-    files.sort(
-        key=lambda f: (
-            0 if hasattr(f, "st_mode") and f.st_mode & 0o40000 else 1,
-            f.filename,
-        )
-    )
-
-    table = Table(show_header=True)
-    table.add_column("Permissions", style="cyan")
-    table.add_column("Size", justify="right", style="magenta")
-    table.add_column("Date modified", style="yellow")
-    table.add_column("Filename", style="white")
-    for file_attr in files:
-        # Get file mode and format it
-        mode = format_mode(file_attr.st_mode if hasattr(file_attr, "st_mode") else None)
-
-        # Filesize
-        size = file_attr.st_size if hasattr(file_attr, "st_size") else 0
-        size_str = filesize_binary(size)
-
-        # Time modified
-        mtime = file_attr.st_mtime if hasattr(file_attr, "st_mtime") else None
-        time_str = format_time(mtime)
-
-        # Determine filename style based on type
-        filename = file_attr.filename
-        is_dir = stat.S_ISDIR(file_attr.st_mode)
-        is_link = stat.S_ISLNK(file_attr.st_mode)
-        is_executable = hasattr(file_attr, "st_mode") and file_attr.st_mode & 0o100
-
-        if is_dir:
-            filename_styled = f"[bold blue]{filename}/[/bold blue]"
-        elif is_link:
-            filename_styled = f"[cyan]{filename}@[/cyan]"
-        elif is_executable:
-            filename_styled = f"[bold green]{filename}*[/bold green]"
-        else:
-            filename_styled = filename
-
-        table.add_row(mode, size_str, time_str, filename_styled)
-
-    console.print(table)
-
-
-def get_dir(
-    sftp_conn: paramiko.SFTPClient, remote_path: str, output_path: str, console: Console
-):
-    try:
-        dir_attrs = sftp_conn.stat(remote_path)
-    except FileNotFoundError:
-        console.print(
-            f"[bold red]Directory not found:[/bold red] [bold blue]{remote_path}"
-        )
-        return
-    if not stat.S_ISDIR(dir_attrs.st_mode):
-        get_file(sftp_conn, remote_path, output_path, console)
-        return
-
-    output_path = os.path.join(output_path, os.path.basename(remote_path))
-    local_dir = os.path.dirname(output_path)
-    try:
-        if local_dir != "":
-            os.makedirs(local_dir, exist_ok=True)
-    except OSError:
-        console.print(
-            f"[bold red]Failed to create output directory:[/bold red] {local_dir}"
-        )
-        return
-
-    file_list = sftp_conn.listdir(remote_path)
-
-    for file in file_list:
-        remote_file = os.path.join(remote_path, file)
-        local_file = os.path.join(output_path, file)
-        if stat.S_ISDIR(sftp_conn.stat(remote_file).st_mode):
-            get_dir(sftp_conn, remote_file, local_file, console)
-        else:
-            get_file(sftp_conn, remote_file, local_file, console)
-
-
-def get_file(
-    sftp_conn: paramiko.SFTPClient, remote_path: str, output_path: str, console: Console
-):
-    try:
-        is_dir = stat.S_ISDIR(sftp_conn.stat(remote_path).st_mode)
-    except FileNotFoundError:
-        console.print(f"[bold red]File not found:[/bold red] [blue]{remote_path}")
-        return
-
-    if is_dir:
-        console.print(
-            f"[bold yellow]Requested path: [/bold yellow][blue]{remote_path}[/blue][bold yellow] is a directory. Use the --recursive(-r) flag to download directories."
-        )
-        return
-
-    local_dir = os.path.dirname(output_path)
-    try:
-        if local_dir != "":
-            os.makedirs(local_dir, exist_ok=True)
-    except OSError:
-        console.print(
-            f"[bold red]Failed to create output directory:[/bold red] {local_dir}"
-        )
-        return
-
-    local_path = output_path
-    if os.path.isdir(output_path):
-        local_path = os.path.join(output_path, os.path.basename(remote_path))
-
-    try:
-        file_st_size = sftp_conn.stat(remote_path).st_size
-        file_size = file_st_size if file_st_size is not None else 0
-
-        prog = progress.Progress(
-            progress.SpinnerColumn(),
-            progress.TextColumn("[progress.description]{task.description}"),
-            progress.BarColumn(),
-            progress.DownloadColumn(),
-            progress.TransferSpeedColumn(),
-            progress.TimeElapsedColumn(),
-        )
-        with prog:
-            task = prog.add_task(f"Downloading file: {remote_path}", total=file_size)
-
-            def update_progress(transferred: int, total: int):
-                prog.update(task, completed=transferred)
-
-            sftp_conn.get(remote_path, local_path, callback=update_progress)
-    except paramiko.SFTPError as e:
-        console.print(f"[bold red]Failed to download file:[/bold red] {e}")
-        return
-
-
-def remove_file(
-    sftp_conn: paramiko.SFTPClient, remote_path: str, recursive: bool, console: Console
-):
-    try:
-        is_dir = stat.S_ISDIR(sftp_conn.stat(remote_path).st_mode)
-    except FileNotFoundError:
-        console.print(f"[bold red]File not found:[/bold red] [blue]{remote_path}")
-        return
-
-    if is_dir and not recursive:
-        console.print(
-            f"[bold yellow]Requested path: [/bold yellow][blue]{remote_path}[/blue][bold yellow] is a directory. Use the --recursive(-r) flag to remove directories."
-        )
-        return
-
-    try:
-        if is_dir:
-            file_list = sftp_conn.listdir(remote_path)
-            for file in file_list:
-                remote_file = os.path.join(remote_path, file)
-                remove_file(sftp_conn, remote_file, recursive, console)
-            sftp_conn.rmdir(remote_path)
-        else:
-            with console.status(
-                f"Removing file: {remote_path}", spinner="bouncingBall"
-            ):
-                sftp_conn.remove(remote_path)
-    except Exception as e:
-        console.print(f"[bold red]Failed to remove file:[/bold red] {e}")
-        return
-
-    console.print(f"[bold green]File removed:[/bold green] [blue]{remote_path}")
-
-
-def find_password(dev_name: Optional[str], env_file: Optional[str]):
-    password = None
-    if env_file is not None and dev_name is not None:
-        if os.path.exists(env_file):
-            password = load_pass_from_env_file(env_file, dev_name)
-            if password is not None:
-                return password
-    password = getpass.getpass("Enter password: ")
-    return password
-
-
-def save_password(password: str, env_file: str, device_name: str):
-    if env_file is None or device_name is None or password is None:
-        return
-    if os.path.exists(env_file):
-        if load_pass_from_env_file(env_file, device_name) is not None:
+    # Recursive deletes take a whole recording directory with them, and there
+    # is no undo on the device. Asked before the SFTP hand-off so both paths ask.
+    if args.recursive and not args.yes:
+        if not Confirm.ask(f"Delete [bold]{args.path}[/bold] and everything under it?"):
+            console.print("Not deleting.")
             return
 
-    save_pass = Confirm.ask(f"Save password for {device_name} in {env_file}?")
-    if not save_pass:
+    device = Device(args.uri, args.verbose)
+    if _uses_sftp(device, console):
+        return files_sftp.rm(args)
+
+    try:
+        files_client.delete_file(device, args.path, args.recursive)
+    except grpc.RpcError as e:
+        _rpc_error(console, f"delete {args.path}", e)
         return
-    store_pass_to_env_file(env_file, device_name, password)
-
-
-def load_pass_from_env_file(env_file: str, device_name: str) -> Optional[str]:
-    try:
-        with open(env_file, "r") as f:
-            env_loaded = yaml.safe_load(f)
-            if env_loaded is None:
-                return None
-            if "sftp_passwords" not in env_loaded:
-                return None
-            passwords = env_loaded.get("sftp_passwords", {})
-            if device_name in passwords:
-                try:
-                    stored_pass = passwords[device_name]
-                    return stored_pass
-                except Exception:
-                    print(
-                        f"Couldnt read password for {device_name} from env file. Env file may be improperly formatted."
-                    )
-                    return None
-            else:
-                return None
-    except Exception as e:
-        print(f"Couldnt read env file at: {env_file}. {e}")
-    return None
-
-
-# Store password to the .env file in yaml format
-def store_pass_to_env_file(env_file: str, device_name: str, password: str):
-    try:
-        prev_env = {}
-        if os.path.exists(env_file):
-            with open(env_file, "r") as f:
-                prev_env = yaml.safe_load(f)
-                prev_env = prev_env if prev_env is not None else {}
-        passwords = prev_env.get("sftp_passwords", {})
-        passwords[device_name] = password
-        prev_env["sftp_passwords"] = passwords
-        with open(env_file, "w", encoding="utf8") as f:
-            yaml.dump(prev_env, f, default_flow_style=False)
-    except TypeError:
-        print(
-            f"Failed to store pass to env file at: {env_file}. Env file may be improperly formatted."
-        )
-    except Exception as e:
-        print(f"Failed to store pass to env file at: {env_file}. {e}")
+    console.print(f"[bold green]Deleted[/bold green] {args.path}")
