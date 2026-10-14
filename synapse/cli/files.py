@@ -3,8 +3,12 @@
 This used SFTP, which needed its own password: a device carried two
 independent credentials, and `synapsectl file` was the only command that asked
 for one. Going through the SynapseDevice service means file access is governed
-by the same pairing token as everything else, so the SFTP password is gone --
-along with --username, --env-file and the local password store.
+by the same pairing token as everything else.
+
+Device firmware that predates the file RPCs answers them with UNIMPLEMENTED;
+for those devices every command falls back to the old SFTP path (files_sftp),
+which still takes --username, --env-file and the SFTP password, and says to
+update the device firmware.
 
 Paths are relative to the device's data root and cannot escape it, so
 `file ls /` shows the data root. That is the same tree the scifi-sftp account

@@ -74,11 +74,11 @@ def close_sftp(ssh, sftp):
 
 # --- SFTP connection and password handling ---------------------------------
 #
-# Moved here from synapse/cli/files.py when `synapsectl file` switched to gRPC.
-# deploy_model is the last SFTP consumer, so this lives beside the SFTP client
-# rather than in a CLI module that no longer speaks SFTP at all. When
-# deploy_model moves to WriteFile, all of this goes with it -- along with the
-# separate SFTP password.
+# Only for device firmware that predates the gRPC file RPCs. `synapsectl file`
+# and `deploy-model` use the file RPCs, and fall back to SFTP (with the
+# device's separate file-transfer password) when the device answers them with
+# UNIMPLEMENTED -- see _uses_sftp in synapse/cli/files.py. When that firmware
+# is no longer in the field, all of this goes, along with the SFTP password.
 
 SCIFI_DEFAULT_SFTP_USER = "scifi-sftp"
 DEFAULT_ENV_FILE = ".scienv"
