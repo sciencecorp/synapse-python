@@ -128,13 +128,18 @@ def test_env_override_is_honored(tmp_path, monkeypatch):
     assert custom.exists()
 
 
-def test_open_methods_are_not_gated():
-    for name in ("Info", "GetLogs", "TailLogs", "RequestAuth"):
-        assert f"/synapse.SynapseDevice/{name}" in auth.OPEN_METHODS
+def test_open_methods_match_the_device():
+    # Exactly the device's open list (headstage src/auth/rpc_auth_policy.cpp). A
+    # method listed here is sent without the token, so an extra entry is a call the
+    # device refuses as "not paired" -- as GetLogs/TailLogs were in 2.8.0.
+    assert auth.OPEN_METHODS == {
+        "/synapse.SynapseDevice/Info",
+        "/synapse.SynapseDevice/RequestAuth",
+    }
 
 
-def test_closed_methods_are_not_in_the_open_set():
-    for name in ("Configure", "Start", "Stop", "Query", "StreamQuery"):
+def test_logs_carry_the_token():
+    for name in ("GetLogs", "TailLogs", "Configure", "Start", "Stop", "Query", "StreamQuery"):
         assert f"/synapse.SynapseDevice/{name}" not in auth.OPEN_METHODS
 
 
