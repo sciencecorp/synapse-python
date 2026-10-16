@@ -116,23 +116,123 @@ def build_license_docker_args(
     return args
 
 
-# The gateware project lives in this subdir of a peripheral repo, by
-# convention shared with the structured build below and the pass-through's
-# implicit-project workdir redirect.
-_GATEWARE_PROJECT_SUBDIR = "src/gateware"
+# Gateware sources live under this subdir of a peripheral repo, by convention
+# shared with the structured build below and the pass-through's implicit-project
+# workdir redirect.
+#
+# Two layouts are supported:
+#
+# - **Single-project** (the original): ``src/gateware/peripheral.yaml`` — the
+#   subdir *is* the SDK project, and there is nothing to choose.
+# - **Per-profile**: ``src/gateware/<profile>/peripheral.yaml``, one project per
+#   target profile (e.g. ``via-devkit``, ``nerv512u-devkit``). A profile's
+#   generated top wrapper, seed constraints, and encrypted transport bundle are
+#   mutually exclusive with any other profile's — same filenames, different
+#   contents — so they cannot share a directory.
+#
+# ``resolve_gateware_project`` picks between them; every caller that needs to
+# name a project (build, clean, pass-through workdir) routes through it so the
+# choice is made in exactly one place.
+GATEWARE_ROOT_SUBDIR = "src/gateware"
 
-_SDK_BUILD_CMD = f"axon-peripheral-sdk build --project {_GATEWARE_PROJECT_SUBDIR}"
+# Honoured everywhere, including ``peripherals gateware <verb>`` — that
+# dispatcher captures its tail with ``argparse.REMAINDER``, so a synapsectl-side
+# ``--profile`` flag would be swallowed and forwarded to the SDK instead. An
+# env var is the only selector that can reach it.
+PROFILE_ENV_VAR = "SYNAPSE_GATEWARE_PROFILE"
+
+
+class GatewareProfileError(RuntimeError):
+    """Raised when the gateware project to act on can't be determined."""
+
+
+def discover_gateware_profiles(peripheral_dir: str) -> list[str]:
+    """Return the per-profile gateware project names, sorted.
+
+    A directory counts as a profile project only if it holds a
+    ``peripheral.yaml``, so build outputs and stray directories under
+    ``src/gateware/`` are never mistaken for one.
+    """
+    root = Path(peripheral_dir) / GATEWARE_ROOT_SUBDIR
+    if not root.is_dir():
+        return []
+    return sorted(
+        entry.name
+        for entry in root.iterdir()
+        if entry.is_dir() and (entry / "peripheral.yaml").is_file()
+    )
+
+
+def resolve_gateware_project(
+    peripheral_dir: str,
+    profile: str | None = None,
+    env: Mapping[str, str] = os.environ,
+) -> str:
+    """Return the repo-relative subdir of the gateware project to act on.
+
+    Resolution order:
+
+    1. An explicit *profile* (``--profile``), else ``$SYNAPSE_GATEWARE_PROFILE``.
+       Must name a ``src/gateware/<profile>/`` project or this raises.
+    2. A single-project repo (``src/gateware/peripheral.yaml``) — the original
+       layout, still resolved with no flag.
+    3. Exactly one per-profile project — unambiguous, so no flag needed.
+
+    Anything else raises :class:`GatewareProfileError`. In particular a repo
+    with two or more profiles and no selection is an error rather than a
+    guess: the profiles differ in clock rate and FPGA part, so picking one
+    arbitrarily would produce artifacts that are wrong in ways that don't
+    surface until they're on hardware.
+    """
+    selected = profile or env.get(PROFILE_ENV_VAR) or None
+    profiles = discover_gateware_profiles(peripheral_dir)
+
+    if selected:
+        if selected not in profiles:
+            known = ", ".join(profiles) if profiles else "none found"
+            raise GatewareProfileError(
+                f"No gateware project for profile {selected!r} at "
+                f"{GATEWARE_ROOT_SUBDIR}/{selected}/peripheral.yaml. "
+                f"Available: {known}."
+            )
+        return f"{GATEWARE_ROOT_SUBDIR}/{selected}"
+
+    if (Path(peripheral_dir) / GATEWARE_ROOT_SUBDIR / "peripheral.yaml").is_file():
+        return GATEWARE_ROOT_SUBDIR
+
+    if len(profiles) == 1:
+        return f"{GATEWARE_ROOT_SUBDIR}/{profiles[0]}"
+
+    if not profiles:
+        raise GatewareProfileError(
+            f"No gateware project found: expected "
+            f"{GATEWARE_ROOT_SUBDIR}/peripheral.yaml or "
+            f"{GATEWARE_ROOT_SUBDIR}/<profile>/peripheral.yaml under "
+            f"{peripheral_dir}."
+        )
+
+    raise GatewareProfileError(
+        f"This repo has more than one gateware profile ({', '.join(profiles)}) "
+        f"and no profile was selected. Pass --profile <name>, or set "
+        f"{PROFILE_ENV_VAR}=<name>."
+    )
 
 
 def run_gateware_build(
     peripheral_dir: str,
     image_tag: str,
     env: Mapping[str, str] = os.environ,
+    project_subdir: str = GATEWARE_ROOT_SUBDIR,
 ) -> str:
     """Invoke ``axon-peripheral-sdk build`` inside the gateware container.
 
+    *project_subdir* is the repo-relative gateware project to build, as
+    returned by :func:`resolve_gateware_project`. The bind-mount stays the repo
+    root either way, so a per-profile project can still reference shared
+    sources above it (``../axon_test_source_peripheral.sv``).
+
     Returns the absolute path to the newest ``sdk_*_extracted.bit`` emitted
-    under ``<peripheral_dir>/src/gateware/build/bitstreams/``. This is the
+    under ``<peripheral_dir>/<project_subdir>/build/bitstreams/``. This is the
     *extracted* bitstream variant the SDK writes alongside the raw
     ``sdk_*.bit``; the extracted form is what gets flashed to the probe, and
     it carries its own same-stem ``.summary.json`` (same schema as the raw
@@ -163,14 +263,13 @@ def run_gateware_build(
         image_tag,
         "/bin/bash",
         "-lc",
-        _SDK_BUILD_CMD,
+        f"axon-peripheral-sdk build --project {project_subdir}",
     ]
     subprocess.run(argv, check=True)
 
     bit_glob = os.path.join(
         abs_peripheral_dir,
-        "src",
-        "gateware",
+        *project_subdir.split("/"),
         "build",
         "bitstreams",
         "sdk_*_extracted.bit",
@@ -179,7 +278,7 @@ def run_gateware_build(
     if not matches:
         raise FileNotFoundError(
             "axon-peripheral-sdk build completed but no sdk_*_extracted.bit was "
-            "emitted under src/gateware/build/bitstreams/"
+            f"emitted under {project_subdir}/build/bitstreams/"
         )
 
     matches.sort(key=os.path.getmtime, reverse=True)
@@ -336,6 +435,7 @@ def _gateware_passthrough(
     peripheral_dir: str,
     license_args: Sequence[str],
     gateware_image_tag: str,
+    project_subdir: str | None = None,
 ) -> int:
     """Forward ``argv`` verbatim to ``axon-peripheral-sdk`` inside the container.
 
@@ -360,19 +460,25 @@ def _gateware_passthrough(
     abs_peripheral_dir = os.path.abspath(peripheral_dir)
 
     # When invoked from a peripheral project root (manifest.json present) that
-    # has a gateware subproject, run the SDK with its cwd inside src/gateware so
+    # has a gateware subproject, run the SDK with its cwd inside that project so
     # every project-scoped verb resolves peripheral.yaml from its cwd default --
     # including verbs with no --project flag (validate/regenerate/add-peripheral).
     # The bind-mount stays the repo root, so `build` still sees the whole repo.
     # The verb is never inspected: this is purely a directory-driven decision,
     # so the pass-through keeps forwarding argv verbatim with no verb allowlist.
+    #
+    # *project_subdir* is the resolved project (see resolve_gateware_project).
+    # None means the caller could not resolve one -- typically a multi-profile
+    # repo with no profile selected. Rather than guess, leave cwd at the repo
+    # root and let the SDK resolve the project itself: the user can still say
+    # `--project src/gateware/<profile>`, which reaches the SDK verbatim.
     workdir = "/home/workspace"
-    if os.path.isfile(
-        os.path.join(abs_peripheral_dir, "manifest.json")
-    ) and os.path.isdir(
-        os.path.join(abs_peripheral_dir, *_GATEWARE_PROJECT_SUBDIR.split("/"))
+    if (
+        project_subdir
+        and os.path.isfile(os.path.join(abs_peripheral_dir, "manifest.json"))
+        and os.path.isdir(os.path.join(abs_peripheral_dir, *project_subdir.split("/")))
     ):
-        workdir = f"/home/workspace/{_GATEWARE_PROJECT_SUBDIR}"
+        workdir = f"/home/workspace/{project_subdir}"
 
     # Allocate a pseudo-TTY when our own stdout is a terminal so the SDK's
     # rich/typer output keeps its colors (inside a plain `docker run` pipe the
