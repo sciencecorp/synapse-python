@@ -15,6 +15,10 @@ def error_message(error: BaseException, verbose: bool = False) -> str:
 
     details = error.details()
     message = details or "The device did not provide an error message."
+    # Matches the hint `synapsectl file` and `deploy-model` give: every RPC but
+    # Info and RequestAuth needs a pairing token now.
+    if error.code() == grpc.StatusCode.UNAUTHENTICATED:
+        message = "Not paired with this device. Run `synapsectl pair` first."
     if not verbose:
         return message
 

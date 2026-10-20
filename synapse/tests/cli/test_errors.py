@@ -11,15 +11,19 @@ from synapse.client.device import Device
 
 
 class FakeRpcError(grpc.RpcError):
+    def __init__(self, code=grpc.StatusCode.UNAVAILABLE, details="device is busy"):
+        self._code = code
+        self._details = details
+
     def code(self):
-        return grpc.StatusCode.UNAUTHENTICATED
+        return self._code
 
     def details(self):
-        return "not paired with this device; pair first"
+        return self._details
 
     def __str__(self):
         return (
-            "<_MultiThreadedRendezvous status=UNAUTHENTICATED "
+            "<_MultiThreadedRendezvous status=UNAVAILABLE "
             'debug_error_string="internal transport details">'
         )
 
@@ -32,15 +36,23 @@ def capture_console():
 def test_rpc_error_message_hides_transport_diagnostics():
     message = error_message(FakeRpcError())
 
-    assert message == "not paired with this device; pair first"
+    assert message == "device is busy"
     assert "_MultiThreadedRendezvous" not in message
     assert "debug_error_string" not in message
+
+
+def test_unauthenticated_rpc_error_points_at_pairing():
+    error = FakeRpcError(grpc.StatusCode.UNAUTHENTICATED, "missing token")
+
+    assert error_message(error) == (
+        "Not paired with this device. Run `synapsectl pair` first."
+    )
 
 
 def test_verbose_rpc_error_message_includes_status_but_not_transport_repr():
     message = error_message(FakeRpcError(), verbose=True)
 
-    assert message == ("gRPC UNAUTHENTICATED: not paired with this device; pair first")
+    assert message == ("gRPC UNAVAILABLE: device is busy")
     assert "_MultiThreadedRendezvous" not in message
     assert "debug_error_string" not in message
 
@@ -68,7 +80,7 @@ def test_rpc_error_is_concise_and_fails():
     exit_code = run_action(fail, console=console)
 
     assert exit_code == 1
-    assert output.getvalue() == "Error: not paired with this device; pair first\n"
+    assert output.getvalue() == "Error: device is busy\n"
 
 
 def test_false_command_result_is_a_failure():
@@ -93,7 +105,7 @@ def test_configure_rpc_error_reaches_cli_boundary_without_duplicate_message():
     )
 
     assert exit_code == 1
-    assert output.getvalue() == "Error: not paired with this device; pair first\n"
+    assert output.getvalue() == "Error: device is busy\n"
     assert "Internal error configuring device" not in output.getvalue()
 
 
