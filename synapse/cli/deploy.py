@@ -4,6 +4,7 @@ import os
 from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
+from synapse.cli.errors import error_message
 from rich.spinner import Spinner
 from rich.text import Text
 
@@ -81,7 +82,7 @@ def deploy_package(ip_address, deb_package_path):
     package_filename = os.path.basename(deb_package_path)
     console.clear_live()
 
-    device = syn.Device(ip_address, False)
+    device = syn.Device(ip_address, False, raise_rpc_errors=True)
     metadata = create_metadata(deb_package_path, console)
     console.print(
         f"[bold green]Deploying:[/bold green] [cyan]{package_filename}[/cyan]"
@@ -178,7 +179,9 @@ def deploy_package(ip_address, deb_package_path):
                         break
 
                 # Add the error message at the bottom
-                display_items.append(f"[bold red]Error: {str(e)}[/bold red]")
+                display_items.append(
+                    f"[bold red]Error:[/bold red] {error_message(e, device.verbose)}"
+                )
 
                 # Update the panel with progress and error
                 response_panel.renderable = Group(*display_items)
@@ -196,7 +199,10 @@ def deploy_package(ip_address, deb_package_path):
                     display_items.append(f"[green]✓[/green] Step {i + 1}: {resp}")
 
             # Add the error message
-            display_items.append(f"[bold red]Error during setup: {str(e)}[/bold red]")
+            display_items.append(
+                "[bold red]Error:[/bold red] "
+                f"Deployment setup failed: {error_message(e, device.verbose)}"
+            )
 
             # Update the panel with progress and error
             response_panel.renderable = Group(*display_items)

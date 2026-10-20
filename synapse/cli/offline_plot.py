@@ -160,25 +160,38 @@ def compute_fft(data, sample_rate):
 
 def plot(args):
     logger = setup_logging()
+    console = Console()
 
     # NOTE(gilbert): we want to support the previous plotting code but we are moving to hdf5 saving and plotting
     #                Short circuit for now and just use the hdf5 plotting code
     if args.data is not None:
+        if not os.path.isfile(args.data):
+            console.print(
+                f"[bold red]Error:[/bold red] Data file not found: {args.data}"
+            )
+            return False
         _, file_extension = os.path.splitext(args.data)
         if file_extension == ".h5":
             return plot_h5(args)
+        if file_extension not in (".bin", ".dat", ".jsonl"):
+            console.print(
+                "[bold red]Error:[/bold red] Unsupported data file format. "
+                "Expected .h5, .bin, .dat, or .jsonl."
+            )
+            return False
 
-    console = Console()
+    if args.dir and not os.path.isdir(args.dir):
+        console.print(
+            f"[bold red]Error:[/bold red] Recording directory not found: {args.dir}"
+        )
+        return False
+
     console.print(
         "[yellow bold]Legacy plotting is deprecated, please use the hdf5 files going forward[/yellow bold]"
     )
     console.print(
         "[yellow bold]Use --data <path_to_hdf5_file> to plot hdf5 files[/yellow bold]"
     )
-
-    app = QtWidgets.QApplication.instance()
-    if not app:
-        app = QtWidgets.QApplication(sys.argv)
 
     data_file = None
     config_file = None
@@ -198,6 +211,28 @@ def plot(args):
         data_file = args.data
     if args.config:
         config_file = args.config
+
+    if data_file is None:
+        console.print(
+            "[bold red]Error:[/bold red] No recording data found. "
+            "Specify --data or --dir."
+        )
+        return False
+    if config_file is None:
+        console.print(
+            "[bold red]Error:[/bold red] Legacy recordings require a "
+            "configuration file. Specify --config or use --dir."
+        )
+        return False
+    if not os.path.isfile(config_file):
+        console.print(
+            f"[bold red]Error:[/bold red] Configuration file not found: {config_file}"
+        )
+        return False
+
+    app = QtWidgets.QApplication.instance()
+    if not app:
+        app = QtWidgets.QApplication(sys.argv)
 
     # Start with loading the config
     sampling_freq, num_channels, channel_ids = load_config(config_file)
