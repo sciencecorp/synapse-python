@@ -38,7 +38,8 @@ def setup_device_uri(args):
     if not args.uri:
         # User doesn't want to use something that needs a uri
         return args
-    if not is_valid_ip(args.uri):
+    # Device accepts ip:port, so only the host part decides name vs address.
+    if not (is_valid_ip(args.uri) or is_valid_ip(args.uri.rsplit(":", 1)[0])):
         # User passed in a name
         console = Console()
         device_ip = find_device_by_name(args.uri, console, False, 60)
