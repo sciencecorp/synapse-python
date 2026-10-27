@@ -83,3 +83,13 @@ if __name__ == '__main__':
     test_to_proto_template_matcher()
     print("All tests passed!")
 
+
+
+def test_negative_threshold_round_trips():
+    # threshold_uV is int32 (synapse-api 2.6.1): the sign is the crossing direction.
+    detector = SpikeDetector(samples_per_spike=32, config=ThresholderConfig(threshold_uV=-400))
+    proto = detector._to_proto().spike_detector
+    assert proto.thresholder.threshold_uV == -400
+
+    wire = SpikeDetectorConfig.FromString(proto.SerializeToString())
+    assert SpikeDetector._from_proto(wire).threshold_uV == -400
