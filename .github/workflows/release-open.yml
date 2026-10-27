@@ -1,0 +1,228 @@
+name: release-open
+
+# Opens a release PR into main: bumps the version in setup.py and drafts the
+# changelog (between the changelog markers in the PR description) from the
+# commits since the last v* tag. Edit the changelog in the PR, then merge;
+# release-tag.yml tags the merge commit and starts release.yml.
+#
+# The changelog is drafted by Claude Code on the self-hosted `changelog-agent`
+# runner (see .github/actions/draft-changelog/RUNNER.md). This repo is public,
+# so only this manually-run workflow may use that label, and the job running
+# there gets read-only repo access; pushing and opening the PR happen on
+# GitHub-hosted runners.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump from the last release
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: Exact version instead of a bump (e.g. 3.0.0)
+        required: false
+        type: string
+      reason:
+        description: Why this release (shown in the PR)
+        required: false
+        type: string
+
+concurrency:
+  group: release-open
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      baseline: ${{ steps.plan.outputs.baseline }}
+      next: ${{ steps.plan.outputs.next }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Plan release
+        id: plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUMP: ${{ inputs.bump }}
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          existing="$(gh pr list --base main --state open --label release \
+            --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing" ]]; then
+            echo "An open release PR (#$existing) already targets main." >&2
+            exit 1
+          fi
+
+          baseline="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD)"
+          current="$(sed -nE 's/^    version="([^"]+)",$/\1/p' setup.py)"
+          if [[ "$current" != "${baseline#v}" ]]; then
+            echo "setup.py is at $current but the last release is $baseline. Versions are bumped by this workflow only; revert setup.py to ${baseline#v} or tag $current first." >&2
+            exit 1
+          fi
+          if [[ -z "$(git log --first-parent --format=%H "$baseline..HEAD")" ]]; then
+            echo "No commits since $baseline; nothing to release." >&2
+            exit 1
+          fi
+
+          if [[ -n "$VERSION_INPUT" ]]; then
+            next="${VERSION_INPUT#v}"
+          else
+            IFS=. read -r major minor patch <<< "${baseline#v}"
+            case "$BUMP" in
+              major) next="$((major + 1)).0.0" ;;
+              minor) next="$major.$((minor + 1)).0" ;;
+              patch) next="$major.$minor.$((patch + 1))" ;;
+            esac
+          fi
+          if [[ ! "$next" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Next version must be X.Y.Z, got $next." >&2
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$next" >/dev/null; then
+            echo "Tag v$next already exists." >&2
+            exit 1
+          fi
+
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+
+  draft-changelog:
+    needs: plan
+    runs-on: [self-hosted, changelog-agent]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Draft changelog
+        uses: ./.github/actions/draft-changelog
+        with:
+          since: ${{ needs.plan.outputs.baseline }}
+          output: changelog.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: changelog.md
+          retention-days: 7
+
+  open-release-pr:
+    # Doesn't `need` draft-changelog: if the runner box is down, that job sits
+    # queued (GitHub keeps it up to a day), so wait for it here for at most
+    # 10 minutes, then fall back to listing commit subjects.
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write # gh label create
+      actions: write # read this run's jobs; cancel a stuck draft job
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Wait for the changelog agent
+        id: agent
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          jobs="repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs"
+          deadline=$((SECONDS + 600))
+          state=""
+          while (( SECONDS < deadline )); do
+            state="$(gh api "$jobs" --jq '.jobs[] | select(.name == "draft-changelog") | "\(.status) \(.conclusion // "")"')"
+            [[ "$state" == completed* ]] && break
+            sleep 15
+          done
+          echo "draft-changelog: ${state:-not found}"
+          if [[ "$state" == "completed success" ]]; then
+            echo "drafted=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Changelog agent didn't finish within 10 minutes ($state); using commit subjects."
+            [[ "$state" == completed* ]] || echo "stuck=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.agent.outputs.drafted == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: changelog
+
+      - if: steps.agent.outputs.drafted != 'true'
+        name: List commit subjects
+        uses: ./.github/actions/draft-changelog
+        with:
+          since: ${{ needs.plan.outputs.baseline }}
+          output: changelog.md
+          agent: "false"
+
+      - name: Open release PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REASON: ${{ inputs.reason }}
+          BASELINE: ${{ needs.plan.outputs.baseline }}
+          NEXT: ${{ needs.plan.outputs.next }}
+        run: |
+          set -euo pipefail
+
+          branch="release/v$NEXT"
+          git switch -c "$branch"
+          sed -i -E "s/^(    version=\")[^\"]+(\",)$/\1$NEXT\2/" setup.py
+          if ! grep -qx "    version=\"$NEXT\"," setup.py; then
+            echo "Could not set version in setup.py." >&2
+            exit 1
+          fi
+
+          {
+            echo "## Release"
+            echo
+            echo "- Baseline: \`$BASELINE\`"
+            echo "- Next: \`v$NEXT\`"
+            echo "- Reason: ${REASON:-not given}"
+            echo
+            echo "## Changelog"
+            echo
+            echo "Edit the changelog below before merging. It becomes the GitHub Release notes."
+            echo
+            echo "<!-- changelog:start -->"
+            cat changelog.md
+            echo "<!-- changelog:end -->"
+          } > .release-pr-body.md
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "release: v$NEXT"
+          git push origin "$branch"
+
+          gh label create release --color 0E8A16 --description "Production release" --force
+          gh pr create --base main --head "$branch" \
+            --title "release: v$NEXT" \
+            --body-file .release-pr-body.md --label release
+
+      - name: Cancel the stuck draft job
+        # Otherwise it stays queued and runs the agent for nothing whenever the
+        # box comes back. Cancelling marks this run cancelled; the PR is open.
+        if: steps.agent.outputs.stuck == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "::notice::Release PR opened with commit subjects. Cancelling the queued changelog-agent job; this run will show as cancelled."
+          gh run cancel "$GITHUB_RUN_ID"

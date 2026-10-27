@@ -1,0 +1,34 @@
+name: Draft changelog
+description: >-
+  Has Claude Code (logged in on the self-hosted changelog-agent runner) read
+  the commits in since..head and write a user-facing markdown changelog. Falls
+  back to a plain list of commit subjects when the CLI is missing or fails, so
+  a release is never blocked on it.
+inputs:
+  since:
+    description: Ref to start after, e.g. the previous release tag
+    required: true
+  head:
+    description: Ref to end at
+    default: HEAD
+  model:
+    description: Claude model id
+    default: claude-opus-5-5
+  output:
+    description: Path to write the markdown to
+    default: changelog.md
+  agent:
+    description: Set to "false" to skip Claude Code and just list commit subjects
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Draft changelog
+      shell: bash
+      run: |
+        python3 "${{ github.action_path }}/draft_changelog.py" \
+          --since "${{ inputs.since }}" \
+          --head "${{ inputs.head }}" \
+          --model "${{ inputs.model }}" \
+          --output "${{ inputs.output }}" \
+          ${{ inputs.agent == 'false' && '--no-agent' || '' }}

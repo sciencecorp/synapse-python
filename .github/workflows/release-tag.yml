@@ -1,0 +1,73 @@
+name: release-tag
+
+# When a release PR (label `release`, opened by release-open.yml) merges into
+# main, tag the merge commit v<version> and start release.yml on that tag.
+# A tag pushed with GITHUB_TOKEN doesn't trigger workflows, so release.yml is
+# started with workflow_dispatch, which does.
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag:
+    if: >-
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+
+      - name: Check changelog and version
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          # release.yml publishes this section; stop here rather than release without it.
+          notes="$(awk '/<!-- changelog:start -->/{f=1;next}/<!-- changelog:end -->/{f=0}f' <<< "$PR_BODY")"
+          if [[ -z "${notes//[[:space:]]/}" ]]; then
+            echo "The release PR's changelog (between the changelog markers) is empty." >&2
+            exit 1
+          fi
+
+          version="$(sed -nE 's/^    version="([^"]+)",$/\1/p' setup.py)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "setup.py version is not X.Y.Z: '$version'" >&2
+            exit 1
+          fi
+          echo "TAG=v$version" >> "$GITHUB_ENV"
+
+      - name: Tag merge commit
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            tag_sha="$(git rev-parse "$TAG^{commit}")"
+            if [[ "$tag_sha" != "$MERGE_SHA" ]]; then
+              echo "$TAG already exists on $tag_sha, not $MERGE_SHA." >&2
+              exit 1
+            fi
+            echo "$TAG already on the merge commit; re-run."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG" "$MERGE_SHA"
+            git push origin "$TAG"
+          fi
+
+      - name: Start release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run release.yml --ref "$TAG"

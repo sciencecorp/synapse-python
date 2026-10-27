@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v*"
+  # release-tag.yml starts this on the new tag (a tag it pushes can't trigger
+  # workflows). Only meaningful with a v* tag as the ref.
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -11,6 +14,7 @@ permissions:
 jobs:
   sdist:
     name: Build source distribution
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
 
     steps:
@@ -100,3 +104,37 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           verbose: true
+
+  github-release:
+    # Creates the GitHub Release once the package is on PyPI.
+    name: Create GitHub Release
+    needs: [publish-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            # Notes come from the changelog in the release PR this commit
+            # merged (release-open.yml). A tag pushed by hand has no release
+            # PR, so fall back to GitHub's list of PRs since the previous tag.
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+              --jq '[.[] | select(any(.labels[]; .name == "release"))][0].body // ""' > pr_body.md
+            awk '/<!-- changelog:start -->/{f=1;next}/<!-- changelog:end -->/{f=0}f' pr_body.md > pr_notes.md
+            if grep -q '[^[:space:]]' pr_notes.md; then
+              gh release create "$TAG" --verify-tag --title "$TAG" --notes-file pr_notes.md
+            else
+              # Without a start tag, the first generated release would list every PR ever merged.
+              PREV=$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^" 2>/dev/null || true)
+              gh release create "$TAG" --verify-tag --generate-notes ${PREV:+--notes-start-tag "$PREV"}
+            fi
+          fi
