@@ -22,6 +22,13 @@ BIOHYBRID_NERV512U_V1_COL_MAP = [
     48, 49, 56, 57, 64, 65, 72, 73, 74, 75, 76,
 ]
 
+# NeRV512U biohybrid, 23 rows x 23 cols (electronics branch maxr/512_led).
+BIOHYBRID_NERV512U_23X23_ROW_MAP = [
+    0, 64, 8, 72, 16, 80, 25, 88, 24, 96, 33, 105,
+    32, 104, 41, 113, 40, 112, 49, 121, 48, 120, 57,
+]
+BIOHYBRID_NERV512U_23X23_COL_MAP = BIOHYBRID_NERV512U_V1_COL_MAP
+
 # LED breakout board (60110001), 32 rows x 64 cols.
 # Rows interleave 0..15 with 64..79; cols are 0..31 then 64..95.
 LED_BOARD_60110001_ROW_MAP = [
