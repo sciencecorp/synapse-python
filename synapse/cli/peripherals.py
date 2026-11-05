@@ -627,8 +627,13 @@ def build_gateware_deb(
     The deb package is named ``axon-gateware-<debianized-identifier>`` where
     the identifier is ``bitstream_name`` (falling back to the plugin name).
     On-device files land at:
-      /opt/scifi/bitstreams/custom/<identifier>.bit
+      /opt/scifi/bitstreams/custom/artifacts/<identifier>/<bit_path basename>
       /opt/scifi/bitstreams/custom/<identifier>.manifest.json
+
+    The .bit keeps its build basename because scifi-probe-updater's Lattice
+    DFU path reads the image's ``v<M.m.p>`` version from it and refuses an
+    unversioned image; the per-identifier directory keeps images of
+    different identifiers from colliding.
 
     The fragment carries ``{"name", "usb_pid", "artifact"}`` (plus
     ``"git_hash"`` when provided) with ``artifact`` relative to
@@ -653,13 +658,15 @@ def build_gateware_deb(
     # /tmp eventually cleans itself.
 
     custom_dir = os.path.join(staging_dir, "opt", "scifi", "bitstreams", "custom")
-    os.makedirs(custom_dir, exist_ok=True)
-    shutil.copy2(bit_path, os.path.join(custom_dir, f"{identifier}.bit"))
+    artifact = f"artifacts/{identifier}/{os.path.basename(bit_path)}"
+    bit_dst = os.path.join(custom_dir, artifact)
+    os.makedirs(os.path.dirname(bit_dst), exist_ok=True)
+    shutil.copy2(bit_path, bit_dst)
 
     fragment: dict = {
         "name": identifier,
         "usb_pid": usb_pid,
-        "artifact": f"custom/{identifier}.bit",
+        "artifact": f"custom/{artifact}",
     }
     if git_hash:
         fragment["git_hash"] = git_hash

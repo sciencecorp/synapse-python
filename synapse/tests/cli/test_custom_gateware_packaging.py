@@ -5,7 +5,9 @@ docs/superpowers/specs/2026-06-09-custom-gateware-bitstreams-design.md):
 
   * ``gateware.summary_path_for`` / ``gateware.read_usb_pid``
   * ``build.find_deb_package`` package_name filtering
-  * ``peripherals.build_gateware_deb`` staging layout + fpm invocation
+  * ``peripherals.build_gateware_deb`` staging layout + fpm invocation: the
+    image keeps its build file name under
+    ``custom/artifacts/<identifier>/`` and the fragment points at it
 
 The two-deb build/deploy command flows live in test_half_selectors.py.
 """
@@ -356,57 +358,81 @@ def _spy_mkdtemp(peripherals, monkeypatch, holder: list):
     monkeypatch.setattr(peripherals.tempfile, "mkdtemp", spy)
 
 
-def test_build_gateware_deb_stages_bit_fragment_and_depends(
-    peripherals, tmp_path, monkeypatch
-):
-    """With bitstream_name and git_hash: files/fragment keyed on identifier."""
-    pd = tmp_path / "plugin"
+BITSTREAMS = Path("opt", "scifi", "bitstreams")
+VERSIONED_BIT = "sdk_nerv512u-devkit_gateware_v0.3.7_ab12cd34_11052026_1530.bit"
+
+
+def _build(peripherals, monkeypatch, tmp_path, bit_name, *, payload, **kwargs):
+    """Run build_gateware_deb on a fresh plugin dir with fpm stubbed out.
+
+    Returns (ok, staging root, recorded subprocess argv list).
+    """
+    pd = tmp_path / f"plugin-{len(list(tmp_path.iterdir()))}"
     pd.mkdir()
-    bit = tmp_path / "sdk_x.bit"
-    bit.write_text("BITSTREAM")
-    manifest = {"name": "scifi-my-chip", "version": "0.2.0"}
+    bit = pd / "build" / bit_name
+    bit.parent.mkdir()
+    bit.write_bytes(payload)
 
     staging: list = []
     _spy_mkdtemp(peripherals, monkeypatch, staging)
     calls: list = []
-    dist_dir = os.path.join(str(pd), "dist")
-    monkeypatch.setattr(peripherals.subprocess, "run", fake_fpm_run(dist_dir, calls))
-
+    monkeypatch.setattr(
+        peripherals.subprocess, "run", fake_fpm_run(str(pd / "dist"), calls)
+    )
     ok = peripherals.build_gateware_deb(
         str(pd),
-        manifest,
+        {"name": "scifi-my-chip", "version": "0.2.0"},
         bit_path=str(bit),
         usb_pid=4,
+        version="0.2.0",
+        **kwargs,
+    )
+    assert len(staging) == 1
+    return ok, Path(staging[0]), calls
+
+
+def _staged_bits(root: Path) -> list:
+    return sorted((root / BITSTREAMS / "custom").rglob("*.bit"))
+
+
+def _fragment(root: Path, identifier: str) -> dict:
+    path = root / BITSTREAMS / "custom" / f"{identifier}.manifest.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _fpm_name(calls: list) -> str:
+    fpm_call = next(c for c in calls if "fpm" in c)
+    return fpm_call[fpm_call.index("-n") + 1]
+
+
+def test_build_gateware_deb_stages_bit_fragment_and_depends(
+    peripherals, tmp_path, monkeypatch
+):
+    """With bitstream_name and git_hash: image under artifacts/<identifier>/."""
+    payload = b"\x96\x01BITSTREAM\x00"
+    ok, root, calls = _build(
+        peripherals,
+        monkeypatch,
+        tmp_path,
+        "sdk_x.bit",
+        payload=payload,
         bitstream_name="via-devkit_gateware",
         git_hash="e6890a3",
-        version="0.2.0",
     )
     assert ok is True
-    assert len(staging) == 1
 
-    bit_dst = os.path.join(
-        staging[0], "opt", "scifi", "bitstreams", "custom", "via-devkit_gateware.bit"
-    )
-    frag_dst = os.path.join(
-        staging[0],
-        "opt",
-        "scifi",
-        "bitstreams",
-        "custom",
-        "via-devkit_gateware.manifest.json",
-    )
-    assert os.path.exists(bit_dst), "bitstream staged under custom/ as <identifier>.bit"
-    with open(frag_dst, "r", encoding="utf-8") as fh:
-        frag = json.load(fh)
-    assert frag == {
+    image = root / BITSTREAMS / "custom/artifacts/via-devkit_gateware/sdk_x.bit"
+    assert _staged_bits(root) == [image]
+    assert image.read_bytes() == payload
+    assert _fragment(root, "via-devkit_gateware") == {
         "name": "via-devkit_gateware",
         "usb_pid": 4,
-        "artifact": "custom/via-devkit_gateware.bit",
+        "artifact": "custom/artifacts/via-devkit_gateware/sdk_x.bit",
         "git_hash": "e6890a3",
     }
 
     fpm_call = next(c for c in calls if "fpm" in c)
-    assert fpm_call[fpm_call.index("-n") + 1] == "axon-gateware-via-devkit-gateware"
+    assert _fpm_name(calls) == "axon-gateware-via-devkit-gateware"
     assert fpm_call[fpm_call.index("--depends") + 1] == "axonprobe-bitstreams"
     # fpm input must be "opt" (not "."): postinstall.sh must NOT ship in the
     # payload, or the driver and gateware debs would dpkg-conflict on
@@ -417,47 +443,100 @@ def test_build_gateware_deb_stages_bit_fragment_and_depends(
 def test_build_gateware_deb_omit_bitstream_name_falls_back_to_plugin_name(
     peripherals, tmp_path, monkeypatch
 ):
-    """Omitting bitstream_name: files/fragment keyed on plugin name, no git_hash key."""
-    pd = tmp_path / "plugin"
-    pd.mkdir()
-    bit = tmp_path / "sdk_x.bit"
-    bit.write_text("BITSTREAM")
-    manifest = {"name": "scifi-my-chip", "version": "0.2.0"}
-
-    staging: list = []
-    _spy_mkdtemp(peripherals, monkeypatch, staging)
-    calls: list = []
-    dist_dir = os.path.join(str(pd), "dist")
-    monkeypatch.setattr(peripherals.subprocess, "run", fake_fpm_run(dist_dir, calls))
-
-    ok = peripherals.build_gateware_deb(
-        str(pd), manifest, bit_path=str(bit), usb_pid=4, version="0.2.0"
+    """Omitting bitstream_name: keyed on plugin name, no git_hash key."""
+    ok, root, calls = _build(
+        peripherals, monkeypatch, tmp_path, "sdk_x.bit", payload=b"BITSTREAM"
     )
     assert ok is True
 
-    bit_dst = os.path.join(
-        staging[0], "opt", "scifi", "bitstreams", "custom", "scifi-my-chip.bit"
-    )
-    frag_dst = os.path.join(
-        staging[0],
-        "opt",
-        "scifi",
-        "bitstreams",
-        "custom",
-        "scifi-my-chip.manifest.json",
-    )
-    assert os.path.exists(bit_dst), "fallback: bit staged as <plugin_name>.bit"
-    with open(frag_dst, "r", encoding="utf-8") as fh:
-        frag = json.load(fh)
-    # 3-key fragment, NO git_hash key
-    assert frag == {
+    image = root / BITSTREAMS / "custom/artifacts/scifi-my-chip/sdk_x.bit"
+    assert _staged_bits(root) == [image]
+    assert _fragment(root, "scifi-my-chip") == {
         "name": "scifi-my-chip",
         "usb_pid": 4,
-        "artifact": "custom/scifi-my-chip.bit",
+        "artifact": "custom/artifacts/scifi-my-chip/sdk_x.bit",
     }
+    assert _fpm_name(calls) == "axon-gateware-scifi-my-chip"
 
-    fpm_call = next(c for c in calls if "fpm" in c)
-    assert fpm_call[fpm_call.index("-n") + 1] == "axon-gateware-scifi-my-chip"
+
+@pytest.mark.parametrize(
+    "bit_name",
+    [VERSIONED_BIT, "sdk_nerv512u-devkit_gateware_extracted.bit"],
+    ids=["versioned", "extracted"],
+)
+def test_build_gateware_deb_keeps_build_file_name(
+    peripherals, tmp_path, monkeypatch, bit_name
+):
+    """The build's own file name is kept verbatim, never renamed to <id>.bit."""
+    payload = bytes(range(256))
+    ok, root, calls = _build(
+        peripherals,
+        monkeypatch,
+        tmp_path,
+        bit_name,
+        payload=payload,
+        bitstream_name="nerv512u-devkit_gateware",
+        git_hash="ab12cd34",
+    )
+    assert ok is True
+
+    custom = root / BITSTREAMS / "custom"
+    image = custom / "artifacts" / "nerv512u-devkit_gateware" / bit_name
+    assert _staged_bits(root) == [image]
+    assert image.read_bytes() == payload
+    assert not (custom / "nerv512u-devkit_gateware.bit").exists()
+    assert _fragment(root, "nerv512u-devkit_gateware") == {
+        "name": "nerv512u-devkit_gateware",
+        "usb_pid": 4,
+        "artifact": f"custom/artifacts/nerv512u-devkit_gateware/{bit_name}",
+        "git_hash": "ab12cd34",
+    }
+    assert _fpm_name(calls) == "axon-gateware-nerv512u-devkit-gateware"
+
+
+@pytest.mark.parametrize("bitstream_name", ["via-devkit_gateware", None])
+def test_build_gateware_deb_fragment_artifact_resolves_to_staged_image(
+    peripherals, tmp_path, monkeypatch, bitstream_name
+):
+    """Fragment ``artifact`` (relative to opt/scifi/bitstreams) is the image."""
+    payload = b"\x69\x80IMAGE"
+    ok, root, _ = _build(
+        peripherals,
+        monkeypatch,
+        tmp_path,
+        VERSIONED_BIT,
+        payload=payload,
+        bitstream_name=bitstream_name,
+    )
+    assert ok is True
+
+    identifier = bitstream_name or "scifi-my-chip"
+    resolved = root / BITSTREAMS / _fragment(root, identifier)["artifact"]
+    assert _staged_bits(root) == [resolved]
+    assert resolved.read_bytes() == payload
+
+
+def test_build_gateware_deb_distinct_identifiers_never_share_a_path(
+    peripherals, tmp_path, monkeypatch
+):
+    """Same build file name, two identifiers: no on-device path collides."""
+    payloads = {"alpha_gateware": b"ALPHA", "beta_gateware": b"BETA"}
+    staged = {}
+    for identifier, payload in payloads.items():
+        ok, root, _ = _build(
+            peripherals,
+            monkeypatch,
+            tmp_path,
+            VERSIONED_BIT,
+            payload=payload,
+            bitstream_name=identifier,
+        )
+        assert ok is True
+        staged[identifier] = {
+            p.relative_to(root) for p in (root / "opt").rglob("*") if p.is_file()
+        }
+
+    assert staged["alpha_gateware"].isdisjoint(staged["beta_gateware"])
 
 
 def test_build_gateware_deb_missing_bit_errors(peripherals, tmp_path, capsys):
@@ -525,13 +604,14 @@ def test_selected_native_bytes_and_summary_become_custom_package(
     )
 
     assert ok is True
-    custom = Path(staging[0]) / "opt" / "scifi" / "bitstreams" / "custom"
-    assert (custom / "profile-alpha_gateware.bit").read_bytes() == native_payload
-    assert json.loads(
-        (custom / "profile-alpha_gateware.manifest.json").read_text()
-    ) == {
+    root = Path(staging[0])
+    bit_name = Path(selected).name
+    image = root / BITSTREAMS / "custom/artifacts/profile-alpha_gateware" / bit_name
+    assert image.read_bytes() == native_payload
+    assert _staged_bits(root) == [image]
+    assert _fragment(root, "profile-alpha_gateware") == {
         "name": "profile-alpha_gateware",
         "usb_pid": 11,
-        "artifact": "custom/profile-alpha_gateware.bit",
+        "artifact": f"custom/artifacts/profile-alpha_gateware/{bit_name}",
         "git_hash": "123abcd",
     }

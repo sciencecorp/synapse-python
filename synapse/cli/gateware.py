@@ -482,7 +482,7 @@ def read_usb_pid(bit_path: str) -> int:
 def read_identifier(bit_path: str) -> str | None:
     """Return ``<target_profile>_<project.name>`` from the bitstream's summary.
 
-    This is the custom bitstream's identity: the on-device file names, the
+    This is the custom bitstream's identity: the on-device manifest name, the
     manifest fragment's ``name``, the ``axon-gateware-*`` deb name,
     ``scifi-probe-updater update --name``, and the systemd instance all key
     on it, and deploying the same identifier again overrides the previous

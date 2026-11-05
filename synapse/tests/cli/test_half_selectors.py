@@ -803,10 +803,13 @@ def test_case_M_both_emits_driver_deb_and_gateware_deb(
         f"driver deb must not carry the bitstream; got: {driver_files!r}"
     )
 
-    assert any(
-        f.endswith(os.path.join("opt/scifi/bitstreams/custom", "via-devkit_gateware.bit"))
-        for f in gateware_files
-    ), f"gateware deb stages the bit under custom/; got: {gateware_files!r}"
+    image = os.path.join(
+        "opt/scifi/bitstreams/custom/artifacts/via-devkit_gateware", fake_bit.name
+    )
+    assert [f for f in gateware_files if f.endswith(".bit")] == [image], (
+        f"gateware deb stages only the built bit, under artifacts/<id>/; "
+        f"got: {gateware_files!r}"
+    )
     assert any(
         f.endswith(
             os.path.join("opt/scifi/bitstreams/custom", "via-devkit_gateware.manifest.json")
@@ -887,10 +890,12 @@ def test_case_O_gateware_only_build_emits_only_gateware_deb(
 
     assert len(staging_dirs) == 1
     files = _captured_staging_files(staging_dirs[0])
-    assert any(
-        f.endswith(os.path.join("opt/scifi/bitstreams/custom", "via-devkit_gateware.bit"))
-        for f in files
-    ), f"gateware deb stages the bit; got: {files!r}"
+    image = os.path.join(
+        "opt/scifi/bitstreams/custom/artifacts/via-devkit_gateware", fake_bit.name
+    )
+    assert [f for f in files if f.endswith(".bit")] == [image], (
+        f"gateware deb stages only the built bit, under artifacts/<id>/; got: {files!r}"
+    )
     with open(
         os.path.join(
             staging_dirs[0],
@@ -903,7 +908,7 @@ def test_case_O_gateware_only_build_emits_only_gateware_deb(
     assert frag == {
         "name": "via-devkit_gateware",
         "usb_pid": 4,
-        "artifact": "custom/via-devkit_gateware.bit",
+        "artifact": f"custom/artifacts/via-devkit_gateware/{fake_bit.name}",
         "git_hash": "e6890a3",
     }
     assert not any(f.endswith(".so") for f in files)
