@@ -231,14 +231,11 @@ def run_gateware_build(
     root either way, so a per-profile project can still reference shared
     sources above it (``../axon_test_source_peripheral.sv``).
 
-    Returns the absolute path to the newest ``sdk_*_extracted.bit`` emitted
-    under ``<peripheral_dir>/<project_subdir>/build/bitstreams/``. This is the
-    *extracted* bitstream variant the SDK writes alongside the raw
-    ``sdk_*.bit``; the extracted form is what gets flashed to the probe, and
-    it carries its own same-stem ``.summary.json`` (same schema as the raw
-    one). Selecting it specifically — rather than the broader ``sdk_*.bit``
-    glob, which would also match the extracted file and pick by mtime —
-    keeps the choice deterministic.
+    Returns the absolute path to the newest native ``sdk_*.bit`` emitted
+    under ``<peripheral_dir>/<project_subdir>/build/bitstreams/``. When the
+    build emitted no native image (older SDKs), returns the newest
+    ``sdk_*_extracted.bit`` instead. Its same-stem ``.summary.json``
+    describes the image.
 
     Raises:
       LicenseUnsetError: if ``LM_LICENSE_FILE`` is unset (propagated from
@@ -272,12 +269,17 @@ def run_gateware_build(
         *project_subdir.split("/"),
         "build",
         "bitstreams",
-        "sdk_*_extracted.bit",
+        "sdk_*.bit",
     )
-    matches = glob.glob(bit_glob)
+    found = glob.glob(bit_glob)
+    matches = [path for path in found if not path.endswith("_extracted.bit")]
+    # Older SDK releases emit only the extracted image, which is what probes
+    # running their firmware expect.
+    if not matches:
+        matches = [path for path in found if path.endswith("_extracted.bit")]
     if not matches:
         raise FileNotFoundError(
-            "axon-peripheral-sdk build completed but no sdk_*_extracted.bit was "
+            "axon-peripheral-sdk build completed but no sdk_*.bit was "
             f"emitted under {project_subdir}/build/bitstreams/"
         )
 
@@ -340,7 +342,7 @@ def read_usb_pid(bit_path: str) -> int:
     if not isinstance(summary, dict):
         raise ValueError(
             f"Bitstream summary {path} is not a JSON object; "
-            "expected a top-level usb_pid hex string (e.g. \"0x000B\")."
+            'expected a top-level usb_pid hex string (e.g. "0x000B").'
         )
 
     raw = summary.get("usb_pid")
@@ -357,13 +359,13 @@ def read_usb_pid(bit_path: str) -> int:
     except ValueError:
         raise ValueError(
             f"Bitstream summary {path} usb_pid {raw!r} is not a valid hex "
-            "string (expected e.g. \"0x000B\")"
+            'string (expected e.g. "0x000B")'
         )
 
     if not (0 < usb_pid <= 0xFFFF):
         raise ValueError(
             f"Bitstream summary {path} usb_pid {raw!r} ({usb_pid}) is out of "
-            "range; expected a hex string in 1..0xFFFF (e.g. \"0x000B\")"
+            'range; expected a hex string in 1..0xFFFF (e.g. "0x000B")'
         )
     return usb_pid
 

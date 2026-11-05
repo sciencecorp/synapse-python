@@ -15,8 +15,11 @@ from __future__ import annotations
 import importlib
 import json
 import os
+from pathlib import Path
 
 import pytest
+
+from synapse.tests.cli.conftest import fake_fpm_run
 
 
 @pytest.fixture()
@@ -244,7 +247,9 @@ def test_read_identifier_missing_target_profile_returns_none(gateware, tmp_path)
 def test_read_identifier_missing_project_name_returns_none(gateware, tmp_path):
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(bit, {"usb_pid": "0x000B", "target_profile": "via-devkit", "project": {}})
+    _write_summary(
+        bit, {"usb_pid": "0x000B", "target_profile": "via-devkit", "project": {}}
+    )
     assert gateware.read_identifier(str(bit)) is None
 
 
@@ -291,7 +296,9 @@ def test_read_git_sha_missing_git_sha_returns_none(gateware, tmp_path):
 def test_read_git_sha_empty_string_returns_none(gateware, tmp_path):
     bit = tmp_path / "sdk_x.bit"
     bit.write_text("bit")
-    _write_summary(bit, {"usb_pid": "0x000B", "project": {"name": "gateware", "git_sha": ""}})
+    _write_summary(
+        bit, {"usb_pid": "0x000B", "project": {"name": "gateware", "git_sha": ""}}
+    )
     assert gateware.read_git_sha(str(bit)) is None
 
 
@@ -336,10 +343,6 @@ def test_find_deb_package_version_anchored_prefix_skips_stale(buildmod, tmp_path
 # peripherals.build_gateware_deb
 # ---------------------------------------------------------------------------
 
-# synapse/tests/cli/ is a package (has __init__.py), so import the helper
-# package-qualified rather than relying on pytest's rootdir sys.path insert.
-from synapse.tests.cli.conftest import fake_fpm_run
-
 
 def _spy_mkdtemp(peripherals, monkeypatch, holder: list):
     real_mkdtemp = peripherals.tempfile.mkdtemp
@@ -369,9 +372,13 @@ def test_build_gateware_deb_stages_bit_fragment_and_depends(
     monkeypatch.setattr(peripherals.subprocess, "run", fake_fpm_run(dist_dir, calls))
 
     ok = peripherals.build_gateware_deb(
-        str(pd), manifest, bit_path=str(bit), usb_pid=4,
-        bitstream_name="via-devkit_gateware", git_hash="e6890a3",
-        version="0.2.0"
+        str(pd),
+        manifest,
+        bit_path=str(bit),
+        usb_pid=4,
+        bitstream_name="via-devkit_gateware",
+        git_hash="e6890a3",
+        version="0.2.0",
     )
     assert ok is True
     assert len(staging) == 1
@@ -380,7 +387,11 @@ def test_build_gateware_deb_stages_bit_fragment_and_depends(
         staging[0], "opt", "scifi", "bitstreams", "custom", "via-devkit_gateware.bit"
     )
     frag_dst = os.path.join(
-        staging[0], "opt", "scifi", "bitstreams", "custom",
+        staging[0],
+        "opt",
+        "scifi",
+        "bitstreams",
+        "custom",
         "via-devkit_gateware.manifest.json",
     )
     assert os.path.exists(bit_dst), "bitstream staged under custom/ as <identifier>.bit"
@@ -427,14 +438,22 @@ def test_build_gateware_deb_omit_bitstream_name_falls_back_to_plugin_name(
         staging[0], "opt", "scifi", "bitstreams", "custom", "scifi-my-chip.bit"
     )
     frag_dst = os.path.join(
-        staging[0], "opt", "scifi", "bitstreams", "custom",
+        staging[0],
+        "opt",
+        "scifi",
+        "bitstreams",
+        "custom",
         "scifi-my-chip.manifest.json",
     )
     assert os.path.exists(bit_dst), "fallback: bit staged as <plugin_name>.bit"
     with open(frag_dst, "r", encoding="utf-8") as fh:
         frag = json.load(fh)
     # 3-key fragment, NO git_hash key
-    assert frag == {"name": "scifi-my-chip", "usb_pid": 4, "artifact": "custom/scifi-my-chip.bit"}
+    assert frag == {
+        "name": "scifi-my-chip",
+        "usb_pid": 4,
+        "artifact": "custom/scifi-my-chip.bit",
+    }
 
     fpm_call = next(c for c in calls if "fpm" in c)
     assert fpm_call[fpm_call.index("-n") + 1] == "axon-gateware-scifi-my-chip"
@@ -448,3 +467,67 @@ def test_build_gateware_deb_missing_bit_errors(peripherals, tmp_path, capsys):
     )
     assert ok is False
     assert "not found" in capsys.readouterr().out.lower()
+
+
+def test_selected_native_bytes_and_summary_become_custom_package(
+    gateware, peripherals, tmp_path, monkeypatch
+):
+    pd = tmp_path / "plugin"
+    bitstreams = pd / "src" / "gateware" / "build" / "bitstreams"
+    bitstreams.mkdir(parents=True)
+    native = bitstreams / "sdk_profile-alpha_gateware.bit"
+    native_payload = b"\x96\x01\x80\x7f\x00\xa5"
+    native.write_bytes(native_payload)
+    _write_summary(
+        native,
+        {
+            "schema_version": 1,
+            "usb_pid": "0x000B",
+            "target_profile": "profile-alpha",
+            "project": {"name": "gateware", "git_sha": "123abcd"},
+        },
+    )
+    extracted = bitstreams / "sdk_profile-alpha_gateware_extracted.bit"
+    extracted.write_bytes(b"\x69\x80\x01\xfe\x00\xa5")
+    _write_summary(
+        extracted,
+        {
+            "schema_version": 1,
+            "usb_pid": "0x0004",
+            "target_profile": "wrong-profile",
+            "project": {"name": "decoy", "git_sha": "badbeef"},
+        },
+    )
+    os.utime(native, (1_000_000, 1_000_000))
+    os.utime(extracted, (2_000_000, 2_000_000))
+
+    staging = []
+    _spy_mkdtemp(peripherals, monkeypatch, staging)
+    monkeypatch.setattr(
+        peripherals.subprocess, "run", fake_fpm_run(str(pd / "dist"), [])
+    )
+
+    selected = gateware.run_gateware_build(
+        str(pd), "fake-gw:latest", env={"LM_LICENSE_FILE": "7788@licenseserver"}
+    )
+    ok = peripherals.build_gateware_deb(
+        str(pd),
+        {"name": "scifi-plugin", "version": "0.2.0"},
+        bit_path=selected,
+        usb_pid=gateware.read_usb_pid(selected),
+        bitstream_name=gateware.read_identifier(selected),
+        git_hash=gateware.read_git_sha(selected),
+        version="0.2.0",
+    )
+
+    assert ok is True
+    custom = Path(staging[0]) / "opt" / "scifi" / "bitstreams" / "custom"
+    assert (custom / "profile-alpha_gateware.bit").read_bytes() == native_payload
+    assert json.loads(
+        (custom / "profile-alpha_gateware.manifest.json").read_text()
+    ) == {
+        "name": "profile-alpha_gateware",
+        "usb_pid": 11,
+        "artifact": "custom/profile-alpha_gateware.bit",
+        "git_hash": "123abcd",
+    }
