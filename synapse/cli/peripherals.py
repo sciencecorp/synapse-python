@@ -295,9 +295,7 @@ def build_peripheral_so(
     # of profile doesn't depend on which one a given repo happens to take.
     # shlex.quote keeps a hostile profile name from breaking out of the
     # `bash -c` string; the value reaches us from --profile or the environment.
-    profile_flag = (
-        f" -DAXON_TARGET_PROFILE={shlex.quote(profile)}" if profile else ""
-    )
+    profile_flag = f" -DAXON_TARGET_PROFILE={shlex.quote(profile)}" if profile else ""
     build_cmd_str = (
         "cd /home/workspace && "
         "if [ -f CMakePresets.json ]; then "
@@ -456,9 +454,7 @@ def build_peripheral_deb(
 
     # 1. Stage the plugin .so at /usr/lib/scifi/plugins/<name>.so
     if not os.path.exists(so_path):
-        console.print(
-            f"[bold red]Error:[/bold red] Plugin .so not found at {so_path}"
-        )
+        console.print(f"[bold red]Error:[/bold red] Plugin .so not found at {so_path}")
         return False
     plugin_dst = os.path.join(staging_dir, "usr", "lib", "scifi", "plugins")
     os.makedirs(plugin_dst, exist_ok=True)
@@ -505,9 +501,7 @@ def build_peripheral_deb(
             )
             return False
         arch_suffix = detect_arch()
-        platform_opt = (
-            "linux/arm64" if arch_suffix == "arm64" else "linux/amd64"
-        )
+        platform_opt = "linux/arm64" if arch_suffix == "arm64" else "linux/amd64"
 
         console.print(
             f"[yellow]Extracting SDK runtime from Docker image [bold]{image_tag}[/bold]...[/yellow]"
@@ -534,9 +528,7 @@ def build_peripheral_deb(
             return False
 
         sdk_files = [
-            f
-            for f in os.listdir(sdk_dst)
-            if f.startswith("libscifi-peripheral-sdk.so")
+            f for f in os.listdir(sdk_dst) if f.startswith("libscifi-peripheral-sdk.so")
         ]
         if not sdk_files:
             console.print(
@@ -788,7 +780,7 @@ def _run_gateware_half(peripheral_dir: str, project_subdir: str) -> Optional[str
     except LicenseUnsetError as exc:
         console.print(f"[bold red]Error:[/bold red] {exc}")
         return None
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as exc:
         console.print(f"[bold red]Error:[/bold red] Gateware build failed: {exc}")
         return None
 
@@ -840,7 +832,9 @@ def _build_debs(
         else None
     )
     if resolved_profile:
-        console.print(f"[bold]Target profile:[/bold] [yellow]{resolved_profile}[/yellow]")
+        console.print(
+            f"[bold]Target profile:[/bold] [yellow]{resolved_profile}[/yellow]"
+        )
 
     if do_gateware and clean:
         try:
@@ -892,7 +886,9 @@ def _build_debs(
             git_hash=gateware.read_git_sha(bit_path),
         ):
             return None
-        deb = find_deb_package(dist_dir, f"{_gateware_package_name(identifier)}_{version}")
+        deb = find_deb_package(
+            dist_dir, f"{_gateware_package_name(identifier)}_{version}"
+        )
         if deb is None:
             return None
         debs.append(deb)

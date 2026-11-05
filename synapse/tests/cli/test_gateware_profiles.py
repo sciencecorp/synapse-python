@@ -19,12 +19,17 @@ driver whose compiled-in clock rate belongs to the other devkit.
 from __future__ import annotations
 
 import importlib
-import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from synapse.tests.cli.test_gateware_runner import (
+    _new_ns,
+    _project_args,
+    _summary,
+    _write,
+)
 
 
 @pytest.fixture()
@@ -167,52 +172,56 @@ def test_bare_gateware_dir_without_manifest_raises(gw, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_build_selects_native_bytes_and_summary_from_each_profile(
+def test_build_targets_each_profile_project_and_selects_its_native_image(
     gw, tmp_path, monkeypatch
 ):
+    """The SDK stub writes only into the project the command names, so a build
+    that ignores the selected profile finds nothing (or the wrong image)."""
     profiles = {
         "profile-alpha": {"usb_pid": "0x0004", "git_sha": "123abcd"},
         "profile-beta": {"usb_pid": "0x000B", "git_sha": "456def0"},
     }
     _make_repo(tmp_path, profiles=profiles)
     expected = {}
-    for index, (profile, metadata) in enumerate(profiles.items(), start=1):
-        bitstreams = tmp_path / "src" / "gateware" / profile / "build" / "bitstreams"
-        bitstreams.mkdir(parents=True)
+
+    def emit(project):
+        profile = Path(project).name
+        metadata = profiles[profile]
+        bitstreams = tmp_path / project / "build" / "bitstreams"
         native = bitstreams / f"sdk_{profile}_gateware.bit"
-        payload = bytes([index, 0x96, 0x80, 0x7F])
-        native.write_bytes(payload)
-        native.with_suffix(".summary.json").write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "target_profile": profile,
-                    "usb_pid": metadata["usb_pid"],
-                    "project": {"name": "gateware", "git_sha": metadata["git_sha"]},
-                }
-            )
+        payload = bytes([len(expected) + 1, 0x96, 0x80, 0x7F])
+        _write(native, payload, _new_ns(1))
+        _summary(
+            native,
+            _new_ns(1),
+            schema_version=1,
+            target_profile=profile,
+            usb_pid=metadata["usb_pid"],
+            project={"name": "gateware", "git_sha": metadata["git_sha"]},
         )
-        os.utime(native, (index * 1_000_000, index * 1_000_000))
         extracted = bitstreams / f"sdk_{profile}_gateware_extracted.bit"
-        extracted.write_bytes(b"wrong extracted bytes")
-        extracted.with_suffix(".summary.json").write_text(
-            json.dumps(
-                {
-                    "usb_pid": "0xFFFF",
-                    "target_profile": "wrong-profile",
-                    "project": {"name": "decoy", "git_sha": "badbeef"},
-                }
-            )
+        _write(extracted, b"wrong extracted bytes", _new_ns(9))
+        _summary(
+            extracted,
+            _new_ns(9),
+            usb_pid="0xFFFF",
+            target_profile="wrong-profile",
+            project={"name": "decoy", "git_sha": "badbeef"},
         )
-        os.utime(extracted, (9_000_000, 9_000_000))
         expected[profile] = (native, payload)
 
-    def fake_run(argv, **kwargs):
+    requested = []
+
+    def fake_run(argv, *args, **kwargs):
+        projects = _project_args(argv)
+        requested.append(projects)
+        if len(projects) == 1:
+            emit(projects[0])
         return subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr(gw.subprocess, "run", fake_run)
 
-    for profile in gw.discover_gateware_profiles(str(tmp_path)):
+    for profile, metadata in profiles.items():
         project = gw.resolve_gateware_project(str(tmp_path), profile, {})
         selected = gw.run_gateware_build(
             str(tmp_path),
@@ -220,10 +229,11 @@ def test_build_selects_native_bytes_and_summary_from_each_profile(
             env={"LM_LICENSE_FILE": "7788@licenseserver"},
             project_subdir=project,
         )
+        assert requested[-1] == [f"src/gateware/{profile}"]
         native, payload = expected[profile]
         assert Path(selected) == native
         assert Path(selected).read_bytes() == payload
         assert gw.summary_path_for(selected) == str(native.with_suffix(".summary.json"))
-        assert gw.read_usb_pid(selected) == int(profiles[profile]["usb_pid"], 16)
+        assert gw.read_usb_pid(selected) == int(metadata["usb_pid"], 16)
         assert gw.read_identifier(selected) == f"{profile}_gateware"
-        assert gw.read_git_sha(selected) == profiles[profile]["git_sha"]
+        assert gw.read_git_sha(selected) == metadata["git_sha"]

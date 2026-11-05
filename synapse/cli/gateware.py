@@ -9,7 +9,6 @@ invocation, the :func:`run_gateware_build` runner that wraps
 
 from __future__ import annotations
 
-import glob
 import json
 import os
 import re
@@ -17,7 +16,7 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Iterable, Mapping, Sequence
 
 from rich.console import Console
 
@@ -218,6 +217,80 @@ def resolve_gateware_project(
     )
 
 
+# Highest build-summary schema this synapse understands. The SDK releases
+# independently, so a newer schema must fail loudly rather than be misread.
+_MAX_SUMMARY_SCHEMA = 2
+
+
+def _scan_bitstreams(bitstreams_dir: str) -> dict[str, tuple[int, int]]:
+    """Return ``{name: (mtime_ns, size)}`` for the regular files in *bitstreams_dir*.
+
+    Size rides with mtime because some filesystems store whole seconds, so a
+    same-second rewrite would otherwise look untouched.
+    """
+    if not os.path.isdir(bitstreams_dir):
+        return {}
+    files = {}
+    with os.scandir(bitstreams_dir) as entries:
+        for entry in entries:
+            if entry.is_file():
+                st = entry.stat()
+                files[entry.name] = (st.st_mtime_ns, st.st_size)
+    return files
+
+
+def _load_summary(path: str) -> dict | None:
+    """Return the build summary at *path* as a dict, or None if unreadable."""
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            summary = json.load(fp)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return summary if isinstance(summary, dict) else None
+
+
+def _summary_schema(path: str) -> tuple[int, dict] | None:
+    """Return ``(schema_version, summary)`` for a build summary, or None if unreadable."""
+    summary = _load_summary(path)
+    if summary is None:
+        return None
+    version = summary.get("schema_version", 1)
+    if type(version) is not int:
+        raise ValueError(
+            f"Bitstream summary {path} has a non-integer schema_version {version!r}"
+        )
+    return version, summary
+
+
+def _schema2_bitstream(
+    bitstreams_dir: str,
+    summary_name: str,
+    summary: dict,
+    after: Mapping[str, tuple[int, int]],
+    emitted: set[str],
+) -> str:
+    """Return the image a schema-2 summary names, checked to be from this build."""
+    name = summary.get("bitstream")
+    # The readers find a summary by its image's stem, so the two must pair up.
+    expected = summary_name.removesuffix(".summary.json") + ".bit"
+    if name != expected:
+        raise ValueError(
+            f"Bitstream summary {summary_name} has 'bitstream' {name!r}; "
+            f"expected {expected!r}, the image next to it"
+        )
+    if name not in after:
+        raise FileNotFoundError(
+            f"Bitstream summary {summary_name} names {name}, which does not "
+            f"exist in {bitstreams_dir}"
+        )
+    if name not in emitted:
+        raise ValueError(
+            f"Bitstream summary {summary_name} names {name}, which this build "
+            "did not write (it predates the build)"
+        )
+    return os.path.join(bitstreams_dir, name)
+
+
 def run_gateware_build(
     peripheral_dir: str,
     image_tag: str,
@@ -231,21 +304,37 @@ def run_gateware_build(
     root either way, so a per-profile project can still reference shared
     sources above it (``../axon_test_source_peripheral.sv``).
 
-    Returns the absolute path to the newest native ``sdk_*.bit`` emitted
-    under ``<peripheral_dir>/<project_subdir>/build/bitstreams/``. When the
-    build emitted no native image (older SDKs), returns the newest
-    ``sdk_*_extracted.bit`` instead. Its same-stem ``.summary.json``
-    describes the image.
+    Returns the absolute path to the image this build emitted under
+    ``<peripheral_dir>/<project_subdir>/build/bitstreams/``. Build directories
+    persist between builds, so only files the build created or changed (by
+    mtime and size) are considered; older files are ignored whatever their
+    name. Among those:
+
+    - A schema-2 ``<stem>.summary.json`` names its image, ``<stem>.bit``,
+      in ``bitstream``; the newest such summary wins.
+    - Otherwise (schema 1, no ``schema_version``, or no summary) the newest
+      native ``sdk_*.bit`` wins, else the newest ``sdk_*_extracted.bit``
+      (older SDKs emit only the extracted image).
+
+    Unreadable summaries are skipped here. The image's same-stem
+    ``.summary.json`` describes it.
 
     Raises:
       LicenseUnsetError: if ``LM_LICENSE_FILE`` is unset (propagated from
         :func:`build_license_docker_args`).
       subprocess.CalledProcessError: if the container's build exits non-zero.
-      FileNotFoundError: if the build succeeds but no bitstream is emitted.
+      ValueError: if a new summary has a schema newer than this synapse
+        supports or a malformed ``schema_version``, or a schema-2 summary
+        names an invalid or pre-existing image.
+      FileNotFoundError: if the build emitted no bitstream, or a schema-2
+        summary names a missing image.
     """
     license_args = build_license_docker_args(env)
 
     abs_peripheral_dir = os.path.abspath(peripheral_dir)
+    bitstreams_dir = os.path.join(
+        abs_peripheral_dir, *project_subdir.split("/"), "build", "bitstreams"
+    )
     argv = [
         "docker",
         "run",
@@ -262,29 +351,49 @@ def run_gateware_build(
         "-lc",
         f"axon-peripheral-sdk build --project {project_subdir}",
     ]
+    before = _scan_bitstreams(bitstreams_dir)
     subprocess.run(argv, check=True)
+    after = _scan_bitstreams(bitstreams_dir)
 
-    bit_glob = os.path.join(
-        abs_peripheral_dir,
-        *project_subdir.split("/"),
-        "build",
-        "bitstreams",
-        "sdk_*.bit",
-    )
-    found = glob.glob(bit_glob)
-    matches = [path for path in found if not path.endswith("_extracted.bit")]
-    # Older SDK releases emit only the extracted image, which is what probes
-    # running their firmware expect.
-    if not matches:
-        matches = [path for path in found if path.endswith("_extracted.bit")]
-    if not matches:
-        raise FileNotFoundError(
-            "axon-peripheral-sdk build completed but no sdk_*.bit was "
-            f"emitted under {project_subdir}/build/bitstreams/"
+    emitted = {name for name, ident in after.items() if before.get(name) != ident}
+
+    def newest(names: Iterable[str]) -> list[str]:
+        return sorted(names, key=lambda name: after[name][0], reverse=True)
+
+    schema2 = {}
+    for name in emitted:
+        if not (name.startswith("sdk_") and name.endswith(".summary.json")):
+            continue
+        parsed = _summary_schema(os.path.join(bitstreams_dir, name))
+        if parsed is None:
+            continue
+        version, summary = parsed
+        if version > _MAX_SUMMARY_SCHEMA:
+            raise ValueError(
+                f"Bitstream summary {name} uses schema_version {version}, newer "
+                f"than this synapse supports ({_MAX_SUMMARY_SCHEMA}). Upgrade "
+                "science-synapse to package this build."
+            )
+        if version == 2:
+            schema2[name] = summary
+
+    if schema2:
+        matches = newest(schema2)
+        chosen = _schema2_bitstream(
+            bitstreams_dir, matches[0], schema2[matches[0]], after, emitted
         )
+    else:
+        bits = [n for n in emitted if n.startswith("sdk_") and n.endswith(".bit")]
+        matches = [n for n in bits if not n.endswith("_extracted.bit")] or bits
+        if not matches:
+            raise FileNotFoundError(
+                "axon-peripheral-sdk build completed but no sdk_*.bit was "
+                f"emitted by this build under {project_subdir}/build/bitstreams/ "
+                "(files left from earlier builds are ignored)"
+            )
+        matches = newest(matches)
+        chosen = os.path.join(bitstreams_dir, matches[0])
 
-    matches.sort(key=os.path.getmtime, reverse=True)
-    chosen = matches[0]
     if len(matches) > 1:
         console.print(
             f"[yellow]Multiple bitstreams matched; selected newest: {chosen}[/yellow]"
@@ -382,14 +491,8 @@ def read_identifier(bit_path: str) -> str | None:
     should stay within ``[A-Za-z0-9._-]`` — the identifier rides in
     ``scifi-probe-update-custom@<serial>:<name>``.
     """
-    path = summary_path_for(bit_path)
-    try:
-        with open(path, "r", encoding="utf-8") as fp:
-            summary = json.load(fp)
-    except (OSError, json.JSONDecodeError):
-        return None
-
-    if not isinstance(summary, dict):
+    summary = _load_summary(summary_path_for(bit_path))
+    if summary is None:
         return None
     target_profile = summary.get("target_profile")
     if not isinstance(target_profile, str) or not target_profile:
@@ -409,14 +512,8 @@ def read_git_sha(bit_path: str) -> str | None:
     Best-effort: returns None when the summary or the field is
     missing/malformed.
     """
-    path = summary_path_for(bit_path)
-    try:
-        with open(path, "r", encoding="utf-8") as fp:
-            summary = json.load(fp)
-    except (OSError, json.JSONDecodeError):
-        return None
-
-    if not isinstance(summary, dict):
+    summary = _load_summary(summary_path_for(bit_path))
+    if summary is None:
         return None
     project = summary.get("project")
     if not isinstance(project, dict):

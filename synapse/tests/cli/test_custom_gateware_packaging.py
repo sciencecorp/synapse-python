@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from synapse.tests.cli.conftest import fake_fpm_run
+from synapse.tests.cli.test_gateware_runner import _new_ns, _summary, _write
 
 
 @pytest.fixture()
@@ -474,38 +475,41 @@ def test_selected_native_bytes_and_summary_become_custom_package(
 ):
     pd = tmp_path / "plugin"
     bitstreams = pd / "src" / "gateware" / "build" / "bitstreams"
-    bitstreams.mkdir(parents=True)
     native = bitstreams / "sdk_profile-alpha_gateware.bit"
     native_payload = b"\x96\x01\x80\x7f\x00\xa5"
-    native.write_bytes(native_payload)
-    _write_summary(
-        native,
-        {
-            "schema_version": 1,
-            "usb_pid": "0x000B",
-            "target_profile": "profile-alpha",
-            "project": {"name": "gateware", "git_sha": "123abcd"},
-        },
-    )
-    extracted = bitstreams / "sdk_profile-alpha_gateware_extracted.bit"
-    extracted.write_bytes(b"\x69\x80\x01\xfe\x00\xa5")
-    _write_summary(
-        extracted,
-        {
-            "schema_version": 1,
-            "usb_pid": "0x0004",
-            "target_profile": "wrong-profile",
-            "project": {"name": "decoy", "git_sha": "badbeef"},
-        },
-    )
-    os.utime(native, (1_000_000, 1_000_000))
-    os.utime(extracted, (2_000_000, 2_000_000))
+
+    def emit_sdk_outputs():
+        _write(native, native_payload, _new_ns(1))
+        _summary(
+            native,
+            _new_ns(1),
+            schema_version=1,
+            usb_pid="0x000B",
+            target_profile="profile-alpha",
+            project={"name": "gateware", "git_sha": "123abcd"},
+        )
+        extracted = bitstreams / "sdk_profile-alpha_gateware_extracted.bit"
+        _write(extracted, b"\x69\x80\x01\xfe\x00\xa5", _new_ns(2))
+        _summary(
+            extracted,
+            _new_ns(2),
+            schema_version=1,
+            usb_pid="0x0004",
+            target_profile="wrong-profile",
+            project={"name": "decoy", "git_sha": "badbeef"},
+        )
 
     staging = []
     _spy_mkdtemp(peripherals, monkeypatch, staging)
-    monkeypatch.setattr(
-        peripherals.subprocess, "run", fake_fpm_run(str(pd / "dist"), [])
-    )
+    fpm_run = fake_fpm_run(str(pd / "dist"), [])
+
+    def fake_run(argv, *args, **kwargs):
+        # The SDK build writes its images; every other call goes to the fpm stub.
+        if any("axon-peripheral-sdk build" in str(element) for element in argv):
+            emit_sdk_outputs()
+        return fpm_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(peripherals.subprocess, "run", fake_run)
 
     selected = gateware.run_gateware_build(
         str(pd), "fake-gw:latest", env={"LM_LICENSE_FILE": "7788@licenseserver"}
