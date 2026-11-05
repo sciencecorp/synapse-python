@@ -71,13 +71,14 @@ def create_metadata(file_path, console):
     return metadata
 
 
-def deploy_package(ip_address, deb_package_path):
+def deploy_package(ip_address, deb_package_path, timeout=None):
     """Deploy a .deb package to the device via gRPC DeployApp streaming.
 
     Returns True when the package was streamed and all device responses were
     received without error; False on any failure (connection, gRPC, or I/O).
     Callers can use the return value to decide whether to continue with
-    subsequent packages.
+    subsequent packages. ``timeout`` bounds the whole DeployApp call in
+    seconds (upload and install); None waits indefinitely.
     """
     package_filename = os.path.basename(deb_package_path)
     console.clear_live()
@@ -120,7 +121,9 @@ def deploy_package(ip_address, deb_package_path):
                     yield chunk
 
             try:
-                device_responses = device.rpc.DeployApp(chunk_generator())
+                device_responses = device.rpc.DeployApp(
+                    chunk_generator(), timeout=timeout
+                )
                 current_index = 0
 
                 # Process each response from the device
