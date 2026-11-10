@@ -908,17 +908,17 @@ def _build_debs(
 # ---------------------------------------------------------------------------
 
 
-def build_cmd(args) -> None:
+def build_cmd(args) -> Optional[bool]:
     """Handle ``synapsectl peripherals build``."""
 
     if not ensure_docker():
-        return
+        return False
 
     peripheral_dir = os.path.abspath(args.peripheral_dir)
 
     manifest = validate_manifest(os.path.join(peripheral_dir, "manifest.json"))
     if not manifest:
-        return
+        return False
 
     console.print(
         f"[bold]Building peripheral plugin:[/bold] [yellow]{manifest['name']}[/yellow]"
@@ -932,7 +932,7 @@ def build_cmd(args) -> None:
         profile=getattr(args, "profile", None),
     )
     if debs is None:
-        return
+        return False
 
     package_lines = "\n".join(f"Package: [bold]{d}[/bold]" for d in debs)
     console.print(
@@ -955,7 +955,7 @@ def build_cmd(args) -> None:
 # ---------------------------------------------------------------------------
 
 
-def deploy_cmd(args) -> None:
+def deploy_cmd(args) -> Optional[bool]:
     """Handle ``synapsectl peripherals deploy`` — gRPC-stream a .deb to the device.
 
     Reuses apps' DeployApp gRPC method; the scifi-server side accepts plugin
@@ -977,18 +977,18 @@ def deploy_cmd(args) -> None:
             console.print(
                 f"[bold red]Error:[/bold red] Provided package not found: {deb_packages[0]}"
             )
-            return
+            return False
         console.print(
             f"[bold]Deploying pre-built plugin:[/bold] [yellow]{os.path.basename(deb_packages[0])}[/yellow]"
         )
     else:
         if not ensure_docker():
-            return
+            return False
 
         peripheral_dir = os.path.abspath(args.peripheral_dir)
         manifest = validate_manifest(os.path.join(peripheral_dir, "manifest.json"))
         if not manifest:
-            return
+            return False
 
         console.print(
             f"[bold]Deploying peripheral plugin:[/bold] [yellow]{manifest['name']}[/yellow]"
@@ -998,7 +998,7 @@ def deploy_cmd(args) -> None:
             peripheral_dir, manifest, half, profile=getattr(args, "profile", None)
         )
         if debs is None:
-            return
+            return False
         deb_packages = debs
 
     if not args.uri:
@@ -1015,7 +1015,7 @@ def deploy_cmd(args) -> None:
                 f"[bold red]Error:[/bold red] Deploy failed for {deb}; "
                 "skipping any remaining packages."
             )
-            return
+            return False
 
 
 # ---------------------------------------------------------------------------
