@@ -3,6 +3,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -41,7 +42,9 @@ def validate_manifest(manifest_path: str) -> dict[str, Any] | Literal[False]:
 
 def detect_arch() -> str:
     """Return an architecture tag suffix (``arm64`` or ``amd64``)."""
-    arch = subprocess.check_output(["uname", "-m"]).decode("utf-8").strip()
+    # platform.machine() reports e.g. "arm64" (macOS), "aarch64" (Linux),
+    # or "ARM64"/"AMD64" (Windows), so compare case-insensitively.
+    arch = platform.machine().lower()
     return "arm64" if arch in ("arm64", "aarch64") else "amd64"
 
 
@@ -205,6 +208,27 @@ def build_docker_image(
     return tags
 
 
+def locate_app_binary(app_dir: str, app_name: str) -> str | None:
+    """Return the path of the first file named *app_name* under *app_dir*.
+
+    Pure-Python replacement for the previous
+    ``find <app_dir> -type f -name <app_name> -not -path '*/.*'`` shell-out
+    (which does not exist on Windows): regular files only, exact name match,
+    hidden directories and hidden names excluded. Returns ``None`` when no
+    match is found.
+    """
+    if app_name.startswith("."):
+        return None
+
+    for root, dirnames, filenames in os.walk(app_dir):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        if app_name in filenames:
+            candidate = os.path.join(root, app_name)
+            if os.path.isfile(candidate):
+                return candidate
+    return None
+
+
 def build_app(
     app_dir: str, app_name: str, force_rebuild: bool = False, clean: bool = False
 ) -> bool:
@@ -331,25 +355,8 @@ def build_app(
     )
 
     try:
-        binary_found = subprocess.run(
-            [
-                "find",
-                app_dir,
-                "-type",
-                "f",
-                "-name",
-                app_name,
-                "-not",
-                "-path",
-                "*/.*",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-
-        if binary_found:
-            located = binary_found.split("\n")[0]
+        located = locate_app_binary(app_dir, app_name)
+        if located:
             build_dir = os.path.dirname(binary_path)
             os.makedirs(build_dir, exist_ok=True)
             shutil.copy(located, binary_path)
