@@ -2,7 +2,7 @@ from rich.console import Console
 from rich.tree import Tree
 from google.protobuf.json_format import MessageToDict
 from synapse.client.device import Device
-from synapse.utils.version import decode_synapse_version
+from synapse.utils.version import decode_firmware_version, decode_synapse_version
 
 
 def visualize_configuration(info_dict, status):
@@ -156,8 +156,14 @@ class DeviceInfoDisplay:
             f"Synapse Version: {synapse_version_str}",
             highlight=False,
         )
+        firmware_version_raw = info_dict.get("firmware_version")
+        firmware_version_str = (
+            decode_firmware_version(int(firmware_version_raw))
+            if firmware_version_raw is not None
+            else "Unknown"
+        )
         self.console.print(
-            f"Firmware Version: {info_dict.get('firmware_version', 'Unknown')}",
+            f"Firmware Version: {firmware_version_str}",
             highlight=False,
         )
 
