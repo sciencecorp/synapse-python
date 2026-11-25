@@ -24,9 +24,26 @@ def format_node_health(node_status):
         if health.get("operational", False)
         else "[red]● dead[/red]"
     )
-    throughput = format_bytes_per_second(health.get("throughput_bytes_per_second", 0))
-    latency_ms = health.get("latency_us", 0) / 1000
-    return f"{mark}  {throughput}  latency {latency_ms:.2f} ms"
+    rate_in = format_bytes_per_second(health.get("in_bytes_per_second", 0))
+    rate_out = format_bytes_per_second(health.get("out_bytes_per_second", 0))
+    mean_ms = health.get("latency_mean_us", 0) / 1000
+    latency = (
+        f"latency {mean_ms:.2f} ms (p99 {health.get('latency_p99_us', 0) / 1000:.2f}, "
+        f"max {health.get('latency_max_us', 0) / 1000:.2f})"
+        if mean_ms
+        else "latency –"
+    )
+    dropped = health.get("dropped_messages", 0)
+    missing = (
+        str(health.get("missing_input_messages", 0))
+        if health.get("detects_input_gaps", False)
+        else "–"
+    )
+    age = health.get("seconds_since_last_data", 0)
+    return (
+        f"{mark}  in {rate_in}  out {rate_out}  {latency}  "
+        f"dropped {dropped}  missing input {missing}  last data {age:.0f} s ago"
+    )
 
 
 def visualize_configuration(info_dict, status):
