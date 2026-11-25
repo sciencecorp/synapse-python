@@ -5,8 +5,33 @@ from synapse.client.device import Device
 from synapse.utils.version import decode_firmware_version, decode_synapse_version
 
 
+def format_bytes_per_second(rate):
+    for unit in ("B/s", "KB/s", "MB/s"):
+        if rate < 1000:
+            return f"{rate:.1f} {unit}"
+        rate /= 1000
+    return f"{rate:.1f} GB/s"
+
+
+def format_node_health(node_status):
+    """One-line node health, or None when the device doesn't report it (older firmware)."""
+    # MessageToDict drops false/0 fields, so a present-but-empty health means "dead, no traffic".
+    health = node_status.get("health")
+    if health is None:
+        return None
+    mark = (
+        "[green]● alive[/green]"
+        if health.get("operational", False)
+        else "[red]● dead[/red]"
+    )
+    throughput = format_bytes_per_second(health.get("throughput_bytes_per_second", 0))
+    latency_ms = health.get("latency_us", 0) / 1000
+    return f"{mark}  {throughput}  latency {latency_ms:.2f} ms"
+
+
 def visualize_configuration(info_dict, status):
     nodes_status = status.get("signal_chain", {}).get("nodes", {})
+    status_by_id = {n.get("id", 0): n for n in nodes_status}
     config = info_dict.get("configuration", {})
     if config:
         tree = Tree("Configuration")
@@ -14,6 +39,9 @@ def visualize_configuration(info_dict, status):
             node_type = node.get("type", "").replace("k", "")
             node_tree = tree.add(f"{node_type}")
             node_tree.add(f"ID: {node.get('id', 'Unknown')}")
+            health = format_node_health(status_by_id.get(node.get("id", 0), {}))
+            if health:
+                node_tree.add(f"Health: {health}")
             if node_type == "Application":
                 app = node.get("application", {})
                 name = app.get("name", "Unknown")
