@@ -83,6 +83,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# Superpowers planning docs (specs/plans) — kept local, not committed
+docs/superpowers/
+
 # PyBuilder
 .pybuilder/
 target/
